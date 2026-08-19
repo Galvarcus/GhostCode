@@ -1,2 +1,28 @@
-# GhostCode
-A vim9 scanner for ghost (unreferenced) code in vim9script plugins
+# GhostCode {#ghostcode}
+A vim9 scanner for ghost (not referenced) code in vim9script plugins. Opens results in a quickfix window.
+
+# Usage {#usage}
+
+```vim
+`:GhostCode PathToPluginDirectory`
+```
+Note: Always double-check results
+
+# Detects {#detects}
+
+  - def / export def
+  - class / export class, including `extends` and `implements`
+  - enum / export enum, and enum values (Color.Red)
+  - interface / export interface (declarations; abstract method signatures are not themselves tracked as callable symbols)
+  - class methods, static methods, and fields
+  - module-level (script) variables and class fields
+  - type annotations (`var x: Foo`, `def F(): Foo`, `list<Foo>`)
+  - Foo()
+  - Foo.Bar()
+  - this.Method() (resolved against the enclosing class)
+  - bare funcref / value usage of a known symbol, e.g. `var Ref = Foo`, `timer_start(1000, Foo)`, `{callback: Foo}`
+  - call({func}, ...), function({name}), execute({cmd}) where the target is a string literal or bare identifier
+  - import './mod.vim' [as ns], import autoload '...' [as ns], import {Foo [as Bar]} from '...'
+  - exported symbols
+  - top-level calls from plugin/*.vim
+

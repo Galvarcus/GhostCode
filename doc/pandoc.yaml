@@ -1,0 +1,5 @@
+title: GhostCode
+author: Galvarcus
+abstract: A tool to identify ghost code in a vim9 plugin.
+filename: ghostcode.txt
+vimdoc-prefix: ghostcode
