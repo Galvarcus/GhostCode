@@ -20,15 +20,7 @@ class Symbol
   var class_name: string
   var exported: bool
 
-  def new(
-        id: string,
-        name: string,
-        kind: string,
-        file: string,
-        line: number,
-        class_name: string = '',
-        exported: bool = false,
-        )
+  def new(id: string, name: string, kind: string, file: string, line: number, class_name: string = '', exported: bool = false)
       this.id = id
       this.name = name
       this.kind = kind
@@ -49,13 +41,7 @@ class Reference
   var caller: string
   var class_name: string
 
-  def new(
-        name: string,
-        file: string,
-        line: number,
-        caller: string,
-        class_name: string = '',
-        )
+  def new(name: string, file: string, line: number, caller: string, class_name: string = '')
       this.name = name
       this.file = file
       this.line = line
@@ -91,21 +77,17 @@ class Analysis
     endif
   enddef
 
-  def AddReference(reference: Reference)
+  def AddReference(reference: Reference): void
     add(this.references, reference)
   enddef
 
-  def AddRoot(id: string)
+  def AddRoot(id: string): void
     if index(this.roots, id) < 0
       add(this.roots, id)
     endif
   enddef
 
-  def AddNamespaceImport(
-        file: string,
-        alias: string,
-        target: string,
-        )
+  def AddNamespaceImport(file: string, alias: string, target: string): void
       if !has_key(this.namespace_imports, file)
         this.namespace_imports[file] = {}
       endif
@@ -113,12 +95,7 @@ class Analysis
       this.namespace_imports[file][alias] = target
   enddef
 
-  def AddNamedImport(
-        file: string,
-        alias: string,
-        target: string,
-        orig: string,
-        )
+  def AddNamedImport(file: string, alias: string, target: string, orig: string ): void
       if !has_key(this.named_import_file, file)
         this.named_import_file[file] = {}
         this.named_import_orig[file] = {}
@@ -128,10 +105,7 @@ class Analysis
       this.named_import_orig[file][alias] = orig
   enddef
 
-  def AddFileImport(
-        file: string,
-        target: string,
-        )
+  def AddFileImport(file: string, target: string): void
       if !has_key(this.file_imports, file)
         this.file_imports[file] = []
       endif
@@ -147,7 +121,7 @@ endclass
 #######################################################################
 
 export def Run(path: string = ''): void
-  var root = path
+  var root: string = path
 
   if root ==# ''
     root = getcwd()
@@ -160,14 +134,14 @@ export def Run(path: string = ''): void
     return
   endif
 
-  var files = FindFiles(root)
+  var files: list<string> = FindFiles(root)
 
   if empty(files)
     echomsg 'GhostCode: no Vim files found under ' .. root
     return
   endif
 
-  var analysis = Analysis.new()
+  var analysis: Analysis = Analysis.new()
   analysis.root = root
 
 
@@ -211,7 +185,7 @@ export def Run(path: string = ''): void
   # Build reachability graph.
   ################################################################
 
-  var reachable = FindReachable(analysis)
+  var reachable: dict<bool> = FindReachable(analysis)
 
   ################################################################
   # Report.
@@ -224,12 +198,7 @@ enddef
 # Method: FindFiles
 #######################################################################
 def FindFiles(root: string): list<string>
-  var files = globpath(
-    root,
-    '**/*.vim',
-    true,
-    true,
-  )
+  var files: list<string> = globpath(root, '**/*.vim', true, true)
 
   var result: list<string> = []
 
@@ -245,45 +214,27 @@ enddef
 #######################################################################
 # Method: ScanDeclarations
 #######################################################################
-def ScanDeclarations(
-    file: string,
-    analysis: Analysis,
-    ): void
+def ScanDeclarations(file: string, analysis: Analysis): void
 
-  var lines = readfile(file)
-  var current_class = ''
-  var container_kind = ''   # '', 'class', 'enum', 'interface'
-  var in_def_body = false
+  var lines: list<string> = readfile(file)
+  var current_class: string = ''
+  var container_kind: string = ''   # '', 'class', 'enum', 'interface'
+  var in_def_body: bool = false
 
   for i in range(len(lines))
-    var line = StripComment(lines[i])
-    var lnum = i + 1
+    var line: string = StripComment(lines[i])
+    var lnum: number = i + 1
 
-    var m = matchlist(
-      line,
-      '^\s*\(export\s\+\)\?\(class\|enum\|interface\)\s\+\([A-Za-z_][A-Za-z0-9_]*\)',
-    )
+    var m: list<string> = matchlist(line, '^\s*\(export\s\+\)\?\(class\|enum\|interface\)\s\+\([A-Za-z_][A-Za-z0-9_]*\)')
 
     if !empty(m)
       current_class = m[3]
       container_kind = m[2]
       in_def_body = false
 
-      var id = SymbolId(
-        file,
-        current_class,
-        '',
-      )
+      var id: string = SymbolId(file, current_class, '')
 
-      var sym = Symbol.new(
-        id,
-        current_class,
-        container_kind,
-        file,
-        lnum,
-        '',
-        !empty(m[1]),
-      )
+      var sym: Symbol = Symbol.new(id, current_class, container_kind, file, lnum, '', !empty(m[1]))
 
       analysis.AddSymbol(sym)
 
@@ -301,38 +252,21 @@ def ScanDeclarations(
       continue
     endif
 
-    m = matchlist(
-      line,
-      '^\s*\(export\s\+\)\?\(static\s\+\)\?def\s\+\([A-Za-z_][A-Za-z0-9_]*\)\s*(',
-    )
+    m = matchlist(line, '^\s*\(export\s\+\)\?\(static\s\+\)\?def\s\+\([A-Za-z_][A-Za-z0-9_]*\)\s*(')
 
     if !empty(m)
       if container_kind ==# 'interface'
         continue
       endif
 
-      var name = m[3]
-      var exported = !empty(m[1])
+      var name: string = m[3]
+      var exported: bool = !empty(m[1])
 
-      var kind = current_class ==# ''
-        ? 'function'
-        : 'method'
+      var kind: string = current_class ==# '' ? 'function' : 'method'
 
-      var id = SymbolId(
-        file,
-        name,
-        current_class,
-      )
+      var id: string = SymbolId(file, name, current_class)
 
-      var sym = Symbol.new(
-        id,
-        name,
-        kind,
-        file,
-        lnum,
-        current_class,
-        exported,
-      )
+      var sym: Symbol = Symbol.new(id, name, kind, file, lnum, current_class, exported)
 
       analysis.AddSymbol(sym)
 
@@ -355,27 +289,12 @@ def ScanDeclarations(
 
     if container_kind ==# 'enum'
       for item in split(line, ',')
-        var em = matchlist(
-          trim(item),
-          '^\([A-Za-z_][A-Za-z0-9_]*\)',
-        )
+        var em: list<string> = matchlist(trim(item), '^\([A-Za-z_][A-Za-z0-9_]*\)')
 
         if !empty(em)
-          var vid = SymbolId(
-            file,
-            em[1],
-            current_class,
-          )
+          var vid: string = SymbolId(file, em[1], current_class)
 
-          var vsym = Symbol.new(
-            vid,
-            em[1],
-            'enum_value',
-            file,
-            lnum,
-            current_class,
-            false,
-          )
+          var vsym: Symbol = Symbol.new(vid, em[1], 'enum_value', file, lnum, current_class, false)
 
           analysis.AddSymbol(vsym)
         endif
@@ -394,28 +313,14 @@ def ScanDeclarations(
     )
 
     if !empty(m)
-      var name = m[3]
-      var exported = !empty(m[1])
+      var name: string = m[3]
+      var exported: bool = !empty(m[1])
 
-      var kind = current_class ==# ''
-        ? 'variable'
-        : 'field'
+      var kind: string = current_class ==# '' ? 'variable' : 'field'
 
-      var id = SymbolId(
-        file,
-        name,
-        current_class,
-      )
+      var id: string = SymbolId(file, name, current_class)
 
-      var sym = Symbol.new(
-        id,
-        name,
-        kind,
-        file,
-        lnum,
-        current_class,
-        exported,
-      )
+      var sym: Symbol = Symbol.new(id, name, kind, file, lnum, current_class, exported)
 
       analysis.AddSymbol(sym)
 
@@ -429,29 +334,17 @@ enddef
 #######################################################################
 # Method: ScanImports
 #######################################################################
-def ScanImports(
-    file: string,
-    root: string,
-    analysis: Analysis,
-    ): void
+def ScanImports(file: string, root: string, analysis: Analysis): void
 
   var lines = readfile(file)
 
   for i in range(len(lines))
     var line = StripComment(lines[i])
 
-    var m = matchlist(
-      line,
-      '^\s*import\s\+{\s*\(.\{-}\)\s*}\s\+from\s\+' ..
-      '\(''[^'']\+''\|"[^"]\+"\)',
-    )
+    var m = matchlist(line, '^\s*import\s\+{\s*\(.\{-}\)\s*}\s\+from\s\+' ..  '\(''[^'']\+''\|"[^"]\+"\)')
 
     if !empty(m)
-      var target = ResolveImportPath(
-        file,
-        root,
-        Unquote(m[2]),
-      )
+      var target = ResolveImportPath(file, root, Unquote(m[2]))
 
       if target !=# ''
         analysis.AddFileImport(file, target)
@@ -461,43 +354,25 @@ def ScanImports(
           var alias = piece
           var orig = piece
 
-          var am = matchlist(
-            piece,
-            '^\(\S\+\)\s\+as\s\+\(\S\+\)$',
-          )
+          var am = matchlist(piece, '^\(\S\+\)\s\+as\s\+\(\S\+\)$')
 
           if !empty(am)
             orig = am[1]
             alias = am[2]
           endif
 
-          analysis.AddNamedImport(
-            file,
-            alias,
-            target,
-            orig,
-          )
+          analysis.AddNamedImport(file, alias, target, orig)
         endfor
       endif
 
       continue
     endif
 
-    m = matchlist(
-      line,
-      '^\s*import\s\+\(autoload\s\+\)\?' ..
-      '\(''[^'']\+''\|"[^"]\+"\)' ..
-      '\%(\s\+as\s\+\([A-Za-z_][A-Za-z0-9_]*\)\)\?',
-    )
+    m = matchlist(line, '^\s*import\s\+\(autoload\s\+\)\?' ..  '\(''[^'']\+''\|"[^"]\+"\)' ..  '\%(\s\+as\s\+\([A-Za-z_][A-Za-z0-9_]*\)\)\?')
 
     if !empty(m)
       var spec = Unquote(m[2])
-      var target = ResolveImportPath(
-        file,
-        root,
-        spec,
-        !empty(m[1]),
-      )
+      var target = ResolveImportPath(file, root, spec, !empty(m[1]))
 
       if target !=# ''
         analysis.AddFileImport(file, target)
@@ -506,11 +381,7 @@ def ScanImports(
           ? m[3]
           : fnamemodify(spec, ':t:r')
 
-        analysis.AddNamespaceImport(
-          file,
-          alias,
-          target,
-        )
+        analysis.AddNamespaceImport(file, alias, target)
       endif
     endif
   endfor
@@ -520,12 +391,7 @@ def Unquote(text: string): string
   return strpart(text, 1, strlen(text) - 2)
 enddef
 
-def ResolveImportPath(
-    file: string,
-    root: string,
-    spec: string,
-    is_autoload: bool = false,
-    ): string
+def ResolveImportPath(file: string, root: string, spec: string, is_autoload: bool = false): string
 
   var candidate: string
 
@@ -561,10 +427,7 @@ enddef
 #######################################################################
 # Method: ScanReferences
 #######################################################################
-def ScanReferences(
-    file: string,
-    analysis: Analysis,
-    ): void
+def ScanReferences(file: string, analysis: Analysis): void
 
   var lines = readfile(file)
 
@@ -617,17 +480,10 @@ def ScanReferences(
       continue
     endif
 
-    m = matchlist(
-      line,
-      '^\s*\(export\s\+\)\?\(static\s\+\)\?def\s\+\([A-Za-z_][A-Za-z0-9_]*\)\s*(',
-    )
+    m = matchlist(line, '^\s*\(export\s\+\)\?\(static\s\+\)\?def\s\+\([A-Za-z_][A-Za-z0-9_]*\)\s*(')
 
     if !empty(m)
-      var sig_id = SymbolId(
-        file,
-        m[3],
-        current_class,
-      )
+      var sig_id = SymbolId(file, m[3], current_class)
 
       ScanTypeReferences(line, file, lnum, sig_id, analysis)
 
@@ -683,14 +539,7 @@ enddef
 #######################################################################
 # Method: ScanCalls
 #######################################################################
-def ScanCalls(
-    code: string,
-    file: string,
-    line: number,
-    caller: string,
-    analysis: Analysis,
-    class_name: string = '',
-    ): void
+def ScanCalls(code: string, file: string, line: number, caller: string, analysis: Analysis, class_name: string = ''): void
 
   var hash_pattern =
     '\<\([A-Za-z_][A-Za-z0-9_]*\%(#[A-Za-z_][A-Za-z0-9_]*\)*\)#' ..
@@ -706,22 +555,13 @@ def ScanCalls(
       break
     endif
 
-    var hm = matchlist(
-      strpart(htext, hpos),
-      hash_pattern,
-    )
+    var hm = matchlist(strpart(htext, hpos), hash_pattern)
 
     if empty(hm)
       break
     endif
 
-    AddCall(
-      hm[1] .. '#' .. hm[2],
-      file,
-      line,
-      caller,
-      analysis,
-    )
+    AddCall(hm[1] .. '#' .. hm[2], file, line, caller, analysis)
 
     hstart += hpos + max([1, strlen(hm[0])])
   endwhile
@@ -740,23 +580,13 @@ def ScanCalls(
       break
     endif
 
-    var m = matchlist(
-      strpart(text, pos),
-      pattern,
-    )
+    var m = matchlist(strpart(text, pos), pattern)
 
     if empty(m)
       break
     endif
 
-    AddCall(
-      m[1] .. '.' .. m[2],
-      file,
-      line,
-      caller,
-      analysis,
-      class_name,
-    )
+    AddCall(m[1] .. '.' .. m[2], file, line, caller, analysis, class_name)
 
     if m[1] !=# 'this' && has_key(analysis.known_names, m[1])
       AddCall(m[1], file, line, caller, analysis, class_name)
@@ -765,23 +595,11 @@ def ScanCalls(
     start += pos + max([1, strlen(m[0])])
   endwhile
 
-  pattern =
-    '\<\([A-Za-z_][A-Za-z0-9_]*\)\s*('
+  pattern = '\<\([A-Za-z_][A-Za-z0-9_]*\)\s*('
 
   start = 0
 
-  var ignored = [
-    'if',
-    'while',
-    'for',
-    'catch',
-    'echo',
-    'execute',
-    'call',
-    'function',
-    'return',
-    'range',
-  ]
+  var ignored = ['if', 'while', 'for', 'catch', 'echo', 'execute', 'call', 'function', 'return', 'range']
 
   while true
     var text = strpart(code, start)
@@ -791,10 +609,7 @@ def ScanCalls(
       break
     endif
 
-    var m = matchlist(
-      strpart(text, pos),
-      pattern,
-    )
+    var m = matchlist(strpart(text, pos), pattern)
 
     if empty(m)
       break
@@ -803,14 +618,7 @@ def ScanCalls(
     var name = m[1]
 
     if index(ignored, name) < 0
-      AddCall(
-        name,
-        file,
-        line,
-        caller,
-        analysis,
-        class_name,
-      )
+      AddCall(name, file, line, caller, analysis, class_name)
     endif
 
     start += pos + max([1, strlen(m[0])])
@@ -821,27 +629,15 @@ enddef
 #######################################################################
 # Method: ScanDynamicCalls - call(), function(), execute()
 #######################################################################
-def ScanDynamicCalls(
-    code: string,
-    file: string,
-    line: number,
-    caller: string,
-    analysis: Analysis,
-    ): void
+def ScanDynamicCalls(code: string, file: string, line: number, caller: string, analysis: Analysis): void
 
-  var m = matchlist(
-    code,
-    '\<call\s*(\s*[''"]\?\%([sgbwtla]:\)\?\([A-Za-z_][A-Za-z0-9_.#]*\)',
-  )
+  var m = matchlist(code, '\<call\s*(\s*[''"]\?\%([sgbwtla]:\)\?\([A-Za-z_][A-Za-z0-9_.#]*\)')
 
   if !empty(m)
     AddCall(m[1], file, line, caller, analysis)
   endif
 
-  m = matchlist(
-    code,
-    '\<function\s*(\s*[''"]\%([sgbwtla]:\)\?\([A-Za-z_][A-Za-z0-9_.#]*\)[''"]',
-  )
+  m = matchlist(code, '\<function\s*(\s*[''"]\%([sgbwtla]:\)\?\([A-Za-z_][A-Za-z0-9_.#]*\)[''"]')
 
   if !empty(m)
     AddCall(m[1], file, line, caller, analysis)
@@ -858,14 +654,7 @@ enddef
 #######################################################################
 # Method: ScanBareReferences - funcrefs, variables, callback options, enum
 #######################################################################
-def ScanBareReferences(
-    code: string,
-    file: string,
-    line: number,
-    caller: string,
-    class_name: string,
-    analysis: Analysis,
-    ): void
+def ScanBareReferences(code: string, file: string, line: number, caller: string, class_name: string, analysis: Analysis): void
 
   for str in ExtractQuotedStrings(code)
     var content = StripScopePrefix(trim(str))
@@ -897,14 +686,7 @@ def ScanBareReferences(
       break
     endif
 
-    AddCall(
-      m[1] .. '.' .. m[2],
-      file,
-      line,
-      caller,
-      analysis,
-      class_name,
-    )
+    AddCall(m[1] .. '.' .. m[2], file, line, caller, analysis, class_name)
 
     if m[1] !=# 'this' && has_key(analysis.known_names, m[1])
       AddCall(m[1], file, line, caller, analysis, class_name)
@@ -913,8 +695,7 @@ def ScanBareReferences(
     start += pos + max([1, strlen(m[0])])
   endwhile
 
-  var bare_pattern =
-    '\%(\.\)\@<!\<\([A-Za-z_][A-Za-z0-9_]*\)\>\%(\s*[(.]\)\@!'
+  var bare_pattern = '\%(\.\)\@<!\<\([A-Za-z_][A-Za-z0-9_]*\)\>\%(\s*[(.]\)\@!'
 
   start = 0
 
@@ -945,13 +726,7 @@ enddef
 #######################################################################
 # Method: ScanTypeReferences
 #######################################################################
-def ScanTypeReferences(
-    code: string,
-    file: string,
-    line: number,
-    caller: string,
-    analysis: Analysis,
-    ): void
+def ScanTypeReferences(code: string, file: string, line: number, caller: string, analysis: Analysis): void
 
   var pattern = '[:<]\s*\([A-Za-z_][A-Za-z0-9_]*\)'
   var start = 0
@@ -1017,22 +792,9 @@ def ExtractQuotedStrings(code: string): list<string>
 enddef
 
 
-def AddCall(
-    name: string,
-    file: string,
-    line: number,
-    caller: string,
-    analysis: Analysis,
-    class_name: string = '',
-    ): void
+def AddCall(name: string, file: string, line: number, caller: string, analysis: Analysis, class_name: string = ''): void
 
-  var reference = Reference.new(
-    name,
-    file,
-    line,
-    caller,
-    class_name,
-  )
+  var reference = Reference.new(name, file, line, caller, class_name)
 
   analysis.AddReference(reference)
 enddef
@@ -1040,10 +802,7 @@ enddef
 #######################################################################
 # Method: ResolveReference
 #######################################################################
-def ResolveReference(
-    ref: Reference,
-    analysis: Analysis,
-    ): string
+def ResolveReference(ref: Reference, analysis: Analysis): string
 
   var local_id = ref.file .. '::' .. ref.name
 
@@ -1057,10 +816,7 @@ def ResolveReference(
     var prefix = strpart(ref.name, 0, hash)
     var func_name = strpart(ref.name, hash + 1)
 
-    var candidate = simplify(
-      analysis.root .. '/autoload/' ..
-      substitute(prefix, '#', '/', 'g') .. '.vim',
-    )
+    var candidate = simplify(analysis.root .. '/autoload/' ..  substitute(prefix, '#', '/', 'g') .. '.vim')
 
     if filereadable(candidate)
       var hash_id = fnamemodify(candidate, ':p') .. '::' .. func_name
@@ -1085,11 +841,7 @@ def ResolveReference(
       endif
     endif
 
-    var method_id = SymbolId(
-      ref.file,
-      member,
-      receiver,
-    )
+    var method_id = SymbolId(ref.file, member, receiver)
 
     if has_key(analysis.symbols, method_id)
       return method_id
@@ -1158,24 +910,16 @@ enddef
 #######################################################################
 # Method: FindReachable
 #######################################################################
-def FindReachable(
-    analysis: Analysis,
-    ): dict<bool>
+def FindReachable(analysis: Analysis): dict<bool>
 
   # Graph: caller -> callees
   var edges: dict<list<string>> = {}
 
   for ref in analysis.references
-    var target = ResolveReference(
-      ref,
-      analysis,
-    )
+    var target = ResolveReference(ref, analysis)
 
     if target ==# ''
-      add(
-        analysis.unresolved,
-        ref,
-      )
+      add(analysis.unresolved, ref)
 
       continue
     endif
@@ -1198,14 +942,8 @@ def FindReachable(
       edges[ref.caller] = []
     endif
 
-    if index(
-        edges[ref.caller],
-        target,
-        ) < 0
-      add(
-        edges[ref.caller],
-        target,
-      )
+    if index(edges[ref.caller], target) < 0
+      add(edges[ref.caller], target)
     endif
   endfor
 
@@ -1262,10 +1000,7 @@ enddef
 #######################################################################
 # Method: CompareSymbols
 #######################################################################
-def CompareSymbols(
-    a: Symbol,
-    b: Symbol,
-    ): number
+def CompareSymbols(a: Symbol, b: Symbol): number
 
   if a.file ==# b.file
     return a.line - b.line
@@ -1279,10 +1014,7 @@ enddef
 #######################################################################
 # Method: Report
 #######################################################################
-def Report(
-    analysis: Analysis,
-    reachable: dict<bool>,
-    ): void
+def Report(analysis: Analysis, reachable: dict<bool>): void
 
   var ghost: list<Symbol> = []
 
@@ -1300,30 +1032,15 @@ def Report(
     add(ghost, sym)
   endfor
 
-  sort(
-    ghost,
-    CompareSymbols,
-  )
+  sort(ghost, CompareSymbols)
 
   var qf: list<dict<any>> = []
 
   for sym in ghost
-    add(qf, {
-      filename: sym.file,
-      lnum: sym.line,
-      col: 1,
-      text: printf(
-        '[ghost] %s %s',
-        sym.kind,
-        sym.name,
-      ),
-    })
+    add(qf, {filename: sym.file, lnum: sym.line, col: 1, text: printf('[ghost] %s %s', sym.kind, sym.name)})
   endfor
 
-  setqflist(
-    qf,
-    'r',
-  )
+  setqflist(qf, 'r')
 
   echomsg printf(
     'GhostCode: %d symbols, %d ghost, %d unresolved',
@@ -1340,11 +1057,7 @@ enddef
 #######################################################################
 # Method: SymbolId
 #######################################################################
-def SymbolId(
-    file: string,
-    name: string,
-    class_name: string,
-    ): string
+def SymbolId(file: string, name: string, class_name: string): string
 
   if class_name ==# ''
     return file .. '::' .. name
@@ -1379,10 +1092,5 @@ enddef
 # Method: StripComment
 #######################################################################
 def StripComment(line: string): string
-  return substitute(
-    line,
-    '\%(\S\)\@<!\s*#.*$',
-    '',
-    '',
-  )
+  return substitute(line, '\%(\S\)\@<!\s*#.*$', '', '')
 enddef

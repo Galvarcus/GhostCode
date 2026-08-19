@@ -5,7 +5,6 @@ if exists('s:is_loaded')
 endif
 var is_loaded: bool = true
 
-
 import autoload 'ghostcode.vim' as ghostcode
 
 command! -nargs=? -complete=file GhostCode ghostcode.Run(<f-args>)
