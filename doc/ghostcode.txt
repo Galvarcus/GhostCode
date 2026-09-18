@@ -5,7 +5,7 @@
 
                                        Type |gO| to see the table of contents.
 
-GhostCode  ............................................... |ghostcode-ghostcode|
+GhostCode ................................................ |ghostcode-ghostcode|
 Usage ........................................................ |ghostcode-usage|
 Detects .................................................... |ghostcode-detects|
 
