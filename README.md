@@ -1,14 +1,14 @@
-# GhostCode <!-- {#ghostcode} -->
+# GhostCode<!-- {#ghostcode} -->
 A vim9 scanner for ghost (not referenced) code in vim9script plugins. Opens results in a quickfix window.
 
-# Usage {#usage}
+# Usage<!-- {#usage} -->
 
 ```vim
 `:GhostCode PathToPluginDirectory`
 ```
 Note: Always double-check results
 
-# Detects {#detects}
+# Detects<!-- {#detects} -->
 
   - def / export def
   - class / export class, including `extends` and `implements`
