@@ -92,6 +92,8 @@ vim -u NONE -N -es \
 - direct calls (`Foo()`), method calls (`Foo.Bar()`, `this.Method()`),
   and calls through a locally-typed variable or parameter, including a
   two-level field-then-method chain on `this` (`this.field.Method()`)
+- a method called directly on a constructor result
+  (`Foo.new(args).Bar()`)
 - bare funcref and value usage of a known symbol (`var Ref = Foo`,
   `timer_start(1000, Foo)`, `{callback: Foo}`)
 - `call()`, `function()`, and `execute()`, where the target is a

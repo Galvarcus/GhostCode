@@ -28,6 +28,8 @@ var is_loaded: bool = true
 #   - calls through a locally-typed variable or parameter, resolved
 #     against its declared or constructor-inferred type, including a
 #     two-level field-then-method chain such as `this.field.Method()`
+#   - a method called directly on a constructor result, such as
+#     `Foo.new(args).Bar()`
 #   - bare funcref and value usage of a known symbol, such as
 #     `var Ref = Foo`, `timer_start(1000, Foo)`, and `{callback: Foo}`
 #   - `call({func}, ...)`, `function({name})`, and `execute({cmd})`,
@@ -911,6 +913,30 @@ def ScanCalls(
 
         hstart += hpos + max([1, strlen(hm[0])])
     endwhile
+
+    # A method called directly on a constructor result:
+    #
+    #   ScriveListPopup.new(entries).Open()
+    #
+    # The generic Foo.Bar() pattern below needs an identifier before
+    # the dot, so it never sees `.Open(` after the closing paren.
+    # Resolve the method against the constructed class instead.
+
+    for chain in FindConstructorChains(code)
+        var class_id = ResolveTypeExpr(file, chain[0], analysis)
+
+        if class_id !=# ''
+            AddCall(
+                chain[0] .. '.' .. chain[1],
+                file,
+                line,
+                caller,
+                analysis,
+                class_name,
+                class_id .. '.' .. chain[1],
+            )
+        endif
+    endfor
 
     # A two-level field-then-method chain on `this`:
     #
@@ -1852,6 +1878,63 @@ def ResolveTypeExpr(
     endif
 
     return ''
+enddef
+
+
+# METHOD: Return each [class, method] pair in code where a method is
+# called directly on a constructor result, as in
+# `Foo.new(args).Bar()`.
+def FindConstructorChains(code: string): list<list<string>>
+    var result: list<list<string>> = []
+    var pattern = '\<\([A-Za-z_][A-Za-z0-9_.]*\)\.new\s*('
+    var start = 0
+
+    while true
+        var pos = match(code, pattern, start)
+
+        if pos < 0
+            break
+        endif
+
+        var m = matchlist(code, pattern, start)
+        var class_expr = m[1]
+        var open = pos + strlen(m[0]) - 1
+        var depth = 0
+        var i = open
+        var close = -1
+
+        while i < strlen(code)
+            if code[i] ==# '('
+                depth += 1
+            elseif code[i] ==# ')'
+                depth -= 1
+
+                if depth == 0
+                    close = i
+                    break
+                endif
+            endif
+
+            i += 1
+        endwhile
+
+        if close < 0
+            break
+        endif
+
+        var tail = matchlist(
+            strpart(code, close + 1),
+            '^\s*\.\([A-Za-z_][A-Za-z0-9_]*\)\s*(',
+        )
+
+        if !empty(tail)
+            add(result, [class_expr, tail[1]])
+        endif
+
+        start = open + 1
+    endwhile
+
+    return result
 enddef
 
 
