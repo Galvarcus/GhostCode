@@ -3,6 +3,7 @@ vim9script
 if exists('s:is_loaded') || v:version < 901 || &cp
   finish
 endif
+
 var is_loaded: bool = true
 
 # Plugin_Name: Ghostcode
@@ -10,6 +11,6 @@ var is_loaded: bool = true
 # unreferenced-code analyzer implemented in autoload/ghostcode.vim.
 # License: GNU GPL 3.0
 
-import autoload 'ghostcode.vim' as ghostcode
+import autoload 'ghostcode.vim' as G
 
-command! -nargs=? -complete=file GhostCode ghostcode.Run(<f-args>)
+command! -nargs=? -complete=file GhostCode G.Run(<f-args>)
