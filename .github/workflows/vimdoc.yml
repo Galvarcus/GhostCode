@@ -29,6 +29,7 @@ jobs:
             --standalone
             --columns=78
             --toc=true
+            --shift-heading-level-by=-1
             --metadata-file=doc/pandoc.yaml
             --lua-filter=doc/vimdoc-filter.lua
             --output=doc/ghostcode.txt
