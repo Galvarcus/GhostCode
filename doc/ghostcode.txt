@@ -1,32 +1,28 @@
 *ghostcode.txt*	A tool to identify ghost code in a vim9 plugin.
 
-                            GhostCode by Galvarcus
+                            Ghostcode by Galvarcus
 
 
                                        Type |gO| to see the table of contents.
 
-Ghostcode ................................................ |ghostcode-ghostcode|
-  Requirements ........................................ |ghostcode-requirements|
-  Installation ........................................ |ghostcode-installation|
-  Usage ...................................................... |ghostcode-usage|
-    Running from the command line .... |ghostcode-running-from-the-command-line|
-  What Ghostcode detects .................... |ghostcode-what-ghostcode-detects|
-  What Ghostcode doesn't detect ....... |ghostcode-what-ghostcode-doesnt-detect|
-  License .................................................. |ghostcode-license|
-
-==============================================================================
-Ghostcode                                                  *ghostcode-ghostcode*
+Requirements .......................................... |ghostcode-requirements|
+Installation .......................................... |ghostcode-installation|
+Usage ........................................................ |ghostcode-usage|
+  Running from the command line ...... |ghostcode-running-from-the-command-line|
+What Ghostcode detects ...................... |ghostcode-what-ghostcode-detects|
+What Ghostcode doesn't detect ......... |ghostcode-what-ghostcode-doesnt-detect|
+License .................................................... |ghostcode-license|
 
 Ghostcode finds unreferenced code in Vim9 plugins. It scans a project for
 functions, methods, classes, fields, enum values, and script-level variables,
 then reports every one that nothing in the project ever calls or reads.
 
-------------------------------------------------------------------------------
+==============================================================================
 Requirements                                            *ghostcode-requirements*
 
 Vim 9.1 or later, compiled with Vim9 script and class support.
 
-------------------------------------------------------------------------------
+==============================================================================
 Installation                                            *ghostcode-installation*
 
 Ghostcode is a Vim plugin with a `plugin/` component and an `autoload/`
@@ -49,7 +45,7 @@ lazy.nvim
     { 'Galvarcus/ghostcode' }
 <
 
-------------------------------------------------------------------------------
+==============================================================================
 Usage                                                          *ghostcode-usage*
 
 Ghostcode adds one command:
@@ -75,7 +71,8 @@ line:
     testplugin/autoload/util.vim|58 col 1| [ghost] variable g_never_read
 <
 
-RUNNING FROM THE COMMAND LINE          *ghostcode-running-from-the-command-line*
+------------------------------------------------------------------------------
+Running from the command line          *ghostcode-running-from-the-command-line*
 
 To run Ghostcode headlessly, for example in CI, source its `plugin/` script
 explicitly before invoking the command. `-u NONE` skips Vim's normal startup,
@@ -91,7 +88,7 @@ its own:
       -c 'qa!'
 <
 
-------------------------------------------------------------------------------
+==============================================================================
 What Ghostcode detects                        *ghostcode-what-ghostcode-detects*
 
 - `def` and `export def`
@@ -116,7 +113,7 @@ What Ghostcode detects                        *ghostcode-what-ghostcode-detects*
 - top-level code in `plugin/*.vim` and `tests/*.vim`, both treated as entry
   points invoked directly rather than requiring a call site
 
-------------------------------------------------------------------------------
+==============================================================================
 What Ghostcode doesn't detect           *ghostcode-what-ghostcode-doesnt-detect*
 
 - local variables declared inside a function body. Ghostcode analyzes
@@ -131,7 +128,7 @@ What Ghostcode doesn't detect           *ghostcode-what-ghostcode-doesnt-detect*
 Ghostcode is conservative by design: anything it can't prove is unreferenced
 is left alone rather than reported.
 
-------------------------------------------------------------------------------
+==============================================================================
 License                                                      *ghostcode-license*
 
 GNU GPL 3.0
