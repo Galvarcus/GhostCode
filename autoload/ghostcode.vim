@@ -38,7 +38,10 @@ var is_loaded: bool = true
 #   - every `import` form: `import './mod.vim' [as ns]`,
 #     `import autoload '...' [as ns]`, and
 #     `import {Foo [as Bar]} from '...'`
-#   - exported symbols
+#   - exported symbols, which count as public API unless the setting
+#     `g:ghostcode_exports_are_api` is false. A method or field of an
+#     exported class counts as exported too, since Vim9 cannot export
+#     a member by itself
 #   - top-level code in scripts that Vim sources directly, such as
 #     `plugin/`, `syntax/`, `ftplugin/`, and their `after/` copies, and
 #     in `tests/`, all treated as entry points that need no call site
@@ -54,9 +57,10 @@ var is_loaded: bool = true
 #     concatenation, computed indices, or anything else that isn't a
 #     literal identifier or string
 #   - method calls on a variable with no declared or inferable type:
-#     `obj.Method()` falls back to an unambiguous same-name match
-#     across the codebase when obj's type can't be determined, same
-#     as bare `Foo()` does
+#     `obj.Method()` falls back to a same-name match across the
+#     codebase when obj's type can't be determined, same as bare
+#     `Foo()` does. When several symbols share the name, every one of
+#     them counts as used, because the call might reach any of them
 #
 # Ghostcode is deliberately conservative around unresolved
 # references. Anything it can't prove is dead is left alone.
@@ -159,6 +163,11 @@ class Analysis
   public var root: string = ''
   public var knownNames: dict<bool> = {}
 
+  # Whether an exported symbol counts as public API, so that it is a
+  # root and is never reported. Set from g:ghostcode_exports_are_api
+  # at the start of each run.
+  public var exportsAreApi: bool = true
+
   # file -> alias -> resolved file, for `import '...' [as alias]`
   var namespaceImports: dict<dict<string>> = {}
 
@@ -260,6 +269,13 @@ export def Run(path: string = ''): void
 
   var analysis = Analysis.new()
   analysis.root = root
+
+  # The setting is a bool by default. Accept 0 and 1 as well, as `:let`
+  # on the command line gives a number.
+  var exportsAreApi: any = g:ghostcode_exports_are_api
+  analysis.exportsAreApi = type(exportsAreApi) == v:t_bool
+    ? exportsAreApi
+    : exportsAreApi != 0
 
   # Vim sources files in its runtime directories directly, without an
   # import or a call: plugin/ at startup, syntax/ and ftplugin/ on
@@ -385,7 +401,7 @@ def ScanDeclarations(
 
       analysis.AddSymbol(sym)
 
-      if sym.exported
+      if sym.exported && analysis.exportsAreApi
         analysis.AddRoot(id)
       endif
 
@@ -452,7 +468,7 @@ def ScanDeclarations(
 
       analysis.AddSymbol(sym)
 
-      if sym.exported
+      if sym.exported && analysis.exportsAreApi
         analysis.AddRoot(id)
       endif
 
@@ -551,7 +567,7 @@ def ScanDeclarations(
 
       analysis.AddSymbol(sym)
 
-      if sym.exported
+      if sym.exported && analysis.exportsAreApi
         analysis.AddRoot(id)
       endif
     endif
@@ -1057,8 +1073,13 @@ def ScanCalls(
   # Ordinary calls:
   #
   #   Foo()
+  #
+  # A name that follows a dot is the member of a dotted call, which
+  # the pass above already recorded, so it is not an ordinary call.
+  # Counting it again would credit every symbol of that name, however
+  # exactly the dotted call resolved.
   pattern =
-    '\<\([A-Za-z_][A-Za-z0-9_]*\)\s*('
+    '\%(\.\)\@<!\<\([A-Za-z_][A-Za-z0-9_]*\)\s*('
 
   start = 0
 
@@ -1420,18 +1441,20 @@ def AddCall(
 enddef
 
 
-# METHOD: Resolve a reference to the symbol it targets, or an empty
-# string when nothing can be proven.
+# METHOD: Resolve a reference to the symbols it may target, or an empty
+# list when nothing matches. One symbol means the reference is proven.
+# Several mean that the name is ambiguous, and then every candidate
+# counts as used, because the reference might reach any of them.
 def ResolveReference(
   ref: Reference,
   analysis: Analysis,
-): string
+): list<string>
 
   # Pre-resolved at scan time, such as a locally-typed variable's
   # method call resolved against its declared type. Trust it
   # outright rather than re-deriving it heuristically.
   if ref.resolvedId !=# '' && has_key(analysis.symbols, ref.resolvedId)
-    return ref.resolvedId
+    return [ref.resolvedId]
   endif
 
   # Same-file function:
@@ -1440,7 +1463,7 @@ def ResolveReference(
   var localId = $'{ref.file}::{ref.name}'
 
   if has_key(analysis.symbols, localId)
-    return localId
+    return [localId]
   endif
 
   # Classic autoload reference:
@@ -1464,7 +1487,7 @@ def ResolveReference(
       var hashId = $'{fullPath}::{funcName}'
 
       if has_key(analysis.symbols, hashId)
-        return hashId
+        return [hashId]
       endif
     endif
   endif
@@ -1485,7 +1508,7 @@ def ResolveReference(
       var thisId = SymbolId(ref.file, member, ref.className)
 
       if has_key(analysis.symbols, thisId)
-        return thisId
+        return [thisId]
       endif
     endif
 
@@ -1497,7 +1520,7 @@ def ResolveReference(
     )
 
     if has_key(analysis.symbols, methodId)
-      return methodId
+      return [methodId]
     endif
 
     # Receiver is an import namespace alias:
@@ -1512,14 +1535,39 @@ def ResolveReference(
         var qualifiedId = $'{targetFile}::{member}'
 
         if has_key(analysis.symbols, qualifiedId)
-          return qualifiedId
+          return [qualifiedId]
         endif
       endif
     endif
 
-    # Receiver is a variable of unknown declared type: fall back
-    # to an unambiguous same-member-name match anywhere in the
-    # codebase. This mirrors the bare-name global search below.
+    # Receiver is a class in another file, named without its import
+    # alias. `M.Menu.new()` shows the scanner only `Menu.new`, since
+    # the pattern keeps the last two names. Find the class by name,
+    # then the member on it. Only a class that is unique by name
+    # resolves here.
+    var classId = ResolveTypeExpr(ref.file, receiver, analysis)
+
+    if classId !=# ''
+      var viaClass = SymbolId(
+        analysis.symbols[classId].file,
+        member,
+        receiver,
+      )
+
+      if has_key(analysis.symbols, viaClass)
+        return [viaClass]
+      endif
+
+      # A class without a `new` method has the default constructor,
+      # which is no symbol and has nothing to credit.
+      if member ==# 'new'
+        return []
+      endif
+    endif
+
+    # Receiver is a variable of unknown declared type: any member of
+    # that name anywhere in the codebase may be the target. Count
+    # them all, which mirrors the bare-name global search below.
     var memberMatches: list<string> = []
 
     for id in keys(analysis.symbols)
@@ -1533,8 +1581,8 @@ def ResolveReference(
       endif
     endfor
 
-    if len(memberMatches) == 1
-      return memberMatches[0]
+    if !empty(memberMatches)
+      return memberMatches
     endif
   endif
 
@@ -1551,14 +1599,14 @@ def ResolveReference(
       var namedId = $'{targetFile}::{orig}'
 
       if has_key(analysis.symbols, namedId)
-        return namedId
+        return [namedId]
       endif
     endif
   endif
 
-  # Global search.
-  #
-  # Only accept an unambiguous result.
+  # Global search: every symbol with the name. A single match is a
+  # proven target. Several are an ambiguous name, and all of them
+  # count as used.
   var matches: list<string> = []
 
   for id in keys(analysis.symbols)
@@ -1567,11 +1615,7 @@ def ResolveReference(
     endif
   endfor
 
-  if len(matches) == 1
-    return matches[0]
-  endif
-
-  return ''
+  return matches
 enddef
 
 
@@ -1584,12 +1628,12 @@ def FindReachable(
   var edges: dict<list<string>> = {}
 
   for ref in analysis.references
-    var target = ResolveReference(
+    var targets = ResolveReference(
       ref,
       analysis,
     )
 
-    if target ==# ''
+    if empty(targets)
       add(
         analysis.unresolved,
         ref,
@@ -1609,33 +1653,11 @@ def FindReachable(
     # any one of them also reaches its top-level code, and
     # `import` edges, also defined below, chain that reachability
     # across files.
-    if ref.caller ==# ''
-      var scriptId = ScriptId(ref.file)
+    var origin = ref.caller ==# '' ? ScriptId(ref.file) : ref.caller
 
-      if !has_key(edges, scriptId)
-        edges[scriptId] = []
-      endif
-
-      if index(edges[scriptId], target) < 0
-        add(edges[scriptId], target)
-      endif
-
-      continue
-    endif
-
-    if !has_key(edges, ref.caller)
-      edges[ref.caller] = []
-    endif
-
-    if index(
-      edges[ref.caller],
-      target,
-    ) < 0
-      add(
-        edges[ref.caller],
-        target,
-      )
-    endif
+    for target in targets
+      AddEdge(edges, origin, target)
+    endfor
   endfor
 
   # Every symbol implicitly reaches its own file's top-level code,
@@ -1696,6 +1718,23 @@ def FindReachable(
 enddef
 
 
+# METHOD: Add an edge from origin to target, once.
+def AddEdge(
+  edges: dict<list<string>>,
+  origin: string,
+  target: string,
+): void
+
+  if !has_key(edges, origin)
+    edges[origin] = []
+  endif
+
+  if index(edges[origin], target) < 0
+    add(edges[origin], target)
+  endif
+enddef
+
+
 def CompareSymbols(
   a: Symbol,
   b: Symbol,
@@ -1727,9 +1766,11 @@ def Report(
       continue
     endif
 
-    # Exported symbols are public API. Don't classify them as
-    # definitely ghost.
-    if sym.exported
+    # Exported symbols are public API by default. Don't classify
+    # them as definitely ghost. With g:ghostcode_exports_are_api
+    # false, an export that nothing uses is reported like any other
+    # symbol.
+    if sym.exported && analysis.exportsAreApi
       continue
     endif
 

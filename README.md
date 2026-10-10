@@ -86,6 +86,25 @@ vim -u NONE -N -es \
   -c 'qa!'
 ```
 
+## Settings
+
+Ghostcode has one setting:
+
+```vim
+let g:ghostcode_exports_are_api = v:true
+```
+
+By default Ghostcode treats an exported symbol as public API and never
+reports it. Vim9 cannot export a method or a field by itself, so every
+method and field of an exported class counts as exported too, unless
+its name starts with an underscore.
+
+Set the value to `v:false` for a plugin whose exports only serve its own
+files, as in an application. Ghostcode then reports an export that
+nothing in the project uses, like any other symbol. From the command
+line, add `-c 'let g:ghostcode_exports_are_api = 0'` to the command
+above, after `runtime plugin/ghostcode.vim`.
+
 ## What Ghostcode detects
 
 - `def` and `export def`
@@ -107,6 +126,7 @@ vim -u NONE -N -es \
 - every `import` form: relative paths, `import autoload`, and named
   imports (`import {Foo} from '...'`)
 - exported symbols, treated as public API and never reported as dead
+  unless you turn that off, see Settings
 - the classic `plugin#Function()` autoload calling convention
 - top-level code in scripts that Vim sources directly (`plugin/`,
   `ftplugin/`, `ftdetect/`, `syntax/`, `indent/`, `compiler/`,
@@ -121,11 +141,27 @@ vim -u NONE -N -es \
   indices, or anything else that isn't a literal identifier or string
 - method calls on a variable with no declared or inferable type. When
   a variable's type can't be determined, Ghostcode falls back to
-  finding an unambiguous same-name match across the project, and
-  reports nothing if that name isn't unique
+  finding a same-name match across the project. When several symbols
+  share the name, it counts every one of them as used
+- a variable that the code only writes and never reads. A write counts
+  as a use
 
 Ghostcode is conservative by design: anything it can't prove is
 unreferenced is left alone rather than reported.
+
+## Development
+
+Run the tests from the root of the repository, with Logger on the
+runtime path:
+
+```bash
+vim -es -u NONE -N --cmd 'set rtp+=.,/path/to/Logger' \
+  -c 'runtime plugin/ghostcode.vim' \
+  -c 'source tests/harness.vim' -c 'quit'
+cat tests/results.txt
+```
+
+The file reads `All tests passed` when every test passes.
 
 ## License
 

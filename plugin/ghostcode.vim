@@ -13,4 +13,9 @@ var is_loaded: bool = true
 
 import autoload 'ghostcode.vim' as G
 
+# Whether an exported symbol is public API, so that it is never reported.
+# Set it to false for a plugin whose exports only serve its own files, to
+# report an export that nothing in the project uses.
+g:ghostcode_exports_are_api = get(g:, 'ghostcode_exports_are_api', true)
+
 command! -nargs=? -complete=file GhostCode G.Run(<f-args>)
