@@ -1,0 +1,107 @@
+name: Tests
+
+# Runs the tests of Ghostcode, tests/harness.vim, on the latest Vim.
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+# A new push to a pull request replaces a run that has not finished.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      # A prebuilt AppImage of the latest Vim, unpacked, so that Vim is on the
+      # PATH. The Vim of the runner is older. With the token, the call to the
+      # API has the limit of the repository. Without one it shares a low limit
+      # with every other runner.
+      - name: Install Vim
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          url=$(curl -fsS --retry 3 -H "Authorization: Bearer $GITHUB_TOKEN" \
+            https://api.github.com/repos/vim/vim-appimage/releases/latest \
+            | jq -r '.assets[] | select(.name | test("^Vim-v.*-x86_64\\.AppImage$")) | .browser_download_url')
+          if [ -z "$url" ]; then
+            echo "::error::The latest vim-appimage release has no Vim AppImage."
+            exit 1
+          fi
+          curl -fsSL --retry 3 -o /tmp/vim.appimage "$url"
+          chmod +x /tmp/vim.appimage
+          cd /tmp && ./vim.appimage --appimage-extract > /dev/null
+          ln -s /tmp/squashfs-root/AppRun /tmp/squashfs-root/vim
+          echo "/tmp/squashfs-root" >> "$GITHUB_PATH"
+
+      - name: Vim version
+        run: vim --version
+
+      # Ghostcode imports 'Logger/logger.vim', a shared dependency
+      # (github.com/Galvarcus/Logger) that is not in this repository.
+      - name: Checkout Logger dependency
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: Galvarcus/Logger
+          path: deps/Logger
+
+      - name: Run tests
+        run: |
+          vim -es -u NONE -N -V20/tmp/vim.log \
+            --cmd 'set rtp+=.,deps/Logger' \
+            -c 'runtime plugin/ghostcode.vim' \
+            -c 'source tests/harness.vim' -c 'quit' || true
+          if [ ! -f tests/results.txt ]; then
+            echo "::error::tests/results.txt was never created - Vim likely failed before finishing. Verbose log follows:"
+            cat /tmp/vim.log
+            exit 1
+          fi
+          cat tests/results.txt
+          grep -qx 'All tests passed' tests/results.txt
+
+      # Ghostcode on its own code. The folders are copied away from deps/, so
+      # that Logger is not scanned too. The exports of Ghostcode only serve its
+      # own files, so an export that nothing uses is reported as well.
+      - name: Run Ghostcode on its own code
+        run: |
+          rm -rf /tmp/self ghostcode_results.txt
+          mkdir /tmp/self
+          cp -r autoload plugin tests /tmp/self/
+
+          set +e
+          vim -u NONE -N -es \
+            --cmd 'set rtp+=.,deps/Logger' \
+            -c 'runtime plugin/ghostcode.vim' \
+            -c 'let g:ghostcode_exports_are_api = 0' \
+            -c 'GhostCode /tmp/self' \
+            -c 'vim9cmd call writefile(getqflist()->mapnew((_, item) => printf("%s:%d:%s", fnamemodify(bufname(item.bufnr), ":."), item.lnum, item.text)), "ghostcode_results.txt")' \
+            -c 'qa!'
+          vim_exit=$?
+          set -e
+
+          if [ "$vim_exit" -ne 0 ]; then
+            echo "::error::Ghostcode failed to run (Vim exit status $vim_exit)"
+            exit "$vim_exit"
+          fi
+          if [ ! -f ghostcode_results.txt ]; then
+            echo "::error::Ghostcode did not produce a results file"
+            exit 1
+          fi
+
+          count=$(grep -c '\[ghost\]' ghostcode_results.txt || true)
+          echo "Ghost code findings: $count"
+          if [ "$count" -ne 0 ]; then
+            grep '\[ghost\]' ghostcode_results.txt | while IFS= read -r line; do
+              echo "::error::$line"
+            done
+            exit 1
+          fi
