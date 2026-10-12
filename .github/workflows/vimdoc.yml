@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@vv7.0.1
 
       - name: Generate Vimdoc
         uses: docker://pandoc/core:latest
