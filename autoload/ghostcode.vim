@@ -1315,7 +1315,7 @@ def ScanBareReferences(
   #   timer_start(1000, Foo)
   #   {callback: Foo}
   var barePattern =
-    '\%(\.\)\@<!\<\([A-Za-z_][A-Za-z0-9_]*\)\>\%(\s*[(.]\)\@!'
+    '\%(\.\)\@<!\<\([A-Za-z_][A-Za-z0-9_]*\)\>\%(\s*\%((\|\.\%(\.\)\@!\)\)\@!'
 
   start = 0
 

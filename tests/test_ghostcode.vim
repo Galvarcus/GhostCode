@@ -229,6 +229,24 @@ def Test_a_field_read_through_an_untyped_receiver_counts(): void
   assert_equal([], Ghosts(files, false))
 enddef
 
+# FUNCTION: A name that a concatenation uses, as in PREFIX .. name, is read.
+# The scanner skips a name that a dot follows, because that is a receiver as
+# in Color.Red, and the first dot of the operator .. must not count as one.
+def Test_a_name_used_in_a_concatenation_counts_as_used(): void
+  var files = {
+    'plugin/p.vim': [
+      'vim9script',
+      'const PREFIX: string = "a-"',
+      'const SUFFIX: string = "-z"',
+      'def Join(name: string): string',
+      '  return PREFIX .. name .. SUFFIX',
+      'enddef',
+      'Join("x")',
+    ],
+  }
+  assert_equal([], Ghosts(files, false))
+enddef
+
 export def RunAll(): void
   Test_the_setting_defaults_to_exports_being_api()
   Test_the_setting_accepts_a_number()
@@ -240,4 +258,5 @@ export def RunAll(): void
   Test_a_class_qualified_call_reaches_only_its_own_member()
   Test_a_default_constructor_credits_nothing()
   Test_a_field_read_through_an_untyped_receiver_counts()
+  Test_a_name_used_in_a_concatenation_counts_as_used()
 enddef
