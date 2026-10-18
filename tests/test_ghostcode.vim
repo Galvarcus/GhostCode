@@ -247,6 +247,26 @@ def Test_a_name_used_in_a_concatenation_counts_as_used(): void
   assert_equal([], Ghosts(files, false))
 enddef
 
+# FUNCTION: A function that only the default value of a parameter calls is
+# used, and so is what it reads. The scanner read a def line for its types
+# only.
+def Test_a_name_used_in_a_parameter_default_counts_as_used(): void
+  var files = {
+    'plugin/p.vim': [
+      'vim9script',
+      'const ROOT: string = "/x"',
+      'def Dirs(): list<string>',
+      '  return [ROOT]',
+      'enddef',
+      'def List(dirs: list<string> = Dirs(), n: number = 0): list<string>',
+      '  return dirs',
+      'enddef',
+      'List()',
+    ],
+  }
+  assert_equal([], Ghosts(files, false))
+enddef
+
 export def RunAll(): void
   Test_the_setting_defaults_to_exports_being_api()
   Test_the_setting_accepts_a_number()
@@ -259,4 +279,5 @@ export def RunAll(): void
   Test_a_default_constructor_credits_nothing()
   Test_a_field_read_through_an_untyped_receiver_counts()
   Test_a_name_used_in_a_concatenation_counts_as_used()
+  Test_a_name_used_in_a_parameter_default_counts_as_used()
 enddef

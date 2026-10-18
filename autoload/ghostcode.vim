@@ -813,6 +813,17 @@ def ScanReferences(
       # below.
       ScanTypeReferences(line, file, lnum, sigId, analysis)
 
+      # A default value of a parameter can call a function or read a
+      # constant, which the function then needs, as it needs its types.
+      var defaults = ParamDefaults(ExtractParamList(line))
+
+      if defaults !=# ''
+        var defFieldTypes = get(fieldTypesByClass, currentClass, {})
+        ScanDynamicCalls(defaults, file, lnum, sigId, analysis)
+        ScanCalls(defaults, file, lnum, sigId, analysis, currentClass, {}, defFieldTypes)
+        ScanBareReferences(defaults, file, lnum, sigId, currentClass, analysis, {}, defFieldTypes)
+      endif
+
       if containerKind ==# 'interface'
         continue
       endif
@@ -1992,6 +2003,15 @@ def ExtractParamList(line: string): string
   return strpart(line, open + 1)
 enddef
 
+
+# FUNCTION: Return the default values of a parameter list, as in name:
+# type = Default(), joined by spaces, or an empty string when it has none.
+def ParamDefaults(params: string): string
+  return SplitTopLevel(params)
+    ->mapnew((_, p) => matchstr(p, '[^=!<>]=\s*\zs.*'))
+    ->filter((_, d) => d !=# '')
+    ->join(' ')
+enddef
 
 def SplitTopLevel(text: string): list<string>
   var result: list<string> = []
