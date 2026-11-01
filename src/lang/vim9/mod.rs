@@ -6,6 +6,7 @@
 pub mod lex;
 pub mod parse;
 pub mod rules;
+pub mod types;
 
 use std::path::Path;
 

@@ -8,6 +8,9 @@ use std::path::PathBuf;
 
 use crate::lang::vim9::lex::Tok;
 use crate::lang::vim9::lex::TokKind;
+use crate::lang::vim9::types;
+use crate::lang::vim9::types::Locals;
+use crate::lang::vim9::types::Types;
 use crate::model::Import;
 use crate::model::Kind;
 use crate::model::Reference;
@@ -475,8 +478,10 @@ const BY_NAME: &[&str] = &["call", "function", "funcref", "execute", "eval"];
 /// heredoc body, which is what the statements it walks have already
 /// removed.
 pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
+    let types = Types::of_file(stmts);
     let mut scope = Scope::default();
     let mut origin = SymbolId::script(file);
+    let mut locals = Locals::default();
 
     for stmt in stmts {
         let words: Vec<&str> = stmt
@@ -487,12 +492,20 @@ pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
 
         if close_container(&words, &mut scope) {
             origin = SymbolId::script(file);
+            locals = Locals::default();
             continue;
         }
+
+        // A declaration inside the body gives its name a type that
+        // the calls after it are resolved against.
+        locals.declare(stmt);
 
         let mut sink = Collect {
             file,
             origin: &origin,
+            owner: scope.owner.as_deref(),
+            locals: &locals,
+            types: &types,
             out,
         };
 
@@ -504,6 +517,7 @@ pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
 
         if let Some(id) = opens_body(file, stmt, &words, &mut scope) {
             origin = id;
+            locals = Locals::of_signature(stmt);
         }
     }
 }
@@ -513,6 +527,9 @@ pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
 struct Collect<'a> {
     file: &'a Path,
     origin: &'a SymbolId,
+    owner: Option<&'a str>,
+    locals: &'a Locals,
+    types: &'a Types,
     out: &'a mut dyn Sink,
 }
 
@@ -541,13 +558,7 @@ impl Collect<'_> {
             return;
         }
 
-        let recv = match (stmt.get(i.wrapping_sub(1)), i) {
-            (Some(dot), 1..) if dot.text == "." => stmt
-                .get(i - 2)
-                .filter(|t| t.kind == TokKind::Ident)
-                .map(|t| t.text.clone()),
-            _ => None,
-        };
+        let recv = types::recv_type(stmt, i, self.owner, self.locals, self.types);
 
         self.out.re(Reference {
             name: tok.text.clone(),
