@@ -8,7 +8,6 @@ pub mod parse;
 pub mod rules;
 
 use std::path::Path;
-use std::path::PathBuf;
 
 use crate::config::Config;
 use crate::lang::Lang;
@@ -36,11 +35,8 @@ impl Lang for Vim9 {
         let toks = lex::tokens(&src.text);
         let stmts = parse::statements(&toks);
         parse::declarations(&src.rel, &stmts, out);
+        parse::imports(&src.rel, &stmts, out);
         Ok(())
-    }
-
-    fn resolve_import(&self, _src: &Source, _spec: &str, _root: &Path) -> Option<PathBuf> {
-        None
     }
 
     fn is_api(&self, sym: &Symbol, cfg: &Config) -> bool {

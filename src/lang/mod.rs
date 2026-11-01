@@ -4,7 +4,6 @@
 //! License: GNU GPL 3.0
 
 use std::path::Path;
-use std::path::PathBuf;
 
 pub mod vim9;
 
@@ -32,10 +31,6 @@ pub trait Lang: Sync {
     /// Never for a file it cannot parse: an unparseable construct is
     /// skipped so that the rest of the project still scans.
     fn scan(&self, src: &Source, out: &mut dyn Sink) -> anyhow::Result<()>;
-
-    /// METHOD: The file an import in this file names, if it names one
-    /// inside the root.
-    fn resolve_import(&self, src: &Source, spec: &str, root: &Path) -> Option<PathBuf>;
 
     /// METHOD: True when this symbol counts as public API, so that it
     /// is never reported.

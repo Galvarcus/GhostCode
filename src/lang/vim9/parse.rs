@@ -2,10 +2,13 @@
 //!
 //! License: GNU GPL 3.0
 
+use std::path::Component;
 use std::path::Path;
+use std::path::PathBuf;
 
 use crate::lang::vim9::lex::Tok;
 use crate::lang::vim9::lex::TokKind;
+use crate::model::Import;
 use crate::model::Kind;
 use crate::model::Sink;
 use crate::model::Symbol;
@@ -326,4 +329,132 @@ fn strip_modifiers<'a>(mut words: &'a [&'a str]) -> &'a [&'a str] {
         }
     }
     words
+}
+
+/// FUNCTION: Record every import a file states, with the file it names
+/// and the names it binds.
+///
+/// The path is computed, not looked up: an import resolves to a path
+/// relative to the project root, and the driver keeps the import only
+/// when that path is one of the project's own sources. So a target
+/// that git ignores, or that lies outside the root, resolves to
+/// nothing here and is dropped there.
+pub fn imports(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
+    for stmt in stmts {
+        if stmt.first().map(|t| t.text.as_str()) != Some("import") {
+            continue;
+        }
+
+        let Some(spec) = stmt.iter().find(|t| t.kind == TokKind::Str) else {
+            continue;
+        };
+        let spec = unquote(&spec.text);
+
+        // `import autoload 'foo.vim'` reads autoload/foo.vim, while
+        // `import 'foo.vim'` reads import/foo.vim. Vim searches every
+        // runtimepath entry for the second; one project root is the
+        // case that matters here.
+        let autoload = stmt.get(1).is_some_and(|t| t.text == "autoload");
+
+        let Some(to) = resolve(file, &spec, autoload) else {
+            continue;
+        };
+
+        out.import(Import {
+            from: file.to_path_buf(),
+            to,
+            alias: Some(alias_of(stmt, &spec)),
+            names: names_of(stmt),
+        });
+    }
+}
+
+/// FUNCTION: The path an import names, relative to the project root,
+/// or none when it names a file outside it.
+fn resolve(file: &Path, spec: &str, autoload: bool) -> Option<PathBuf> {
+    let joined = if spec.starts_with("./") || spec.starts_with("../") || spec.starts_with('/') {
+        file.parent()?.join(spec.trim_start_matches('/'))
+    } else if autoload {
+        Path::new("autoload").join(spec)
+    } else {
+        Path::new("import").join(spec)
+    };
+
+    simplify(&joined)
+}
+
+/// FUNCTION: Resolve `.` and `..` in a path without touching the
+/// filesystem. A path that climbs above the root is not the project's,
+/// and so is none.
+fn simplify(path: &Path) -> Option<PathBuf> {
+    let mut parts: Vec<std::ffi::OsString> = Vec::new();
+
+    for part in path.components() {
+        match part {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                parts.pop()?;
+            }
+            Component::Normal(p) => parts.push(p.to_os_string()),
+            Component::RootDir | Component::Prefix(_) => return None,
+        }
+    }
+
+    if parts.is_empty() {
+        return None;
+    }
+
+    Some(parts.iter().collect())
+}
+
+/// FUNCTION: The namespace an import binds: the name after `as`, or
+/// the target's own file stem.
+fn alias_of(stmt: &[Tok], spec: &str) -> String {
+    if let Some(i) = stmt.iter().position(|t| t.text == "as") {
+        if let Some(name) = stmt.get(i + 1) {
+            return name.text.clone();
+        }
+    }
+
+    Path::new(spec)
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+/// FUNCTION: The names of `import {A, B as C} from ...`, each as the
+/// pair this file calls it by and the name it really has.
+fn names_of(stmt: &[Tok]) -> Vec<(String, String)> {
+    let Some(open) = stmt.iter().position(|t| t.text == "{") else {
+        return Vec::new();
+    };
+    let Some(close) = stmt.iter().position(|t| t.text == "}") else {
+        return Vec::new();
+    };
+
+    let mut out: Vec<(String, String)> = Vec::new();
+
+    for item in stmt[open + 1..close].split(|t| t.text == ",") {
+        let words: Vec<&str> = item
+            .iter()
+            .filter(|t| t.kind == TokKind::Ident)
+            .map(|t| t.text.as_str())
+            .collect();
+
+        match words.as_slice() {
+            [name] => out.push(((*name).to_string(), (*name).to_string())),
+            [orig, "as", alias] => out.push(((*alias).to_string(), (*orig).to_string())),
+            _ => {}
+        }
+    }
+
+    out
+}
+
+/// FUNCTION: Take the quotes off a string literal.
+fn unquote(text: &str) -> String {
+    let mut chars = text.chars();
+    chars.next();
+    chars.next_back();
+    chars.collect()
 }

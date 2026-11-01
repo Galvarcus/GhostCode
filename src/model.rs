@@ -122,10 +122,12 @@ pub struct Reference {
 pub struct Import {
     pub from: PathBuf,
     pub to: PathBuf,
-    /// The alias of `import ... as NAME`, where one is given.
+    /// The namespace alias: the name after `as`, or the target's own
+    /// file stem, which is what `import autoload 'foo.vim'` binds.
     pub alias: Option<String>,
-    /// The names of `import {A, B} from ...`, where any are given.
-    pub names: Vec<String>,
+    /// Each name of `import {A, B as C} from ...`, as the pair the
+    /// file calls it by and the name it really has.
+    pub names: Vec<(String, String)>,
 }
 
 /// TRAIT: What a language's scan writes its findings into, so that a
