@@ -1,0 +1,78 @@
+name: Release
+
+# Builds the binaries for a tag and attaches them to its release, then
+# publishes the crate. A Vim user installs the plugin with a plugin
+# manager and takes the binary from here, because a plugin manager
+# clones and does not build.
+#
+# Windows is not built. Adding it is one entry in the matrix.
+on:
+  push:
+    tags:
+      - v*
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The tag to build, for a run started by hand.
+        required: true
+permissions:
+  contents: write
+jobs:
+  binaries:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: x86_64-apple-darwin
+            os: macos-15-intel
+          - target: aarch64-apple-darwin
+            os: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Add the target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Name the asset
+        id: asset
+        run: |
+          set -euo pipefail
+          name="ghostcode-${{ matrix.target }}"
+          cp "target/${{ matrix.target }}/release/ghostcode" "$name"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      - name: Checksum
+        run: shasum -a 256 "${{ steps.asset.outputs.name }}" > "${{ steps.asset.outputs.name }}.sha256"
+
+      - name: Attach to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          files: |
+            ${{ steps.asset.outputs.name }}
+            ${{ steps.asset.outputs.name }}.sha256
+
+  crate:
+    name: Publish the crate
+    needs: binaries
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish --locked

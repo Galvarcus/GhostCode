@@ -1,6 +1,14 @@
 name: Tests
 
-# Runs the tests of Ghostcode, tests/harness.vim, on the latest Vim.
+# The checks of Ghostcode, in two jobs:
+#
+#   rust       the analyzer: formatting, clippy, the suite, the timing
+#              ceiling, and Ghostcode on its own code
+#   front-end  the Vim plugin that runs the binary, against the stub
+#
+# The analysis is Rust and needs no Vim. The front end needs Vim and
+# Logger, and needs no release build, because its tests run against the
+# stub in tests/stub.
 on:
   push:
     branches:
@@ -14,8 +22,66 @@ concurrency:
   group: tests-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  tests:
-    name: Tests
+  rust:
+    name: Analyzer
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: Cache the build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      - name: Rust version
+        run: cargo --version && rustc --version
+
+      - name: Formatting
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test
+
+      # Built for release, because the ceiling is about the analyzer
+      # and not about the test profile. The test prints what it
+      # measured beside what the Vim9 analyzer took.
+      - name: Timing
+        run: cargo test --release --test timing -- --nocapture
+
+      # Ghostcode on its own code. Its exports serve its own files
+      # alone, and ghostcode.toml says so, along with excluding the
+      # fixture corpora, which are other projects' code.
+      - name: Run Ghostcode on its own code
+        run: |
+          set -euo pipefail
+
+          out=$(./target/release/ghostcode --format=text .)
+
+          if [ -n "$out" ]; then
+            echo "Ghost code findings:"
+            printf '%s\n' "$out"
+            printf '%s\n' "$out" | while IFS= read -r line; do
+              file=${line%%:*}
+              rest=${line#*:}
+              lnum=${rest%%:*}
+              echo "::error file=$file,line=$lnum::${line#*:*:*:}"
+            done
+            exit 1
+          fi
+
+          echo "No ghost code found."
+
+  front-end:
+    name: Front end
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -46,7 +112,7 @@ jobs:
       - name: Vim version
         run: vim --version
 
-      # Ghostcode imports 'Logger/logger.vim', a shared dependency
+      # The front end speaks through Logger, a shared dependency
       # (github.com/Galvarcus/Logger) that is not in this repository.
       - name: Checkout Logger dependency
         uses: actions/checkout@v7.0.1
@@ -67,42 +133,3 @@ jobs:
           fi
           cat tests/results.txt
           grep -qx 'All tests passed' tests/results.txt
-
-      # Ghostcode on its own code. The folders are copied away from deps/, so
-      # that Logger is not scanned too. The exports of Ghostcode only serve its
-      # own files, so an export that nothing uses is reported as well.
-      - name: Run Ghostcode on its own code
-        run: |
-          rm -rf /tmp/self ghostcode_results.txt
-          mkdir -p /tmp/self/tests
-          cp -r autoload plugin /tmp/self/
-          cp tests/*.vim /tmp/self/tests/
-
-          set +e
-          vim -u NONE -N -es \
-            --cmd 'set rtp+=.,deps/Logger' \
-            -c 'runtime plugin/ghostcode.vim' \
-            -c 'let g:ghostcode_exports_are_api = 0' \
-            -c 'GhostCode /tmp/self' \
-            -c 'vim9cmd call writefile(getqflist()->mapnew((_, item) => printf("%s:%d:%s", fnamemodify(bufname(item.bufnr), ":."), item.lnum, item.text)), "ghostcode_results.txt")' \
-            -c 'qa!'
-          vim_exit=$?
-          set -e
-
-          if [ "$vim_exit" -ne 0 ]; then
-            echo "::error::Ghostcode failed to run (Vim exit status $vim_exit)"
-            exit "$vim_exit"
-          fi
-          if [ ! -f ghostcode_results.txt ]; then
-            echo "::error::Ghostcode did not produce a results file"
-            exit 1
-          fi
-
-          count=$(grep -c '\[ghost\]' ghostcode_results.txt || true)
-          echo "Ghost code findings: $count"
-          if [ "$count" -ne 0 ]; then
-            grep '\[ghost\]' ghostcode_results.txt | while IFS= read -r line; do
-              echo "::error::$line"
-            done
-            exit 1
-          fi

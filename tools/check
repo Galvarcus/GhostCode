@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+#
+# tools/check: every check this project has, in one command, with one
+# line per check and one verdict. Run it from the root of the
+# repository, with Logger reachable.
+#
+#   LOGGER=/path/to/Logger tools/check
+#
+# License: GNU GPL 3.0
+
+set -uo pipefail
+
+logger=${LOGGER:-deps/Logger}
+failed=0
+log=$(mktemp -t ghostcode-check)
+trap 'rm -f "$log"' EXIT
+
+# FUNCTION: Run one check, print its verdict, and remember a failure.
+check() {
+  local name=$1
+  shift
+
+  if "$@" > "$log" 2>&1; then
+    printf 'ok    %s\n' "$name"
+    return 0
+  fi
+
+  printf 'FAIL  %s\n' "$name"
+  sed 's/^/        /' "$log" | tail -25
+  failed=1
+  return 1
+}
+
+# FUNCTION: The front-end tests, which need Vim and Logger. The
+# harness writes its own results file and deletes a stale one first, so
+# a missing file means Vim never finished.
+vim_tests() {
+  vim -es -u NONE -N -V20"$log.vim" \
+    --cmd "set rtp+=.,$logger" \
+    -c 'runtime plugin/ghostcode.vim' \
+    -c 'source tests/harness.vim' \
+    -c 'quit'
+
+  if [ ! -f tests/results.txt ]; then
+    echo 'tests/results.txt was never written; Vim did not finish:'
+    tail -25 "$log.vim"
+    return 1
+  fi
+
+  grep -qx 'All tests passed' tests/results.txt
+}
+
+# FUNCTION: Ghostcode on its own code. Its exports serve its own files
+# alone, so an export that nothing uses is a finding like any other,
+# and ghostcode.toml says so along with excluding the corpora.
+self_scan() {
+  local out
+  out=$(./target/release/ghostcode --format=text .)
+
+  if [ -n "$out" ]; then
+    printf '%s\n' "$out"
+    return 1
+  fi
+}
+
+check 'cargo fmt' cargo fmt --check
+check 'cargo clippy' cargo clippy --all-targets -- -D warnings
+check 'cargo test' cargo test
+check 'release build' cargo build --release
+check 'timing' cargo test --release --test timing
+check 'front end (vim)' vim_tests
+check 'self scan' self_scan
+
+if command -v actionlint > /dev/null; then
+  check 'actionlint' actionlint .github/workflows/*.yml
+else
+  printf 'skip  actionlint (not installed)\n'
+fi
+
+if [ "$failed" -eq 0 ]; then
+  printf '\nevery check passed\n'
+  exit 0
+fi
+
+printf '\na check failed\n'
+exit 1
