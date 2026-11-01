@@ -1,0 +1,460 @@
+//! Resolution: which symbols a reference may name.
+//!
+//! Every lookup here is an index lookup. The analyzer this replaces
+//! walked every symbol for every reference, which is why a project of
+//! thirty thousand lines cost a hundred times what one of two thousand
+//! did, and the cost grew with the square of the project rather than
+//! with the project.
+//!
+//! License: GNU GPL 3.0
+
+use std::collections::HashMap;
+use std::path::Path;
+use std::path::PathBuf;
+
+use crate::model::Analysis;
+use crate::model::Kind;
+use crate::model::Reference;
+use crate::model::Symbol;
+use crate::model::SymbolId;
+
+/// What every reference resolved to, and how many resolved to nothing.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Resolved {
+    pub targets: HashMap<usize, Vec<SymbolId>>,
+    pub unresolved: usize,
+}
+
+/// Every way a reference can be looked up, each built once.
+#[derive(Debug, Default)]
+pub struct Index<'a> {
+    by_id: HashMap<&'a SymbolId, &'a Symbol>,
+    by_name: HashMap<&'a str, Vec<&'a SymbolId>>,
+    members: HashMap<&'a str, Vec<&'a SymbolId>>,
+    containers: HashMap<&'a str, Vec<&'a SymbolId>>,
+    /// Per file, the namespace alias of an import and the file it names.
+    aliases: HashMap<&'a Path, HashMap<&'a str, &'a Path>>,
+    /// Per file, a named import's local name and the file and original
+    /// name it stands for.
+    named: HashMap<&'a Path, HashMap<&'a str, (&'a Path, &'a str)>>,
+}
+
+impl<'a> Index<'a> {
+    /// METHOD: Build every index of an analysis in one pass, so that
+    /// resolution costs the same whatever the project's size.
+    pub fn build(a: &'a Analysis) -> Self {
+        let mut idx = Self::default();
+
+        for sym in &a.syms {
+            idx.by_id.insert(&sym.id, sym);
+            idx.by_name.entry(&sym.name).or_default().push(&sym.id);
+
+            if matches!(sym.kind, Kind::Method | Kind::Field | Kind::EnumValue) {
+                idx.members.entry(&sym.name).or_default().push(&sym.id);
+            }
+
+            if matches!(sym.kind, Kind::Class | Kind::Enum | Kind::Interface) {
+                idx.containers.entry(&sym.name).or_default().push(&sym.id);
+            }
+        }
+
+        for imp in &a.imports {
+            if let Some(alias) = &imp.alias {
+                idx.aliases
+                    .entry(&imp.from)
+                    .or_default()
+                    .insert(alias, &imp.to);
+            }
+
+            for (local, orig) in &imp.names {
+                idx.named
+                    .entry(&imp.from)
+                    .or_default()
+                    .insert(local, (&imp.to, orig));
+            }
+        }
+
+        idx
+    }
+
+    /// METHOD: Every symbol a reference may name.
+    ///
+    /// One is a proven target. Several mean the name is ambiguous, and
+    /// then every candidate counts as used, because the analyzer
+    /// reports only what it can prove is unreferenced. None means the
+    /// reference named nothing this project declares.
+    pub fn candidates(&self, r: &Reference) -> Vec<SymbolId> {
+        if let Some(id) = &r.target {
+            if self.by_id.contains_key(id) {
+                return vec![id.clone()];
+            }
+        }
+
+        if let Some(recv) = &r.recv {
+            return self.dotted(r, recv);
+        }
+
+        // A function of the same file needs no import and wins over
+        // every name that matches elsewhere.
+        let here = SymbolId::of(&r.file, None, &r.name);
+        if self.by_id.contains_key(&here) {
+            return vec![here];
+        }
+
+        if let Some(id) = self.autoload(&r.name) {
+            return vec![id];
+        }
+
+        if let Some(id) = self.named_import(r) {
+            return vec![id];
+        }
+
+        self.cloned(self.by_name.get(r.name.as_str()))
+    }
+
+    /// METHOD: Resolve `recv.name`, where `recv` is already the type
+    /// of the receiver rather than the text that named it.
+    fn dotted(&self, r: &Reference, recv: &str) -> Vec<SymbolId> {
+        // A container declared in this same file.
+        let here = SymbolId::of(&r.file, Some(recv), &r.name);
+        if self.by_id.contains_key(&here) {
+            return vec![here];
+        }
+
+        // An import's namespace alias: `import autoload 'u.vim' as u`
+        // makes `u.Foo()` a call into that file.
+        if let Some(to) = self.aliases.get(r.file.as_path()).and_then(|a| a.get(recv)) {
+            let id = SymbolId::of(to, None, &r.name);
+            if self.by_id.contains_key(&id) {
+                return vec![id];
+            }
+        }
+
+        // A container of that name elsewhere, where exactly one file
+        // declares it. `M.Menu.new()` names Menu without naming its
+        // file, so the class is found by name and the member on it.
+        if let Some(file) = self.unique_container(recv) {
+            let id = SymbolId::of(file, Some(recv), &r.name);
+            if self.by_id.contains_key(&id) {
+                return vec![id];
+            }
+
+            // A class with no `new` has the default constructor, which
+            // is no symbol and so has nothing to credit. Without this
+            // the call would fall through and credit every other
+            // class's constructor.
+            if r.name == "new" {
+                return Vec::new();
+            }
+        }
+
+        // The receiver's type is unknown, so any member of that name
+        // may be the target, and every one of them counts as used.
+        self.cloned(self.members.get(r.name.as_str()))
+    }
+
+    /// METHOD: The symbol a classic autoload name states, as
+    /// `foo#bar#Func` states `autoload/foo/bar.vim::Func`.
+    fn autoload(&self, name: &str) -> Option<SymbolId> {
+        let (prefix, func) = name.rsplit_once('#')?;
+        let path = PathBuf::from("autoload").join(format!("{}.vim", prefix.replace('#', "/")));
+        let id = SymbolId::of(&path, None, func);
+
+        self.by_id.contains_key(&id).then_some(id)
+    }
+
+    /// METHOD: The symbol a named import binds, under the name this
+    /// file calls it by.
+    fn named_import(&self, r: &Reference) -> Option<SymbolId> {
+        let (to, orig) = self.named.get(r.file.as_path())?.get(r.name.as_str())?;
+        let id = SymbolId::of(to, None, orig);
+
+        self.by_id.contains_key(&id).then_some(id)
+    }
+
+    /// METHOD: The one file declaring a container of this name, or
+    /// none when none or several do.
+    fn unique_container(&self, name: &str) -> Option<&Path> {
+        let ids = self.containers.get(name)?;
+        let [id] = ids.as_slice() else {
+            return None;
+        };
+
+        Some(self.by_id.get(*id)?.file.as_path())
+    }
+
+    fn cloned(&self, ids: Option<&Vec<&'a SymbolId>>) -> Vec<SymbolId> {
+        ids.map(|ids| ids.iter().map(|id| (*id).clone()).collect())
+            .unwrap_or_default()
+    }
+}
+
+/// FUNCTION: Resolve every reference of an analysis.
+pub fn all(a: &Analysis) -> Resolved {
+    let idx = Index::build(a);
+    let mut out = Resolved::default();
+
+    for (i, r) in a.refs.iter().enumerate() {
+        let ids = idx.candidates(r);
+
+        if ids.is_empty() {
+            out.unresolved += 1;
+            continue;
+        }
+
+        out.targets.insert(i, ids);
+    }
+
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::Import;
+
+    /// FUNCTION: A symbol, for a test that cares about one of its
+    /// fields and not the rest.
+    fn sym(file: &str, owner: Option<&str>, name: &str, kind: Kind) -> Symbol {
+        Symbol {
+            id: SymbolId::of(Path::new(file), owner, name),
+            kind,
+            name: name.to_string(),
+            file: PathBuf::from(file),
+            line: 1,
+            exported: false,
+            owner: owner.map(str::to_string),
+        }
+    }
+
+    /// FUNCTION: A reference from a file, with an optional receiver.
+    fn re(file: &str, recv: Option<&str>, name: &str) -> Reference {
+        Reference {
+            name: name.to_string(),
+            recv: recv.map(str::to_string),
+            file: PathBuf::from(file),
+            line: 1,
+            origin: Some(SymbolId::script(Path::new(file))),
+            target: None,
+        }
+    }
+
+    fn ids(a: &Analysis, r: &Reference) -> Vec<String> {
+        let idx = Index::build(a);
+        let mut out: Vec<String> = idx.candidates(r).iter().map(|i| i.to_string()).collect();
+        out.sort();
+        out
+    }
+
+    #[test]
+    fn a_unique_name_resolves_to_one_symbol() {
+        let a = Analysis {
+            syms: vec![sym("autoload/a.vim", None, "Helper", Kind::Function)],
+            ..Analysis::default()
+        };
+
+        assert_eq!(
+            ids(&a, &re("plugin/p.vim", None, "Helper")),
+            vec!["autoload/a.vim::Helper"]
+        );
+    }
+
+    #[test]
+    fn a_name_in_the_same_file_wins_over_one_elsewhere() {
+        let a = Analysis {
+            syms: vec![
+                sym("autoload/a.vim", None, "Helper", Kind::Function),
+                sym("plugin/p.vim", None, "Helper", Kind::Function),
+            ],
+            ..Analysis::default()
+        };
+
+        assert_eq!(
+            ids(&a, &re("plugin/p.vim", None, "Helper")),
+            vec!["plugin/p.vim::Helper"]
+        );
+    }
+
+    #[test]
+    fn an_ambiguous_name_resolves_to_every_candidate() {
+        let a = Analysis {
+            syms: vec![
+                sym("autoload/a.vim", None, "Helper", Kind::Function),
+                sym("autoload/b.vim", None, "Helper", Kind::Function),
+            ],
+            ..Analysis::default()
+        };
+
+        assert_eq!(
+            ids(&a, &re("plugin/p.vim", None, "Helper")),
+            vec!["autoload/a.vim::Helper", "autoload/b.vim::Helper"],
+            "what cannot be told apart cannot be reported"
+        );
+    }
+
+    #[test]
+    fn a_typed_receiver_resolves_to_its_class_member_alone() {
+        let a = Analysis {
+            syms: vec![
+                sym("autoload/m.vim", Some("Menu"), "Open", Kind::Method),
+                sym("autoload/p.vim", Some("Popup"), "Open", Kind::Method),
+                sym("autoload/m.vim", None, "Menu", Kind::Class),
+            ],
+            ..Analysis::default()
+        };
+
+        assert_eq!(
+            ids(&a, &re("plugin/p.vim", Some("Menu"), "Open")),
+            vec!["autoload/m.vim::Menu.Open"]
+        );
+    }
+
+    #[test]
+    fn an_untyped_receiver_resolves_to_every_member_of_the_name() {
+        let a = Analysis {
+            syms: vec![
+                sym("autoload/m.vim", Some("Menu"), "Close", Kind::Method),
+                sym("autoload/p.vim", Some("Popup"), "Close", Kind::Method),
+                sym("autoload/o.vim", None, "Close", Kind::Function),
+            ],
+            ..Analysis::default()
+        };
+
+        assert_eq!(
+            ids(&a, &re("plugin/p.vim", None, "Close")),
+            vec![
+                "autoload/m.vim::Menu.Close",
+                "autoload/o.vim::Close",
+                "autoload/p.vim::Popup.Close"
+            ],
+            "with no receiver the plain name matches everything"
+        );
+    }
+
+    #[test]
+    fn a_class_qualified_call_credits_only_its_own_member() {
+        let a = Analysis {
+            syms: vec![
+                sym("autoload/m.vim", None, "Menu", Kind::Class),
+                sym("autoload/m.vim", Some("Menu"), "new", Kind::Method),
+                sym("autoload/o.vim", None, "Other", Kind::Class),
+                sym("autoload/o.vim", Some("Other"), "new", Kind::Method),
+            ],
+            ..Analysis::default()
+        };
+
+        assert_eq!(
+            ids(&a, &re("plugin/p.vim", Some("Menu"), "new")),
+            vec!["autoload/m.vim::Menu.new"]
+        );
+    }
+
+    #[test]
+    fn a_default_constructor_credits_nothing() {
+        let a = Analysis {
+            syms: vec![
+                sym("autoload/m.vim", None, "Menu", Kind::Class),
+                sym("autoload/o.vim", None, "Other", Kind::Class),
+                sym("autoload/o.vim", Some("Other"), "new", Kind::Method),
+            ],
+            ..Analysis::default()
+        };
+
+        assert!(
+            ids(&a, &re("plugin/p.vim", Some("Menu"), "new")).is_empty(),
+            "Menu has no new of its own, and must not credit another class's"
+        );
+    }
+
+    #[test]
+    fn a_namespace_alias_resolves_into_the_file_it_names() {
+        let a = Analysis {
+            syms: vec![sym("autoload/util.vim", None, "Trim", Kind::Function)],
+            imports: vec![Import {
+                from: PathBuf::from("plugin/p.vim"),
+                to: PathBuf::from("autoload/util.vim"),
+                alias: Some("util".to_string()),
+                names: Vec::new(),
+            }],
+            ..Analysis::default()
+        };
+
+        assert_eq!(
+            ids(&a, &re("plugin/p.vim", Some("util"), "Trim")),
+            vec!["autoload/util.vim::Trim"]
+        );
+    }
+
+    #[test]
+    fn a_named_import_resolves_under_the_name_it_was_given() {
+        let a = Analysis {
+            syms: vec![sym("autoload/mod.vim", None, "Real", Kind::Function)],
+            imports: vec![Import {
+                from: PathBuf::from("plugin/p.vim"),
+                to: PathBuf::from("autoload/mod.vim"),
+                alias: None,
+                names: vec![("Alias".to_string(), "Real".to_string())],
+            }],
+            ..Analysis::default()
+        };
+
+        assert_eq!(
+            ids(&a, &re("plugin/p.vim", None, "Alias")),
+            vec!["autoload/mod.vim::Real"]
+        );
+    }
+
+    #[test]
+    fn the_classic_autoload_convention_resolves_by_its_path() {
+        let a = Analysis {
+            syms: vec![sym("autoload/foo/bar.vim", None, "Init", Kind::Function)],
+            ..Analysis::default()
+        };
+
+        assert_eq!(
+            ids(&a, &re("plugin/p.vim", None, "foo#bar#Init")),
+            vec!["autoload/foo/bar.vim::Init"]
+        );
+    }
+
+    #[test]
+    fn an_unmatched_reference_raises_the_unresolved_count() {
+        let a = Analysis {
+            syms: vec![sym("autoload/a.vim", None, "Helper", Kind::Function)],
+            refs: vec![re("plugin/p.vim", None, "Missing")],
+            ..Analysis::default()
+        };
+
+        let out = all(&a);
+        assert_eq!(out.unresolved, 1);
+        assert!(out.targets.is_empty());
+    }
+
+    #[test]
+    fn resolving_a_large_project_stays_linear() {
+        // Twenty thousand references against twenty thousand symbols.
+        // Walking every symbol for every reference would be four
+        // hundred million comparisons, which no bound below would
+        // survive; an index lookup is instant.
+        let n = 20_000;
+        let mut a = Analysis::default();
+
+        for i in 0..n {
+            let file = format!("autoload/f{i}.vim");
+            a.syms
+                .push(sym(&file, None, &format!("F{i}"), Kind::Function));
+            a.refs.push(re("plugin/p.vim", None, &format!("F{i}")));
+        }
+
+        let start = std::time::Instant::now();
+        let out = all(&a);
+        let spent = start.elapsed();
+
+        assert_eq!(out.targets.len(), n);
+        assert_eq!(out.unresolved, 0);
+        assert!(
+            spent < std::time::Duration::from_secs(2),
+            "resolution took {spent:?}, which is not an index lookup"
+        );
+    }
+}

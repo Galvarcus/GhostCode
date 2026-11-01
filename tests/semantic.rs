@@ -1,0 +1,274 @@
+//! What the analyzer reports for small projects, as the Vim suite
+//! asked it before the core moved to Rust.
+//!
+//! Each test here carries the files and the expectation of its Vim
+//! original in tests/test_ghostcode.vim, under the same name, so that
+//! the two can be read side by side.
+//!
+//! License: GNU GPL 3.0
+
+mod common;
+
+use common::TempDir;
+use ghostcode::report;
+
+/// FUNCTION: Scan a project of the given files and return each
+/// finding as `kind name`, sorted, as the Vim helper did.
+fn ghosts(tag: &str, files: &[(&str, &str)], exports_are_api: bool) -> Vec<String> {
+    let dir = TempDir::new(tag);
+    for (path, text) in files {
+        dir.write(path, text);
+    }
+
+    let cfg = common::cfg(exports_are_api);
+    let r = report::analyze(dir.path(), &cfg).expect("the scan runs");
+
+    let mut out: Vec<String> = r
+        .findings
+        .iter()
+        .map(|f| format!("{} {}", f.kind, f.name))
+        .collect();
+    out.sort();
+    out
+}
+
+/// FUNCTION: A plugin with an exported class and two exported
+/// functions. The plugin script uses one function and one method; the
+/// other function and method are exported and used by nothing.
+fn library() -> Vec<(&'static str, &'static str)> {
+    vec![
+        (
+            "autoload/lib.vim",
+            "vim9script\n\
+             export class Thing\n\
+             \x20 def Used()\n\
+             \x20 enddef\n\
+             \x20 def Unused()\n\
+             \x20 enddef\n\
+             endclass\n\
+             export def Helper()\n\
+             enddef\n\
+             export def Orphan()\n\
+             enddef\n",
+        ),
+        (
+            "plugin/p.vim",
+            "vim9script\n\
+             import autoload \"lib.vim\" as L\n\
+             L.Helper()\n\
+             var t = L.Thing.new()\n\
+             t.Used()\n",
+        ),
+    ]
+}
+
+#[test]
+fn an_export_is_api_by_default() {
+    assert!(ghosts("api-default", &library(), true).is_empty());
+}
+
+#[test]
+fn strict_mode_reports_an_export_that_nothing_uses() {
+    assert_eq!(
+        ghosts("strict-export", &library(), false),
+        vec!["function Orphan", "method Unused"]
+    );
+}
+
+#[test]
+fn a_symbol_nothing_reaches_is_reported_in_both_modes() {
+    let mut files = library();
+    files[0].1 = "vim9script\n\
+                  export class Thing\n\
+                  \x20 def Used()\n\
+                  \x20 enddef\n\
+                  \x20 def Unused()\n\
+                  \x20 enddef\n\
+                  endclass\n\
+                  export def Helper()\n\
+                  enddef\n\
+                  export def Orphan()\n\
+                  enddef\n\
+                  def Dead()\n\
+                  enddef\n";
+
+    assert_eq!(ghosts("dead-api", &files, true), vec!["function Dead"]);
+    assert_eq!(
+        ghosts("dead-strict", &files, false),
+        vec!["function Dead", "function Orphan", "method Unused"]
+    );
+}
+
+#[test]
+fn every_candidate_of_an_ambiguous_name_counts_as_used() {
+    let files = [
+        (
+            "autoload/a.vim",
+            "vim9script\n\
+             export class A\n\
+             \x20 def Close()\n\
+             \x20 enddef\n\
+             endclass\n\
+             export class B\n\
+             \x20 def Close()\n\
+             \x20 enddef\n\
+             \x20 def Other()\n\
+             \x20 enddef\n\
+             endclass\n",
+        ),
+        (
+            "plugin/p.vim",
+            "vim9script\n\
+             import autoload \"a.vim\" as X\n\
+             def Run(thing: any)\n\
+             \x20 thing.Close()\n\
+             enddef\n\
+             Run(X.A.new())\n\
+             Run(X.B.new())\n",
+        ),
+    ];
+
+    assert_eq!(
+        ghosts("ambiguous", &files, false),
+        vec!["method Other"],
+        "the call may reach either Close, so both count"
+    );
+}
+
+#[test]
+fn a_bare_name_that_two_files_define_counts_for_both() {
+    let files = [
+        (
+            "autoload/a.vim",
+            "vim9script\nexport def Helper()\nenddef\n",
+        ),
+        (
+            "autoload/b.vim",
+            "vim9script\nexport def Helper()\nenddef\n",
+        ),
+        (
+            "plugin/p.vim",
+            "vim9script\n\
+             import autoload \"a.vim\" as A\n\
+             import autoload \"b.vim\" as B\n\
+             call(\"Helper\", [])\n",
+        ),
+    ];
+
+    assert!(ghosts("bare-name", &files, false).is_empty());
+}
+
+#[test]
+fn a_class_qualified_call_reaches_only_its_own_member() {
+    let files = [
+        (
+            "autoload/m.vim",
+            "vim9script\n\
+             export class Menu\n\
+             \x20 def new(this.label: string)\n\
+             \x20 enddef\n\
+             endclass\n\
+             export class Other\n\
+             \x20 def new()\n\
+             \x20 enddef\n\
+             endclass\n",
+        ),
+        (
+            "plugin/p.vim",
+            "vim9script\nimport autoload \"m.vim\" as M\nM.Menu.new(\"x\")\n",
+        ),
+    ];
+
+    assert_eq!(
+        ghosts("class-qualified", &files, false),
+        vec!["class Other", "method new"]
+    );
+}
+
+#[test]
+fn a_default_constructor_credits_nothing() {
+    let files = [
+        (
+            "autoload/m.vim",
+            "vim9script\n\
+             export class Plain\n\
+             endclass\n\
+             export class Other\n\
+             \x20 def new()\n\
+             \x20 enddef\n\
+             endclass\n",
+        ),
+        (
+            "plugin/p.vim",
+            "vim9script\nimport autoload \"m.vim\" as M\nM.Plain.new()\n",
+        ),
+    ];
+
+    assert_eq!(
+        ghosts("default-ctor", &files, false),
+        vec!["class Other", "method new"],
+        "building Plain must not credit Other's constructor"
+    );
+}
+
+#[test]
+fn a_field_read_through_an_untyped_receiver_counts() {
+    let files = [
+        (
+            "autoload/f.vim",
+            "vim9script\n\
+             export class Item\n\
+             \x20 public var label: string\n\
+             endclass\n\
+             export class Entry\n\
+             \x20 public var label: string\n\
+             endclass\n",
+        ),
+        (
+            "plugin/p.vim",
+            "vim9script\n\
+             import autoload \"f.vim\" as F\n\
+             def Show(thing: any): string\n\
+             \x20 return thing.label\n\
+             enddef\n\
+             Show(F.Item.new())\n\
+             Show(F.Entry.new())\n",
+        ),
+    ];
+
+    assert!(ghosts("untyped-field", &files, false).is_empty());
+}
+
+#[test]
+fn a_name_used_in_a_concatenation_counts_as_used() {
+    let files = [(
+        "plugin/p.vim",
+        "vim9script\n\
+         const PREFIX: string = \"a-\"\n\
+         const SUFFIX: string = \"-z\"\n\
+         def Join(name: string): string\n\
+         \x20 return PREFIX .. name .. SUFFIX\n\
+         enddef\n\
+         Join(\"x\")\n",
+    )];
+
+    assert!(ghosts("concat", &files, false).is_empty());
+}
+
+#[test]
+fn a_name_used_in_a_parameter_default_counts_as_used() {
+    let files = [(
+        "plugin/p.vim",
+        "vim9script\n\
+         const ROOT: string = \"/x\"\n\
+         def Dirs(): list<string>\n\
+         \x20 return [ROOT]\n\
+         enddef\n\
+         def List(dirs: list<string> = Dirs(), n: number = 0): list<string>\n\
+         \x20 return dirs\n\
+         enddef\n\
+         List()\n",
+    )];
+
+    assert!(ghosts("param-default", &files, false).is_empty());
+}

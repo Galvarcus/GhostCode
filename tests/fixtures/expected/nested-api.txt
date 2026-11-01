@@ -1,0 +1,2 @@
+deps/Logger/plugin/logger.vim:7:1:[ghost] variable is_loaded
+deps/Logger/tests/harness.vim:28:1:[ghost] variable suites

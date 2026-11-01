@@ -1,0 +1,924 @@
+{
+  "schema": 1,
+  "root": "/Users/joe/Development/GhostCode/tests/fixtures/corpora/nested",
+  "findings": [
+    {
+      "class": "ghost",
+      "kind": "variable",
+      "name": "is_loaded",
+      "file": "deps/Logger/import/Logger/config.vim",
+      "line": 7,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "class",
+      "name": "Config",
+      "file": "deps/Logger/import/Logger/config.vim",
+      "line": 19,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "field",
+      "name": "key",
+      "file": "deps/Logger/import/Logger/config.vim",
+      "line": 20,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "method",
+      "name": "new",
+      "file": "deps/Logger/import/Logger/config.vim",
+      "line": 24,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "method",
+      "name": "Name",
+      "file": "deps/Logger/import/Logger/config.vim",
+      "line": 29,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "method",
+      "name": "HasOwn",
+      "file": "deps/Logger/import/Logger/config.vim",
+      "line": 34,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "method",
+      "name": "Get",
+      "file": "deps/Logger/import/Logger/config.vim",
+      "line": 40,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "method",
+      "name": "GetNumber",
+      "file": "deps/Logger/import/Logger/config.vim",
+      "line": 49,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "method",
+      "name": "GetBool",
+      "file": "deps/Logger/import/Logger/config.vim",
+      "line": 61,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "method",
+      "name": "GetString",
+      "file": "deps/Logger/import/Logger/config.vim",
+      "line": 72,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "variable",
+      "name": "is_loaded",
+      "file": "deps/Logger/import/Logger/logfile.vim",
+      "line": 7,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "variable",
+      "name": "session",
+      "file": "deps/Logger/import/Logger/logfile.vim",
+      "line": 19,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "class",
+      "name": "LogFile",
+      "file": "deps/Logger/import/Logger/logfile.vim",
+      "line": 22,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "field",
+      "name": "key",
+      "file": "deps/Logger/import/Logger/logfile.vim",
+      "line": 23,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "field",
+      "name": "folder",
+      "file": "deps/Logger/import/Logger/logfile.vim",
+      "line": 24,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "field",
+      "name": "path",
+      "file": "deps/Logger/import/Logger/logfile.vim",
+      "line": 25,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "method",
+      "name": "new",
+      "file": "deps/Logger/import/Logger/logfile.vim",
+      "line": 27,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "method",
+      "name": "Write",
+      "file": "deps/Logger/import/Logger/logfile.vim",
+      "line": 33,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "method",
+      "name": "Prune",
+      "file": "deps/Logger/import/Logger/logfile.vim",
+      "line": 51,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "variable",
+      "name": "is_loaded",
+      "file": "deps/Logger/import/Logger/logger.vim",
+      "line": 7,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "variable",
+      "name": "LEVEL_UNSET",
+      "file": "deps/Logger/import/Logger/logger.vim",
+      "line": 41,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "variable",
+      "name": "SEVERITY",
+      "file": "deps/Logger/import/Logger/logger.vim",
+      "line": 42,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "variable",
+      "name": "TAG",
+      "file": "deps/Logger/import/Logger/logger.vim",
+      "line": 43,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "variable",
+      "name": "LABEL",
+      "file": "deps/Logger/import/Logger/logger.vim",
+      "line": 49,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "class",
+      "name": "Logger",
+      "file": "deps/Logger/import/Logger/logger.vim",
+      "line": 57,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "field",
+      "name": "plugin",
+      "file": "deps/Logger/import/Logger/logger.vim",
+      "line": 58,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "field",
+      "name": "script",
+      "file": "deps/Logger/import/Logger/logger.vim",
+      "line": 59,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "field",
+      "name": "level",
+      "file": "deps/Logger/import/Logger/logger.vim",
+      "line": 60,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "field",
+      "name": "config",
+      "file": "deps/Logger/import/Logger/logger.vim",
+      "line": 61,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "field",
+      "name": "file",
+      "file": "deps/Logger/import/Logger/logger.vim",
+      "line": 62,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "field",
+      "name": "fileFailed",
+      "file": "deps/Logger/import/Logger/logger.vim",
+      "line": 63,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "method",
+      "name": "new",
+      "file": "deps/Logger/import/Logger/logger.vim",
+      "line": 65,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "method",
+      "name": "Prefix",
+      "file": "deps/Logger/import/Logger/logger.vim",
+      "line": 71,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "method",
+      "name": "CallerName",
+      "file": "deps/Logger/import/Logger/logger.vim",
+      "line": 81,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "method",
+      "name": "Info",
+      "file": "deps/Logger/import/Logger/logger.vim",
+      "line": 96,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "method",
+      "name": "Warn",
+      "file": "deps/Logger/import/Logger/logger.vim",
+      "line": 102,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "method",
+      "name": "Error",
+      "file": "deps/Logger/import/Logger/logger.vim",
+      "line": 108,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "method",
+      "name": "Exception",
+      "file": "deps/Logger/import/Logger/logger.vim",
+      "line": 116,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "method",
+      "name": "Fmt",
+      "file": "deps/Logger/import/Logger/logger.vim",
+      "line": 136,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "method",
+      "name": "Try",
+      "file": "deps/Logger/import/Logger/logger.vim",
+      "line": 145,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "method",
+      "name": "_EchoLevel",
+      "file": "deps/Logger/import/Logger/logger.vim",
+      "line": 157,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "method",
+      "name": "_Shown",
+      "file": "deps/Logger/import/Logger/logger.vim",
+      "line": 164,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "method",
+      "name": "_Logged",
+      "file": "deps/Logger/import/Logger/logger.vim",
+      "line": 169,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "method",
+      "name": "_Emit",
+      "file": "deps/Logger/import/Logger/logger.vim",
+      "line": 176,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "method",
+      "name": "_WriteFile",
+      "file": "deps/Logger/import/Logger/logger.vim",
+      "line": 202,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "variable",
+      "name": "is_loaded",
+      "file": "deps/Logger/import/Logger/messages.vim",
+      "line": 7,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "variable",
+      "name": "history",
+      "file": "deps/Logger/import/Logger/messages.vim",
+      "line": 17,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "variable",
+      "name": "pending",
+      "file": "deps/Logger/import/Logger/messages.vim",
+      "line": 18,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "variable",
+      "name": "HISTORY_MAX",
+      "file": "deps/Logger/import/Logger/messages.vim",
+      "line": 20,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "variable",
+      "name": "HIGHLIGHT",
+      "file": "deps/Logger/import/Logger/messages.vim",
+      "line": 21,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "Record",
+      "file": "deps/Logger/import/Logger/messages.vim",
+      "line": 30,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "Echo",
+      "file": "deps/Logger/import/Logger/messages.vim",
+      "line": 38,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "Flush",
+      "file": "deps/Logger/import/Logger/messages.vim",
+      "line": 47,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "History",
+      "file": "deps/Logger/import/Logger/messages.vim",
+      "line": 55,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "Pending",
+      "file": "deps/Logger/import/Logger/messages.vim",
+      "line": 60,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "Clear",
+      "file": "deps/Logger/import/Logger/messages.vim",
+      "line": 65,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "Show",
+      "file": "deps/Logger/import/Logger/messages.vim",
+      "line": 71,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "EchoNow",
+      "file": "deps/Logger/import/Logger/messages.vim",
+      "line": 88,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "variable",
+      "name": "is_loaded",
+      "file": "deps/Logger/plugin/logger.vim",
+      "line": 7,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "Reset",
+      "file": "deps/Logger/tests/fixtures.vim",
+      "line": 14,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "LogLines",
+      "file": "deps/Logger/tests/fixtures.vim",
+      "line": 26,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "variable",
+      "name": "suites",
+      "file": "deps/Logger/tests/harness.vim",
+      "line": 28,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "Test_key_is_lowercase_and_safe",
+      "file": "deps/Logger/tests/test_config.vim",
+      "line": 13,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "Test_plugin_value_overrides_global_and_default",
+      "file": "deps/Logger/tests/test_config.vim",
+      "line": 19,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "Test_global_only_skips_plugin_value",
+      "file": "deps/Logger/tests/test_config.vim",
+      "line": 32,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "Test_wrong_type_returns_default",
+      "file": "deps/Logger/tests/test_config.vim",
+      "line": 42,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "RunAll",
+      "file": "deps/Logger/tests/test_config.vim",
+      "line": 58,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "variable",
+      "name": "SESSION_NAME",
+      "file": "deps/Logger/tests/test_logfile.vim",
+      "line": 12,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "Test_creates_folder_and_appends",
+      "file": "deps/Logger/tests/test_logfile.vim",
+      "line": 14,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "Test_keeps_only_retention_old_files",
+      "file": "deps/Logger/tests/test_logfile.vim",
+      "line": 26,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "Test_retention_zero_keeps_all",
+      "file": "deps/Logger/tests/test_logfile.vim",
+      "line": 48,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "Test_new_folder_starts_new_file",
+      "file": "deps/Logger/tests/test_logfile.vim",
+      "line": 59,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "Test_throws_when_folder_is_a_file",
+      "file": "deps/Logger/tests/test_logfile.vim",
+      "line": 72,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "RunAll",
+      "file": "deps/Logger/tests/test_logfile.vim",
+      "line": 85,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "variable",
+      "name": "STAMP",
+      "file": "deps/Logger/tests/test_logger.vim",
+      "line": 18,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "FirstLines",
+      "file": "deps/Logger/tests/test_logger.vim",
+      "line": 20,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "class",
+      "name": "Probe",
+      "file": "deps/Logger/tests/test_logger.vim",
+      "line": 24,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "field",
+      "name": "log",
+      "file": "deps/Logger/tests/test_logger.vim",
+      "line": 25,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "method",
+      "name": "new",
+      "file": "deps/Logger/tests/test_logger.vim",
+      "line": 26,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "method",
+      "name": "Speak",
+      "file": "deps/Logger/tests/test_logger.vim",
+      "line": 28,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "Test_prefix_omits_empty_parts",
+      "file": "deps/Logger/tests/test_logger.vim",
+      "line": 33,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "Test_caller_name_of_function_and_method",
+      "file": "deps/Logger/tests/test_logger.vim",
+      "line": 39,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "Test_tags",
+      "file": "deps/Logger/tests/test_logger.vim",
+      "line": 52,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "Test_level_limits_echo",
+      "file": "deps/Logger/tests/test_logger.vim",
+      "line": 61,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "Test_level_lookup_order",
+      "file": "deps/Logger/tests/test_logger.vim",
+      "line": 75,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "Test_echo_off_for_one_plugin",
+      "file": "deps/Logger/tests/test_logger.vim",
+      "line": 87,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "Test_file_is_off_by_default",
+      "file": "deps/Logger/tests/test_logger.vim",
+      "line": 96,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "Test_file_line_format",
+      "file": "deps/Logger/tests/test_logger.vim",
+      "line": 102,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "Test_log_level_limits_file",
+      "file": "deps/Logger/tests/test_logger.vim",
+      "line": 113,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "Test_file_without_echo",
+      "file": "deps/Logger/tests/test_logger.vim",
+      "line": 127,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "Test_exception_has_throwpoint",
+      "file": "deps/Logger/tests/test_logger.vim",
+      "line": 139,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "Test_fmt_is_recorded_and_logged_once",
+      "file": "deps/Logger/tests/test_logger.vim",
+      "line": 158,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "Test_fmt_is_caught_in_another_script",
+      "file": "deps/Logger/tests/test_logger.vim",
+      "line": 174,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "Test_try_returns_result_or_none",
+      "file": "deps/Logger/tests/test_logger.vim",
+      "line": 187,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "Test_write_failure_warns_once",
+      "file": "deps/Logger/tests/test_logger.vim",
+      "line": 199,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "RunAll",
+      "file": "deps/Logger/tests/test_logger.vim",
+      "line": 216,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "Test_history_keeps_last_200",
+      "file": "deps/Logger/tests/test_messages.vim",
+      "line": 13,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "Test_flush_echoes_queue_in_order",
+      "file": "deps/Logger/tests/test_messages.vim",
+      "line": 24,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "Test_command_shows_history",
+      "file": "deps/Logger/tests/test_messages.vim",
+      "line": 37,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "RunAll",
+      "file": "deps/Logger/tests/test_messages.vim",
+      "line": 54,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "variable",
+      "name": "log",
+      "file": "deps/Logger/tests/thrower.vim",
+      "line": 12,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "function",
+      "name": "GetThat",
+      "file": "deps/Logger/tests/thrower.vim",
+      "line": 15,
+      "col": 1,
+      "lang": "vim9"
+    }
+  ]
+}

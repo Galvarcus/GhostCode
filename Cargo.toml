@@ -1,0 +1,29 @@
+[package]
+name = "ghostcode"
+version = "0.1.0"
+edition = "2021"
+description = "Finds unreferenced code in Vim9 plugins."
+license = "GPL-3.0"
+repository = "https://github.com/Galvarcus/GhostCode"
+
+# The fixture corpora are copies of other projects' Vim scripts, kept to
+# prove parity against the analyzer this replaces. They are 185 of the
+# 238 files the crate would otherwise carry, and nobody installing the
+# binary needs them.
+exclude = ["tests/fixtures/**", ".superpowers/**", "docs/superpowers/**"]
+
+[lib]
+name = "ghostcode"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ghostcode"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.104"
+clap = { version = "4.6.7", features = ["derive"] }
+ignore = "0.4.34"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+toml = "1.1.8"
