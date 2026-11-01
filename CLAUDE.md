@@ -87,6 +87,10 @@ Always ask before pushing.
 - `plugin/ghostcode.vim` defines the command and sets no defaults. A
   default assigned there cannot be told from a value the user chose,
   and would override a project's `ghostcode.toml` everywhere.
+- Both Vim scripts guard on `v:version < 901`, where the
+  `vim9script-plugin` skill states 902. The README and the release
+  promise Vim 9.1, and the front end needs less of Vim than the deleted
+  analyzer did, so raising the guard would drop a supported Vim.
 - `autoload/ghostcode.vim` finds the binary, runs it, and fills the
   quickfix list. Every failure goes through Logger, never through
   `:throw`.
