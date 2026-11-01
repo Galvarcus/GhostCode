@@ -1,0 +1,190 @@
+//! Vim9 declarations: what a file declares, and what it does not.
+//!
+//! License: GNU GPL 3.0
+
+mod common;
+
+use std::path::Path;
+
+use common::cfg;
+use common::source;
+use ghostcode::lang::vim9::Vim9;
+use ghostcode::lang::Lang;
+use ghostcode::model::Analysis;
+use ghostcode::model::Kind;
+
+/// FUNCTION: Scan one file and return what it declared.
+fn scan(rel: &str, text: &str) -> Analysis {
+    let mut found = Analysis::default();
+    Vim9.scan(&source(rel, text), &mut found)
+        .expect("a scan never fails on one file");
+    found
+}
+
+/// FUNCTION: Each declaration as `kind name`, in the order found.
+fn decls(a: &Analysis) -> Vec<String> {
+    a.syms
+        .iter()
+        .map(|s| format!("{} {}", s.kind, s.name))
+        .collect()
+}
+
+#[test]
+fn def_and_export_def_are_functions() {
+    let a = scan(
+        "autoload/p.vim",
+        "vim9script\ndef Private()\nenddef\nexport def Public()\nenddef\n",
+    );
+
+    assert_eq!(decls(&a), vec!["function Private", "function Public"]);
+    assert!(!a.syms[0].exported);
+    assert!(a.syms[1].exported);
+}
+
+#[test]
+fn a_class_is_recorded_with_its_extends_and_implements() {
+    let a = scan(
+        "autoload/p.vim",
+        "vim9script\nexport class Item extends Base implements Thing\nendclass\n",
+    );
+
+    assert_eq!(decls(&a), vec!["class Item"]);
+    assert!(a.syms[0].exported);
+    assert_eq!(a.syms[0].line, 2);
+}
+
+#[test]
+fn enum_values_are_symbols_owned_by_their_enum() {
+    let a = scan(
+        "autoload/p.vim",
+        "vim9script\nenum Color\n  Red, Green\n  Blue('b')\nendenum\n",
+    );
+
+    assert_eq!(
+        decls(&a),
+        vec![
+            "enum Color",
+            "enum_value Red",
+            "enum_value Green",
+            "enum_value Blue",
+        ]
+    );
+    assert_eq!(a.syms[1].owner.as_deref(), Some("Color"));
+}
+
+#[test]
+fn a_method_and_a_static_method_belong_to_their_class() {
+    let a = scan(
+        "autoload/p.vim",
+        "vim9script\nclass Menu\n  def Open()\n  enddef\n  static def Make()\n  enddef\nendclass\n",
+    );
+
+    assert_eq!(decls(&a), vec!["class Menu", "method Open", "method Make"]);
+    assert_eq!(a.syms[1].owner.as_deref(), Some("Menu"));
+    assert_eq!(a.syms[2].owner.as_deref(), Some("Menu"));
+}
+
+#[test]
+fn a_member_of_an_exported_class_is_api_unless_underscored() {
+    let a = scan(
+        "autoload/p.vim",
+        "vim9script\nexport class Menu\n  var width: number\n  var _depth: number\n  def Open()\n  enddef\n  def _Shut()\n  enddef\nendclass\n",
+    );
+
+    assert_eq!(
+        decls(&a),
+        vec![
+            "class Menu",
+            "field width",
+            "field _depth",
+            "method Open",
+            "method _Shut",
+        ]
+    );
+
+    let api: Vec<bool> = a.syms.iter().map(|s| Vim9.is_api(s, &cfg(true))).collect();
+    assert_eq!(api, vec![true, true, false, true, false]);
+}
+
+#[test]
+fn nothing_is_api_when_the_setting_is_off() {
+    let a = scan(
+        "autoload/p.vim",
+        "vim9script\nexport def Public()\nenddef\n",
+    );
+
+    assert!(!Vim9.is_api(&a.syms[0], &cfg(false)));
+}
+
+#[test]
+fn a_script_level_var_is_a_variable_and_a_local_var_is_not() {
+    let a = scan(
+        "autoload/p.vim",
+        "vim9script\nvar count = 0\ndef F()\n  var local = 1\nenddef\n",
+    );
+
+    assert_eq!(decls(&a), vec!["variable count", "function F"]);
+}
+
+#[test]
+fn an_interface_signature_declares_no_symbol_of_its_own() {
+    let a = scan(
+        "autoload/p.vim",
+        "vim9script\nexport interface Thing\n  def Do()\nendinterface\n",
+    );
+
+    assert_eq!(
+        decls(&a),
+        vec!["interface Thing"],
+        "the implementations carry the methods"
+    );
+}
+
+#[test]
+fn an_entry_script_directory_roots_its_top_level_code() {
+    let root = Path::new("/project");
+
+    assert!(Vim9.is_entry(root, Path::new("plugin/p.vim")));
+    assert!(Vim9.is_entry(root, Path::new("tests/test_p.vim")));
+    assert!(Vim9.is_entry(root, Path::new("after/syntax/p.vim")));
+    assert!(!Vim9.is_entry(root, Path::new("autoload/p.vim")));
+    assert!(!Vim9.is_entry(root, Path::new("import/p.vim")));
+}
+
+#[test]
+fn a_legacy_function_file_yields_no_symbols_and_no_error() {
+    let a = scan(
+        "autoload/old.vim",
+        "function! s:Helper()\n  echo 'hi'\nendfunction\n",
+    );
+
+    assert!(
+        decls(&a).is_empty(),
+        "legacy script declares no Vim9 symbol"
+    );
+}
+
+#[test]
+fn an_unparseable_line_does_not_lose_the_rest_of_the_file() {
+    let a = scan(
+        "autoload/p.vim",
+        "vim9script\ndef ((((\nenddef\nexport def Good()\nenddef\n",
+    );
+
+    assert!(
+        decls(&a).contains(&"function Good".to_string()),
+        "a broken statement costs its own line only: {:?}",
+        decls(&a)
+    );
+}
+
+#[test]
+fn a_declaration_keeps_the_physical_line_it_sits_on() {
+    let a = scan(
+        "autoload/p.vim",
+        "vim9script\n\n\ndef F(\n  x: number\n)\nenddef\n",
+    );
+
+    assert_eq!(a.syms[0].line, 4, "the line the def opens on");
+    assert_eq!(a.syms[0].kind, Kind::Function);
+}

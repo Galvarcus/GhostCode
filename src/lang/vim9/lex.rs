@@ -30,6 +30,44 @@ pub struct Tok {
 
 // The operators of more than one character, longest first, so that `..`
 // never reads as two member dots and `==#` never as `==` and `#`.
+// The words that open or close a block. A bracket left unclosed by a
+// broken line must not swallow the file, so one of these at the start
+// of a line ends the statement before it, whatever the bracket depth.
+const RESYNC: &[&str] = &[
+    "vim9script",
+    "def",
+    "enddef",
+    "class",
+    "endclass",
+    "enum",
+    "endenum",
+    "interface",
+    "endinterface",
+    "export",
+    "var",
+    "const",
+    "final",
+    "if",
+    "elseif",
+    "else",
+    "endif",
+    "for",
+    "endfor",
+    "while",
+    "endwhile",
+    "try",
+    "catch",
+    "finally",
+    "endtry",
+    "return",
+    "function",
+    "endfunction",
+    "import",
+    "augroup",
+    "command",
+    "autocmd",
+];
+
 const OPS: &[&str] = &[
     "=<<", "...", "->>", "==#", "==?", "!=#", "!=?", "=~#", "=~?", "!~#", "!~?", "<=#", ">=#",
     "..=", "<<=", ">>=", "->", "=>", "..", "==", "!=", "<=", ">=", "&&", "||", "+=", "-=", "*=",
@@ -70,6 +108,9 @@ pub fn tokens(text: &str) -> Vec<Tok> {
             pop_newline(&mut toks);
         } else if rest.starts_with("->") || rest.starts_with("|") {
             pop_newline(&mut toks);
+        } else if depth > 0 && opens_block(rest) {
+            depth = 0;
+            push_newline(&mut toks, line.saturating_sub(1));
         }
 
         lex_line(rest, line, &mut toks, &mut depth, &mut heredoc);
@@ -83,6 +124,16 @@ pub fn tokens(text: &str) -> Vec<Tok> {
 
     push_newline(&mut toks, text.lines().count() as u32);
     toks
+}
+
+/// FUNCTION: True when a line opens or closes a block, which ends any
+/// statement a broken line left open.
+fn opens_block(line: &str) -> bool {
+    let word: String = line
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .collect();
+    RESYNC.contains(&word.as_str())
 }
 
 /// FUNCTION: Tokenise one logical line's worth of text.

@@ -53,5 +53,5 @@ pub fn for_path(path: &Path) -> Option<&'static dyn Lang> {
 
 /// FUNCTION: Every language the binary knows.
 fn registry() -> &'static [&'static dyn Lang] {
-    &[]
+    &[&vim9::Vim9]
 }

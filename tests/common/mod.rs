@@ -86,3 +86,26 @@ impl Drop for TempDir {
         let _ = std::fs::remove_dir_all(&self.path);
     }
 }
+
+/// FUNCTION: A source as discovery would have produced it, for a test
+/// that scans text rather than a directory.
+pub fn source(rel: &str, text: &str) -> ghostcode::project::Source {
+    ghostcode::project::Source {
+        path: PathBuf::from("/project").join(rel),
+        rel: PathBuf::from(rel),
+        text: text.to_string(),
+        lang: "vim9",
+    }
+}
+
+/// FUNCTION: The settings a test needs, with everything but the
+/// exports rule left at its default.
+pub fn cfg(exports_are_api: bool) -> ghostcode::config::Config {
+    ghostcode::config::Config {
+        exports_are_api,
+        ignore: Vec::new(),
+        entry: Vec::new(),
+        no_ignore: false,
+        findings: ghostcode::config::FindingFlags::default(),
+    }
+}
