@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "root": "/Users/joe/Development/GhostCode/tests/fixtures/corpora/nested",
+  "findings": [
+    {
+      "class": "ghost",
+      "kind": "variable",
+      "name": "is_loaded",
+      "file": "deps/Logger/plugin/logger.vim",
+      "line": 7,
+      "col": 1,
+      "lang": "vim9"
+    },
+    {
+      "class": "ghost",
+      "kind": "variable",
+      "name": "suites",
+      "file": "deps/Logger/tests/harness.vim",
+      "line": 28,
+      "col": 1,
+      "lang": "vim9"
+    }
+  ]
+}

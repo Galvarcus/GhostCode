@@ -1,0 +1,10 @@
+# Ghostcode's settings for scanning Ghostcode itself.
+#
+# The exports of Ghostcode serve its own files alone, so an export that
+# nothing uses is a finding like any other. The fixture corpora are other
+# projects' code, recorded as golden output, and a scan of this repository
+# must not read them.
+# License: GNU GPL 3.0
+
+exports_are_api = false
+ignore = ["tests/fixtures/**"]

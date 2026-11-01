@@ -74,8 +74,9 @@ jobs:
       - name: Run Ghostcode on its own code
         run: |
           rm -rf /tmp/self ghostcode_results.txt
-          mkdir /tmp/self
-          cp -r autoload plugin tests /tmp/self/
+          mkdir -p /tmp/self/tests
+          cp -r autoload plugin /tmp/self/
+          cp tests/*.vim /tmp/self/tests/
 
           set +e
           vim -u NONE -N -es \
