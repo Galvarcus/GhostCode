@@ -45,10 +45,14 @@ fn a_dotted_call_records_its_receiver() {
 }
 
 #[test]
-fn a_call_on_this_records_this_as_the_receiver() {
+fn a_call_on_this_records_its_class_as_the_receiver() {
     let text = "vim9script\nclass C\n  def F()\n    this.Shut()\n  enddef\nendclass\n";
 
-    assert_eq!(recv_of(text, "Shut"), Some("this".to_string()));
+    assert_eq!(
+        recv_of(text, "Shut"),
+        Some("C".to_string()),
+        "the receiver is the type, which for this is the class"
+    );
 }
 
 #[test]
