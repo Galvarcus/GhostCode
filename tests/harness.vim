@@ -2,8 +2,9 @@ vim9script
 
 ##############################################################################
 # Plugin_Name: Ghostcode
-# tests/harness.vim: runs every test of Ghostcode and writes the result to
-# tests/results.txt. From the root of the repository run
+# tests/harness.vim: runs every test of Ghostcode's front end and writes the
+# result to tests/results.txt. The analysis itself is tested by `cargo test`.
+# From the root of the repository run
 #
 #   vim -es -u NONE -N --cmd 'set rtp+=.,/path/to/Logger' \
 #     -c 'runtime plugin/ghostcode.vim' \
@@ -14,10 +15,14 @@ vim9script
 # License: GNU GPL 3.0
 ##############################################################################
 
-import './test_ghostcode.vim' as TG
+# The results of the run before this one must not survive it: a suite that
+# aborts writes nothing, and a stale file would read as a pass.
+delete('tests/results.txt')
+
+import './test_frontend.vim' as TF
 
 var suites: list<func> = [
-  TG.RunAll,
+  TF.RunAll,
 ]
 
 for RunSuite in suites

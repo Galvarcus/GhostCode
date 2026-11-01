@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+#
+# tests/stub/ghostcode: stands in for the binary, so that the front end
+# can be tested without a release build. It writes its arguments to
+# $GHOSTCODE_STUB_ARGS, prints $GHOSTCODE_STUB_OUT, and exits with
+# $GHOSTCODE_STUB_EXIT.
+#
+# License: GNU GPL 3.0
+
+if [ -n "${GHOSTCODE_STUB_ARGS:-}" ]; then
+  printf '%s\n' "$@" > "$GHOSTCODE_STUB_ARGS"
+fi
+
+printf '%s' "${GHOSTCODE_STUB_OUT:-}"
+
+exit "${GHOSTCODE_STUB_EXIT:-0}"
