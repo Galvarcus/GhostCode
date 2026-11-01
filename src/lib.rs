@@ -4,6 +4,8 @@
 
 pub mod cli;
 pub mod config;
+pub mod lang;
+pub mod model;
 pub mod project;
 
 /// The program's name, stated once so that no other file repeats it.
