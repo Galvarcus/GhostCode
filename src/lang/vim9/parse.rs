@@ -17,6 +17,7 @@ use crate::model::Reference;
 use crate::model::Sink;
 use crate::model::Symbol;
 use crate::model::SymbolId;
+use crate::model::Text;
 
 // A modifier that may stand before a declaration and says nothing
 // about what is declared.
@@ -463,9 +464,89 @@ fn unquote(text: &str) -> String {
     chars.collect()
 }
 
+// The language's own words. None of them can name a symbol, because
+// Vim9 will not let a declaration take one of these names, so emitting
+// them as references would only inflate the count of what resolved to
+// nothing.
+const KEYWORDS: &[&str] = &[
+    "vim9script",
+    "def",
+    "enddef",
+    "class",
+    "endclass",
+    "endenum",
+    "interface",
+    "endinterface",
+    "enum",
+    "export",
+    "import",
+    "from",
+    "as",
+    "autoload",
+    "var",
+    "const",
+    "final",
+    "static",
+    "public",
+    "protected",
+    "private",
+    "abstract",
+    "this",
+    "super",
+    "if",
+    "elseif",
+    "else",
+    "endif",
+    "for",
+    "endfor",
+    "while",
+    "endwhile",
+    "try",
+    "catch",
+    "finally",
+    "endtry",
+    "throw",
+    "return",
+    "break",
+    "continue",
+    "in",
+    "echo",
+    "echomsg",
+    "echoerr",
+    "echohl",
+    "echon",
+    "true",
+    "false",
+    "null",
+    "silent",
+    "unsilent",
+    "legacy",
+    "function",
+    "endfunction",
+    "let",
+    "unlet",
+    "command",
+    "augroup",
+    "autocmd",
+    "set",
+    "setlocal",
+    "normal",
+    "enum_value",
+];
+
 // The builtins that take a name as text rather than as code, so that
 // the name inside the string is a call site like any other.
-const BY_NAME: &[&str] = &["call", "function", "funcref", "execute", "eval"];
+const BY_NAME: &[&str] = &[
+    "call",
+    "function",
+    "funcref",
+    "execute",
+    "eval",
+    // Every script opens with `exists('s:is_loaded')`, which reads the
+    // variable as surely as any expression does.
+    "exists",
+    "exists_compiled",
+];
 
 /// FUNCTION: Record every reference a file makes: calls, member
 /// accesses, funcrefs read as values, type annotations, and the names
@@ -552,6 +633,10 @@ impl Collect<'_> {
     /// METHOD: Record a name, with its receiver where a dot gives it
     /// one, as in `menu.Open()`, `this.Shut()`, or `Color.Red`.
     fn ident(&mut self, stmt: &[Tok], i: usize, tok: &Tok) {
+        if KEYWORDS.contains(&tok.text.as_str()) {
+            return;
+        }
+
         // A name against a colon is a parameter or a key, not a use:
         // `{callback: OnDone}` uses OnDone, not callback.
         if stmt.get(i + 1).is_some_and(|t| t.text == ":") && !is_type_position(stmt, i) {
@@ -570,8 +655,11 @@ impl Collect<'_> {
         });
     }
 
-    /// METHOD: Record the names inside a string that a builtin takes
-    /// as text, and nothing from any other string.
+    /// METHOD: Record what a string holds. A builtin that takes a name
+    /// as text names it outright, so those become references. Every
+    /// other string is kept as text, to be matched against the
+    /// project's own names once they are all known: Vim evaluates text
+    /// in places no parser sees, and a name used only there is used.
     fn text(&mut self, stmt: &[Tok], i: usize, tok: &Tok) {
         let by_name = stmt[..i]
             .iter()
@@ -580,6 +668,12 @@ impl Collect<'_> {
             .any(|t| BY_NAME.contains(&t.text.as_str()));
 
         if !by_name {
+            self.out.text(Text {
+                text: unquote(&tok.text),
+                file: self.file.to_path_buf(),
+                line: tok.line,
+                origin: Some(self.origin.clone()),
+            });
             return;
         }
 
@@ -665,9 +759,8 @@ fn is_type_position(stmt: &[Tok], i: usize) -> bool {
     depth == 0
 }
 
-/// FUNCTION: Every identifier inside a piece of text, for the builtins
-/// that take a name as a string.
-fn identifiers(text: &str) -> Vec<String> {
+/// FUNCTION: Every identifier inside a piece of text.
+pub fn identifiers(text: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut cur = String::new();
 

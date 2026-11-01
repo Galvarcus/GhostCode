@@ -58,12 +58,12 @@ pub fn discover(root: &Path, cfg: &Config) -> anyhow::Result<Found> {
         .canonicalize()
         .with_context(|| format!("{}: cannot be resolved", root.display()))?;
 
+    // A hidden directory is skipped, as Vim's own globpath skips one:
+    // Vim sources nothing from `.github`, and a script there is run by
+    // hand or by CI, so nothing in the project roots it. A project that
+    // wants such a file scanned names it in `entry`, below.
     let mut walk = WalkBuilder::new(&root);
-    walk.follow_links(false)
-        .hidden(false)
-        .parents(false)
-        .require_git(true)
-        .filter_entry(|e| e.file_name() != ".git");
+    walk.follow_links(false).parents(false).require_git(true);
 
     if cfg.no_ignore {
         walk.git_ignore(false)
@@ -134,6 +134,36 @@ pub fn discover(root: &Path, cfg: &Config) -> anyhow::Result<Found> {
                     why: SkipReason::NotUtf8,
                 }),
             },
+            Err(_) => found.skipped.push(Skipped {
+                path,
+                why: SkipReason::Unreadable,
+            }),
+        }
+    }
+
+    // A file named as an entry is scanned wherever it sits, because
+    // naming it an entry point says it is the project's own code.
+    for rel in &cfg.entry {
+        let path = root.join(rel);
+
+        if seen.contains(&path) || !path.is_file() {
+            continue;
+        }
+
+        let Some(lang) = lang_of(&path) else {
+            continue;
+        };
+
+        match std::fs::read_to_string(&path) {
+            Ok(text) => {
+                seen.insert(path.clone());
+                found.sources.push(Source {
+                    path,
+                    rel: rel.clone(),
+                    text,
+                    lang,
+                });
+            }
             Err(_) => found.skipped.push(Skipped {
                 path,
                 why: SkipReason::Unreadable,

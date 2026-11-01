@@ -2,6 +2,7 @@
 //!
 //! License: GNU GPL 3.0
 
+use serde::Serialize;
 use std::collections::HashMap;
 use std::fmt;
 use std::path::Path;
@@ -9,7 +10,8 @@ use std::path::PathBuf;
 
 /// What a symbol is. The text of each one is a contract: it is the word
 /// the quickfix line carries, which CI and every front end read.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Kind {
     Function,
     Method,
@@ -40,7 +42,8 @@ impl fmt::Display for Kind {
 /// Which class of finding a symbol is reported as. Only `Ghost` is
 /// always on; the other two wait behind their flags. The text is a
 /// contract too: CI counts the lines that carry `[ghost]`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Class {
     Ghost,
     WriteOnly,
@@ -130,6 +133,19 @@ pub struct Import {
     pub names: Vec<(String, String)>,
 }
 
+/// A piece of text a file holds. Vim evaluates text in many places a
+/// parser cannot see: a mapping's right-hand side, a command's
+/// completion function, `feedkeys`, and a substitution that opens with
+/// `\\=`. A name in one of those is used, so the text is kept and
+/// matched against the project's own names once they are all known.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Text {
+    pub text: String,
+    pub file: PathBuf,
+    pub line: u32,
+    pub origin: Option<SymbolId>,
+}
+
 /// TRAIT: What a language's scan writes its findings into, so that a
 /// language need not know how they are stored.
 pub trait Sink {
@@ -137,6 +153,7 @@ pub trait Sink {
     fn re(&mut self, r: Reference);
     fn import(&mut self, i: Import);
     fn root(&mut self, id: SymbolId);
+    fn text(&mut self, t: Text);
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -145,6 +162,7 @@ pub struct Analysis {
     pub refs: Vec<Reference>,
     pub roots: Vec<SymbolId>,
     pub imports: Vec<Import>,
+    pub texts: Vec<Text>,
 }
 
 impl Analysis {
@@ -170,6 +188,10 @@ impl Sink for Analysis {
 
     fn root(&mut self, id: SymbolId) {
         self.roots.push(id);
+    }
+
+    fn text(&mut self, t: Text) {
+        self.texts.push(t);
     }
 }
 

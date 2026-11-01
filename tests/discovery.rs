@@ -130,10 +130,28 @@ fn the_bartleby_corpus_yields_every_tracked_file() {
     let cfg = Config::load(&root, &args).expect("load the configuration");
     let f = project::discover(&root, &cfg).expect("discover the corpus");
 
-    assert_eq!(f.sources.len(), 138, "every tracked Vim file of the corpus");
+    assert_eq!(
+        f.sources.len(),
+        135,
+        "every tracked Vim file Vim would source"
+    );
     assert!(f.skipped.is_empty(), "nothing in the corpus is unreadable");
     assert!(
-        rels(&f).contains(&".github/scripts/latex-needs.vim".to_string()),
-        "a tracked file in a hidden directory is read"
+        !rels(&f).contains(&".github/scripts/latex-needs.vim".to_string()),
+        "a hidden directory is Vim's blind spot and the analyzer's"
+    );
+}
+
+#[test]
+fn a_configured_entry_is_scanned_though_it_is_hidden() {
+    let dir = TempDir::new("entry-hidden");
+    dir.write("ghostcode.toml", "entry = [\".github/scripts/s.vim\"]\n");
+    dir.write(".github/scripts/s.vim", SRC);
+    dir.write("autoload/p.vim", SRC);
+
+    assert_eq!(
+        rels(&found(&dir, &[])),
+        vec![".github/scripts/s.vim", "autoload/p.vim"],
+        "naming a file an entry says it is the project's own code"
     );
 }

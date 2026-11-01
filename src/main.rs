@@ -7,6 +7,7 @@ use std::process::ExitCode;
 use clap::Parser;
 
 use ghostcode::cli::Args;
+use ghostcode::cli::Format;
 use ghostcode::config::Config;
 
 fn main() -> ExitCode {
@@ -22,6 +23,16 @@ fn main() -> ExitCode {
 fn run() -> anyhow::Result<()> {
     let args = Args::parse();
     let root = args.root_dir()?;
-    let _cfg = Config::load(&root, &args)?;
+    let cfg = Config::load(&root, &args)?;
+    let found = ghostcode::report::analyze(&root, &cfg)?;
+
+    print!(
+        "{}",
+        match args.format {
+            Format::Json => ghostcode::report::json(&found),
+            Format::Text => ghostcode::report::text(&found),
+        }
+    );
+
     Ok(())
 }

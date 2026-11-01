@@ -169,6 +169,17 @@ fn lex_line(
             break;
         }
 
+        // `$'a {expr} b'` is a string whose braces hold code. The
+        // literal part is text, and what the braces hold is read as
+        // code, because a name used only there is still used.
+        if c == '$' && matches!(src.get(i + 1), Some('\'') | Some('"')) {
+            let quote = src[i + 1];
+            let (text, next) = lex_str(&src, i + 1, quote);
+            lex_interpolated(&text, line, toks, depth, heredoc);
+            i = next;
+            continue;
+        }
+
         if c == '\'' || c == '"' {
             let (text, next) = lex_str(&src, i, c);
             toks.push(Tok {
@@ -197,6 +208,12 @@ fn lex_line(
 
         if is_ident_start(c) {
             let start = i;
+
+            // The first character is taken whatever it is, because a
+            // name may open with a sigil that cannot appear again:
+            // `&cp`, `$HOME`, `@a`. Testing the loop's condition
+            // against it would consume nothing and never advance.
+            i += 1;
             while i < src.len() && is_ident(src[i]) {
                 i += 1;
             }
@@ -248,6 +265,54 @@ fn lex_line(
             .find(|t| t.kind == TokKind::Ident && t.line == line)
             .map(|t| t.text.clone());
     }
+}
+
+/// FUNCTION: Tokenise an interpolated string: its literal text as one
+/// string token, and each braced part as the code it is.
+///
+/// A doubled brace escapes itself and holds no code, which is how Vim9
+/// writes a literal brace.
+fn lex_interpolated(
+    text: &str,
+    line: u32,
+    toks: &mut Vec<Tok>,
+    depth: &mut i32,
+    heredoc: &mut Option<String>,
+) {
+    toks.push(Tok {
+        kind: TokKind::Str,
+        text: text.to_string(),
+        line,
+    });
+
+    let chars: Vec<char> = text.chars().collect();
+    let mut i = 0;
+
+    while i < chars.len() {
+        if chars[i] != '{' {
+            i += 1;
+            continue;
+        }
+
+        if chars.get(i + 1) == Some(&'{') {
+            i += 2;
+            continue;
+        }
+
+        let start = i + 1;
+        let mut end = start;
+        while end < chars.len() && chars[end] != '}' {
+            end += 1;
+        }
+
+        let code: String = chars[start..end].iter().collect();
+        let mut inner = 0i32;
+        lex_line(&code, line, toks, &mut inner, heredoc);
+
+        i = end + 1;
+    }
+
+    let _ = depth;
 }
 
 /// FUNCTION: Read one string literal whole, so that nothing inside it
@@ -451,6 +516,64 @@ mod tests {
         let toks = tokens("var x = 1 # why\n");
 
         assert_eq!(texts(&toks, TokKind::Comment), vec!["# why"]);
+    }
+
+    #[test]
+    fn an_interpolated_string_lexes_its_braces_as_code() {
+        let toks = tokens("echo $'count: {LABEL} done'\n");
+
+        assert!(
+            texts(&toks, TokKind::Ident).contains(&"LABEL"),
+            "a brace in an interpolated string holds code: {toks:?}"
+        );
+    }
+
+    #[test]
+    fn an_interpolated_string_keeps_its_literal_text_out_of_the_code() {
+        let toks = tokens("echo $'count: {LABEL} done'\n");
+
+        assert!(
+            !texts(&toks, TokKind::Ident).contains(&"count"),
+            "the literal part is text: {toks:?}"
+        );
+    }
+
+    #[test]
+    fn an_interpolated_string_reads_a_call_inside_its_braces() {
+        let toks = tokens("echo $'{Fmt(x)} done'\n");
+
+        assert!(texts(&toks, TokKind::Ident).contains(&"Fmt"));
+    }
+
+    #[test]
+    fn a_doubled_brace_in_an_interpolated_string_is_not_code() {
+        let toks = tokens("echo $'{{literal}} done'\n");
+
+        assert!(
+            !texts(&toks, TokKind::Ident).contains(&"literal"),
+            "a doubled brace escapes itself: {toks:?}"
+        );
+    }
+
+    #[test]
+    fn an_option_name_is_one_token() {
+        let toks = tokens("if &cp\n");
+
+        assert_eq!(texts(&toks, TokKind::Ident), vec!["if", "&cp"]);
+    }
+
+    #[test]
+    fn an_environment_variable_and_a_register_are_tokens() {
+        let toks = tokens("echo $HOME .. @a\n");
+
+        assert_eq!(texts(&toks, TokKind::Ident), vec!["echo", "$HOME", "@a"]);
+    }
+
+    #[test]
+    fn a_comparison_against_a_number_lexes_whole() {
+        let toks = tokens("if v:version < 901 || &cp\n");
+
+        assert_eq!(texts(&toks, TokKind::Num), vec!["901"]);
     }
 
     #[test]

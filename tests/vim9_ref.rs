@@ -193,3 +193,25 @@ fn a_reference_at_the_top_level_belongs_to_the_script() {
         "autoload/p.vim::<script>"
     );
 }
+
+#[test]
+fn exists_with_a_scoped_name_is_a_reference() {
+    let text = "vim9script\nif exists('s:is_loaded')\n  finish\nendif\nvar is_loaded = true\n";
+
+    assert!(
+        names(text).contains(&"is_loaded".to_string()),
+        "the guard every script opens with reads the variable: {:?}",
+        names(text)
+    );
+}
+
+#[test]
+fn an_interpolated_name_is_a_reference() {
+    let text = "vim9script\nconst LABEL = 'x'\ndef F()\n  echo $'see {LABEL} here'\nenddef\n";
+
+    assert!(
+        names(text).contains(&"LABEL".to_string()),
+        "a name used only inside interpolation is used: {:?}",
+        names(text)
+    );
+}
