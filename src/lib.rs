@@ -7,6 +7,7 @@ pub mod config;
 pub mod lang;
 pub mod model;
 pub mod project;
+pub mod reach;
 pub mod resolve;
 
 /// The program's name, stated once so that no other file repeats it.
