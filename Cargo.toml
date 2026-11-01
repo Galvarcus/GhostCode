@@ -1,0 +1,21 @@
+[package]
+name = "ghostcode"
+version = "0.1.0"
+edition = "2021"
+description = "Finds unreferenced code in Vim9 plugins."
+license = "GPL-3.0"
+repository = "https://github.com/Galvarcus/GhostCode"
+
+[lib]
+name = "ghostcode"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ghostcode"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.104"
+clap = { version = "4.6.7", features = ["derive"] }
+serde = { version = "1.0.229", features = ["derive"] }
+toml = "1.1.8"
