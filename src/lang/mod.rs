@@ -6,6 +6,8 @@
 use std::path::Path;
 use std::path::PathBuf;
 
+pub mod vim9;
+
 use crate::config::Config;
 use crate::model::Sink;
 use crate::model::Symbol;
