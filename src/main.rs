@@ -12,7 +12,7 @@ use ghostcode::config::Config;
 
 fn main() -> ExitCode {
     if let Err(e) = run() {
-        eprintln!("{}: {e}", ghostcode::NAME);
+        eprintln!("{}: {e:#}", ghostcode::NAME);
         return ExitCode::from(2);
     }
     ExitCode::SUCCESS
@@ -25,6 +25,17 @@ fn run() -> anyhow::Result<()> {
     let root = args.root_dir()?;
     let cfg = Config::load(&root, &args)?;
     let found = ghostcode::report::analyze(&root, &cfg)?;
+
+    // A file that could not be read goes to stderr, never to stdout:
+    // what stdout carries is the report, and CI counts its lines.
+    for s in &found.skipped {
+        eprintln!(
+            "{}: {}: skipped, {}",
+            ghostcode::NAME,
+            s.file.display(),
+            s.why
+        );
+    }
 
     print!(
         "{}",

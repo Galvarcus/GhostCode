@@ -52,12 +52,23 @@ pub struct Finding {
     pub lang: &'static str,
 }
 
+/// A file discovery found and could not read. It is reported rather
+/// than passed over in silence: a symbol that only the dropped file
+/// uses looks unreferenced, so a finding this causes cannot be
+/// explained without it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Dropped {
+    pub file: PathBuf,
+    pub why: &'static str,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Report {
     pub schema: u32,
     pub root: PathBuf,
     pub summary: Summary,
     pub findings: Vec<Finding>,
+    pub skipped: Vec<Dropped>,
 }
 
 /// FUNCTION: One run, from a root to a report: discover the files,
@@ -109,7 +120,22 @@ pub fn analyze(root: &Path, cfg: &Config) -> anyhow::Result<Report> {
     let resolved = resolve::all(&a);
     let reached = reach::walk(&a, &resolved);
 
-    Ok(build(root, &a, &reached, resolved.unresolved, cfg))
+    let mut report = build(root, &a, &reached, resolved.unresolved, cfg);
+
+    report.skipped = found
+        .skipped
+        .iter()
+        .map(|s| Dropped {
+            file: s.path.strip_prefix(root).unwrap_or(&s.path).to_path_buf(),
+            why: match s.why {
+                project::SkipReason::NotUtf8 => "not UTF-8",
+                project::SkipReason::Unreadable => "cannot be read",
+                project::SkipReason::OutsideRoot => "outside the root",
+            },
+        })
+        .collect();
+
+    Ok(report)
 }
 
 /// FUNCTION: Turn the text a project holds into references, for the
@@ -184,6 +210,7 @@ pub fn build(
             unresolved,
         },
         findings,
+        skipped: Vec::new(),
     }
 }
 

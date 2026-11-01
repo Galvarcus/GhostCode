@@ -155,3 +155,46 @@ fn a_configured_entry_is_scanned_though_it_is_hidden() {
         "naming a file an entry says it is the project's own code"
     );
 }
+
+#[test]
+fn a_skipped_file_is_named_on_stderr() {
+    let dir = TempDir::new("skip-reported");
+    dir.write("autoload/a.vim", SRC);
+    dir.write_bytes("autoload/old.vim", b"vim9script\n# caf\xe9\n");
+
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_ghostcode"))
+        .arg(dir.path())
+        .output()
+        .expect("run the built binary");
+    let err = String::from_utf8_lossy(&out.stderr);
+
+    assert!(out.status.success(), "one bad file does not end the run");
+    assert!(
+        err.contains("autoload/old.vim"),
+        "a dropped file must be named, or a finding it causes cannot be explained: {err}"
+    );
+}
+
+#[test]
+fn a_configured_entry_outside_the_root_is_refused() {
+    let outside = TempDir::new("entry-outside-target");
+    outside.write("dep.vim", SRC);
+
+    let dir = TempDir::new("entry-outside");
+    dir.write("autoload/p.vim", SRC);
+    dir.write(
+        "ghostcode.toml",
+        &format!(
+            "entry = [\"{}\"]\n",
+            outside.path().join("dep.vim").display()
+        ),
+    );
+
+    let f = found(&dir, &[]);
+    assert_eq!(
+        rels(&f),
+        vec!["autoload/p.vim"],
+        "an entry outside the root is not the project's"
+    );
+    assert!(f.skipped.iter().any(|s| s.why == SkipReason::OutsideRoot));
+}

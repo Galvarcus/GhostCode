@@ -188,3 +188,18 @@ fn a_declaration_keeps_the_physical_line_it_sits_on() {
     assert_eq!(a.syms[0].line, 4, "the line the def opens on");
     assert_eq!(a.syms[0].kind, Kind::Function);
 }
+
+#[test]
+fn a_local_after_a_nested_def_is_still_a_local() {
+    let a = scan(
+        "plugin/main.vim",
+        "vim9script\ndef Outer()\n  def Inner()\n  enddef\n  Inner()\n  var local = 1\nenddef\n",
+    );
+
+    assert_eq!(
+        decls(&a),
+        vec!["function Outer", "function Inner"],
+        "the nested enddef closed Inner, not Outer: {:?}",
+        decls(&a)
+    );
+}

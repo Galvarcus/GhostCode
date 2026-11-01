@@ -27,7 +27,7 @@ impl Types {
     pub fn of_file(stmts: &[Vec<Tok>]) -> Self {
         let mut types = Self::default();
         let mut owner: Option<String> = None;
-        let mut in_def = false;
+        let mut depth = 0u32;
 
         for stmt in stmts {
             let words: Vec<&str> = idents(stmt);
@@ -35,11 +35,11 @@ impl Types {
             match words.first().copied() {
                 Some("endclass" | "endenum" | "endinterface") => {
                     owner = None;
-                    in_def = false;
+                    depth = 0;
                     continue;
                 }
                 Some("enddef") => {
-                    in_def = false;
+                    depth = depth.saturating_sub(1);
                     continue;
                 }
                 _ => {}
@@ -47,16 +47,16 @@ impl Types {
 
             if let Some(name) = opens_container(&words) {
                 owner = Some(name.to_string());
-                in_def = false;
+                depth = 0;
                 continue;
             }
 
             if is_def(stmt, &words) {
-                in_def = true;
+                depth += 1;
                 continue;
             }
 
-            if in_def {
+            if depth > 0 {
                 continue;
             }
 

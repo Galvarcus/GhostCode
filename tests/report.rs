@@ -129,6 +129,7 @@ fn text_prints_file_line_col_then_the_tagged_kind_and_name() {
             col: 1,
             lang: "vim9",
         }],
+        skipped: Vec::new(),
     };
 
     assert_eq!(
@@ -152,6 +153,7 @@ fn a_write_only_finding_prints_its_own_tag_not_ghost() {
             col: 1,
             lang: "vim9",
         }],
+        skipped: Vec::new(),
     };
 
     assert_eq!(

@@ -23,12 +23,13 @@ pub enum Format {
 /// ghostcode.toml must survive a run that does not mention it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::Args)]
 pub struct FindingArgs {
-    /// Report a variable that is written and never read.
-    #[arg(long = "write-only")]
+    // Hidden until the detection ships. The settings are read and
+    // carried so that ghostcode.toml keeps its shape, and advertising
+    // a flag that changes nothing would be worse than not having one.
+    #[arg(long = "write-only", hide = true)]
     pub write_only: Option<bool>,
 
-    /// Report a dead local variable inside a function body.
-    #[arg(long = "locals")]
+    #[arg(long = "locals", hide = true)]
     pub locals: Option<bool>,
 }
 

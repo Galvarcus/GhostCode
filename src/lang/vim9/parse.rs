@@ -49,7 +49,11 @@ pub struct Scope {
     owner: Option<String>,
     owner_exported: bool,
     container: Container,
-    in_def: bool,
+    /// How many function bodies enclose the statement. Vim9 allows a
+    /// def inside a def, so one `enddef` closes one body and not the
+    /// one around it. A declaration is a local while this is above
+    /// zero, and the analyzer does not report a local.
+    depth: u32,
 }
 
 /// FUNCTION: Split a file's tokens into statements, dropping comments
@@ -107,13 +111,13 @@ pub fn declarations(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
         }
 
         if function(file, stmt, &words, line, &scope, out) {
-            scope.in_def = true;
+            scope.depth += 1;
             continue;
         }
 
         // Everything below is module level or class level. A
         // declaration inside a function body is a local.
-        if scope.in_def {
+        if scope.depth > 0 {
             continue;
         }
 
@@ -162,7 +166,7 @@ fn open_container(
     scope.owner = Some(name.to_string());
     scope.owner_exported = exported;
     scope.container = container;
-    scope.in_def = false;
+    scope.depth = 0;
 
     out.sym(Symbol {
         id: SymbolId::of(file, None, name),
@@ -186,7 +190,7 @@ fn close_container(words: &[&str], scope: &mut Scope) -> bool {
             true
         }
         Some("enddef") => {
-            scope.in_def = false;
+            scope.depth = scope.depth.saturating_sub(1);
             true
         }
         _ => false,

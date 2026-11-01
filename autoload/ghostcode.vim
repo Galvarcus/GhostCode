@@ -33,6 +33,7 @@ const MSG_FAILED: string = '%s failed (status %d): %s'
 const MSG_NOT_JSON: string = '%s did not report JSON: %s'
 const MSG_SCHEMA: string = '%s reports schema %d, and this plugin reads %d. Update the plugin.'
 const MSG_SUMMARY: string = '%d symbols, %d ghost, %d unresolved'
+const MSG_SKIPPED: string = '%s skipped, %s'
 
 # FUNCTION: Scan path, or the working directory, and put every finding
 # in the quickfix list.
@@ -141,6 +142,12 @@ def Fill(root: string, report: dict<any>): void
   }))
 
   setqflist(qf, 'r')
+
+  # A file the scan could not read is said once, because a symbol that
+  # only that file uses then looks unreferenced.
+  for skip in get(report, 'skipped', [])
+    log.Warn(printf(MSG_SKIPPED, skip.file, skip.why))
+  endfor
 
   var sum = get(report, 'summary', {})
 

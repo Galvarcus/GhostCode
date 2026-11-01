@@ -140,6 +140,17 @@ def Test_the_setting_accepts_a_number(): void
   assert_equal('false', args[index(args, '--exports-are-api') + 1])
 enddef
 
+def Test_a_skipped_file_does_not_reach_the_quickfix_list(): void
+  Scan(join([
+    '{"schema": 1, "root": "/project",',
+    '"summary": {"symbols": 1, "ghost": 0, "unresolved": 0},',
+    '"findings": [],',
+    '"skipped": [{"file": "autoload/old.vim", "why": "not UTF-8"}]}',
+  ], "\n"))
+
+  assert_equal([], getqflist())
+enddef
+
 def Test_the_plugin_script_defines_no_default_for_the_setting(): void
   assert_false(exists('g:ghostcode_exports_are_api'))
 enddef
@@ -156,5 +167,6 @@ export def RunAll(): void
   Test_the_setting_is_not_passed_when_the_user_did_not_set_it()
   Test_the_setting_is_passed_when_the_user_set_it()
   Test_the_setting_accepts_a_number()
+  Test_a_skipped_file_does_not_reach_the_quickfix_list()
   Test_the_plugin_script_defines_no_default_for_the_setting()
 enddef

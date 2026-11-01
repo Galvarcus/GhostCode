@@ -150,6 +150,26 @@ pub fn discover(root: &Path, cfg: &Config) -> anyhow::Result<Found> {
             continue;
         }
 
+        // An entry names the project's own code, so it has to be the
+        // project's. Without this an entry could reach out of the
+        // root that discovery stops at, and put a path the report
+        // cannot state relative to it in every finding.
+        let Ok(path) = path.canonicalize() else {
+            found.skipped.push(Skipped {
+                path,
+                why: SkipReason::Unreadable,
+            });
+            continue;
+        };
+
+        if !path.starts_with(&root) {
+            found.skipped.push(Skipped {
+                path,
+                why: SkipReason::OutsideRoot,
+            });
+            continue;
+        }
+
         let Some(lang) = lang_of(&path) else {
             continue;
         };
