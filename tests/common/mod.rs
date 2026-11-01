@@ -1,6 +1,11 @@
 //! A temporary directory for one integration test, removed on drop.
 //!
+//! Cargo compiles this module into every integration test binary, so a
+//! helper that one test needs is dead code in the others.
+//!
 //! License: GNU GPL 3.0
+
+#![allow(dead_code)]
 
 use std::path::Path;
 use std::path::PathBuf;
