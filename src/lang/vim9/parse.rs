@@ -10,6 +10,7 @@ use crate::lang::vim9::lex::Tok;
 use crate::lang::vim9::lex::TokKind;
 use crate::model::Import;
 use crate::model::Kind;
+use crate::model::Reference;
 use crate::model::Sink;
 use crate::model::Symbol;
 use crate::model::SymbolId;
@@ -457,4 +458,220 @@ fn unquote(text: &str) -> String {
     chars.next();
     chars.next_back();
     chars.collect()
+}
+
+// The builtins that take a name as text rather than as code, so that
+// the name inside the string is a call site like any other.
+const BY_NAME: &[&str] = &["call", "function", "funcref", "execute", "eval"];
+
+/// FUNCTION: Record every reference a file makes: calls, member
+/// accesses, funcrefs read as values, type annotations, and the names
+/// that `call()`, `function()` and `execute()` take as text.
+///
+/// A name that no symbol in the project declares resolves to nothing
+/// and costs nothing, so the scan records what might be a reference
+/// and lets resolution decide. What it must never record is a name it
+/// cannot see: a word inside an ordinary string, a comment, or a
+/// heredoc body, which is what the statements it walks have already
+/// removed.
+pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
+    let mut scope = Scope::default();
+    let mut origin = SymbolId::script(file);
+
+    for stmt in stmts {
+        let words: Vec<&str> = stmt
+            .iter()
+            .filter(|t| t.kind == TokKind::Ident)
+            .map(|t| t.text.as_str())
+            .collect();
+
+        if close_container(&words, &mut scope) {
+            origin = SymbolId::script(file);
+            continue;
+        }
+
+        let mut sink = Collect {
+            file,
+            origin: &origin,
+            out,
+        };
+
+        // A declaration's own name is not a use of itself, so the
+        // statement is read from after it: a def's parameter types and
+        // defaults, and a var's initialiser, are still references.
+        let skip = declared_name_at(stmt, &words);
+        sink.statement(stmt, skip);
+
+        if let Some(id) = opens_body(file, stmt, &words, &mut scope) {
+            origin = id;
+        }
+    }
+}
+
+/// Writes the references of one statement, so that the walk itself
+/// says nothing about where they are stored.
+struct Collect<'a> {
+    file: &'a Path,
+    origin: &'a SymbolId,
+    out: &'a mut dyn Sink,
+}
+
+impl Collect<'_> {
+    /// METHOD: Read one statement, from the token after its own name.
+    fn statement(&mut self, stmt: &[Tok], skip: Option<usize>) {
+        for (i, tok) in stmt.iter().enumerate() {
+            if Some(i) == skip {
+                continue;
+            }
+
+            match tok.kind {
+                TokKind::Ident => self.ident(stmt, i, tok),
+                TokKind::Str => self.text(stmt, i, tok),
+                _ => {}
+            }
+        }
+    }
+
+    /// METHOD: Record a name, with its receiver where a dot gives it
+    /// one, as in `menu.Open()`, `this.Shut()`, or `Color.Red`.
+    fn ident(&mut self, stmt: &[Tok], i: usize, tok: &Tok) {
+        // A name against a colon is a parameter or a key, not a use:
+        // `{callback: OnDone}` uses OnDone, not callback.
+        if stmt.get(i + 1).is_some_and(|t| t.text == ":") && !is_type_position(stmt, i) {
+            return;
+        }
+
+        let recv = match (stmt.get(i.wrapping_sub(1)), i) {
+            (Some(dot), 1..) if dot.text == "." => stmt
+                .get(i - 2)
+                .filter(|t| t.kind == TokKind::Ident)
+                .map(|t| t.text.clone()),
+            _ => None,
+        };
+
+        self.out.re(Reference {
+            name: tok.text.clone(),
+            recv,
+            file: self.file.to_path_buf(),
+            line: tok.line,
+            origin: Some(self.origin.clone()),
+            target: None,
+        });
+    }
+
+    /// METHOD: Record the names inside a string that a builtin takes
+    /// as text, and nothing from any other string.
+    fn text(&mut self, stmt: &[Tok], i: usize, tok: &Tok) {
+        let by_name = stmt[..i]
+            .iter()
+            .rev()
+            .take(2)
+            .any(|t| BY_NAME.contains(&t.text.as_str()));
+
+        if !by_name {
+            return;
+        }
+
+        for name in identifiers(&unquote(&tok.text)) {
+            self.out.re(Reference {
+                name,
+                recv: None,
+                file: self.file.to_path_buf(),
+                line: tok.line,
+                origin: Some(self.origin.clone()),
+                target: None,
+            });
+        }
+    }
+}
+
+/// FUNCTION: The index of the name a statement declares, which is a
+/// declaration rather than a use of itself.
+fn declared_name_at(stmt: &[Tok], words: &[&str]) -> Option<usize> {
+    let (_, rest) = strip_export(words);
+    let rest = strip_modifiers(rest);
+
+    let keyword = rest.first().copied()?;
+    if !matches!(
+        keyword,
+        "def" | "var" | "const" | "class" | "enum" | "interface" | "import"
+    ) {
+        return None;
+    }
+
+    let at = stmt.iter().position(|t| t.text == keyword)?;
+    stmt.iter()
+        .enumerate()
+        .skip(at + 1)
+        .find(|(_, t)| t.kind == TokKind::Ident)
+        .map(|(i, _)| i)
+}
+
+/// FUNCTION: The symbol a statement opens a body for, so that what
+/// follows belongs to it.
+fn opens_body(file: &Path, stmt: &[Tok], words: &[&str], scope: &mut Scope) -> Option<SymbolId> {
+    let (_, rest) = strip_export(words);
+    let rest = strip_modifiers(rest);
+
+    if let Some(name) = container_name(rest) {
+        scope.owner = Some(name.to_string());
+        return None;
+    }
+
+    if rest.first().copied() != Some("def") {
+        return None;
+    }
+
+    let name = rest.get(1)?;
+    if !stmt.iter().any(|t| t.text == "(") {
+        return None;
+    }
+
+    Some(SymbolId::of(file, scope.owner.as_deref(), name))
+}
+
+/// FUNCTION: The name of the class, enum or interface a statement
+/// opens, if it opens one.
+fn container_name<'a>(words: &'a [&'a str]) -> Option<&'a str> {
+    match words.split_first() {
+        Some((&("class" | "enum" | "interface"), rest)) => rest.first().copied(),
+        _ => None,
+    }
+}
+
+/// FUNCTION: True when a colon after a name introduces a type rather
+/// than separating a key from its value, as `var x: Config` does and
+/// `{callback: OnDone}` does not.
+fn is_type_position(stmt: &[Tok], i: usize) -> bool {
+    let mut depth = 0i32;
+    for tok in &stmt[..i] {
+        match tok.text.as_str() {
+            "{" => depth += 1,
+            "}" => depth -= 1,
+            _ => {}
+        }
+    }
+    depth == 0
+}
+
+/// FUNCTION: Every identifier inside a piece of text, for the builtins
+/// that take a name as a string.
+fn identifiers(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut cur = String::new();
+
+    for c in text.chars() {
+        if c.is_ascii_alphanumeric() || c == '_' || c == '#' {
+            cur.push(c);
+        } else if !cur.is_empty() {
+            out.push(std::mem::take(&mut cur));
+        }
+    }
+
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+
+    out.retain(|name| name.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_'));
+    out
 }

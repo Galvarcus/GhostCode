@@ -36,6 +36,7 @@ impl Lang for Vim9 {
         let stmts = parse::statements(&toks);
         parse::declarations(&src.rel, &stmts, out);
         parse::imports(&src.rel, &stmts, out);
+        parse::references(&src.rel, &stmts, out);
         Ok(())
     }
 

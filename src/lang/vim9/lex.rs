@@ -156,9 +156,11 @@ fn lex_line(
             continue;
         }
 
-        // A comment runs to the end of the line. In Vim9 that is `#`
-        // alone: a double quote opens a string.
-        if c == '#' {
+        // A comment runs to the end of the line. In Vim9 the marker is
+        // `#`, and a double quote opens a string. A hash against a
+        // name belongs to it: `bartleby#Open` is the classic autoload
+        // calling convention, not a name and a comment.
+        if c == '#' && (i == 0 || src[i - 1].is_whitespace()) {
             toks.push(Tok {
                 kind: TokKind::Comment,
                 text: src[i..].iter().collect(),
@@ -299,7 +301,7 @@ fn is_ident_start(c: char) -> bool {
 // writes a type annotation as `x: Foo` with the colon against the name,
 // and an identifier that swallowed a colon would swallow that too.
 fn is_ident(c: char) -> bool {
-    c.is_ascii_alphanumeric() || c == '_'
+    c.is_ascii_alphanumeric() || c == '_' || c == '#'
 }
 
 /// FUNCTION: End the statement, unless it is already ended or nothing
@@ -431,6 +433,24 @@ mod tests {
         let toks = tokens("echo 'open\nvar y = 1\n");
 
         assert!(texts(&toks, TokKind::Ident).contains(&"y"));
+    }
+
+    #[test]
+    fn a_hash_inside_a_name_is_part_of_it() {
+        let toks = tokens("call bartleby#Open()\n");
+
+        assert!(
+            texts(&toks, TokKind::Ident).contains(&"bartleby#Open"),
+            "the autoload calling convention is one name: {toks:?}"
+        );
+        assert!(texts(&toks, TokKind::Comment).is_empty());
+    }
+
+    #[test]
+    fn a_hash_after_a_space_still_opens_a_comment() {
+        let toks = tokens("var x = 1 # why\n");
+
+        assert_eq!(texts(&toks, TokKind::Comment), vec!["# why"]);
     }
 
     #[test]
