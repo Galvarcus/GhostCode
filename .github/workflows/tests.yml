@@ -57,6 +57,9 @@ jobs:
       - name: Timing
         run: cargo test --release --test timing -- --nocapture
 
+      - name: Release build
+        run: cargo build --release --locked
+
       # Ghostcode on its own code. Its exports serve its own files
       # alone, and ghostcode.toml says so, along with excluding the
       # fixture corpora, which are other projects' code.
