@@ -82,7 +82,7 @@ directory. The report goes to standard output as JSON:
 {
   "schema": 1,
   "root": "/path/to/project",
-  "summary": { "symbols": 412, "ghost": 1, "unresolved": 7 },
+  "summary": { "symbols": 412, "ghost": 1, "unplaced_names": 7 },
   "findings": [
     {
       "class": "ghost",
@@ -105,7 +105,9 @@ autoload/util.vim:15:1:[ghost] function AddSeparator
 
 `schema` states the shape of the JSON. It rises when a change would
 break a reader, so a front end that meets a number it does not know can
-say so rather than guess.
+say so rather than guess. The counts in `summary` are diagnostics
+rather than contract: nothing is derived from them, and one may be
+renamed without the schema rising.
 
 ### In Vim
 
@@ -119,7 +121,7 @@ It puts the findings in the quickfix list, opens the list when it finds
 any, and shows a summary through Logger:
 
 ```text
-Ghostcode - ghostcode.vim - Report: 23 symbols, 7 ghost, 3 unresolved
+Ghostcode - ghostcode.vim - Fill: 23 symbols, 7 ghost
 ```
 
 Each entry names the kind of symbol, its name, its file, and its line:

@@ -22,7 +22,7 @@ use crate::model::SymbolId;
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Resolved {
     pub targets: HashMap<usize, Vec<SymbolId>>,
-    pub unresolved: usize,
+    pub unplaced: usize,
 }
 
 /// Every way a reference can be looked up, each built once.
@@ -198,7 +198,7 @@ pub fn all(a: &Analysis) -> Resolved {
         let ids = idx.candidates(r);
 
         if ids.is_empty() {
-            out.unresolved += 1;
+            out.unplaced += 1;
             continue;
         }
 
@@ -418,7 +418,7 @@ mod tests {
     }
 
     #[test]
-    fn an_unmatched_reference_raises_the_unresolved_count() {
+    fn an_unmatched_reference_raises_the_unplaced_count() {
         let a = Analysis {
             syms: vec![sym("autoload/a.vim", None, "Helper", Kind::Function)],
             refs: vec![re("plugin/p.vim", None, "Missing")],
@@ -426,7 +426,7 @@ mod tests {
         };
 
         let out = all(&a);
-        assert_eq!(out.unresolved, 1);
+        assert_eq!(out.unplaced, 1);
         assert!(out.targets.is_empty());
     }
 
@@ -451,7 +451,7 @@ mod tests {
         let spent = start.elapsed();
 
         assert_eq!(out.targets.len(), n);
-        assert_eq!(out.unresolved, 0);
+        assert_eq!(out.unplaced, 0);
         assert!(
             spent < std::time::Duration::from_secs(2),
             "resolution took {spent:?}, which is not an index lookup"

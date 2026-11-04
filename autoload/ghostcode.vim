@@ -32,7 +32,7 @@ const MSG_NO_BIN: string = 'no %s binary found. Looked at g:%s, then $PATH, then
 const MSG_FAILED: string = '%s failed (status %d): %s'
 const MSG_NOT_JSON: string = '%s did not report JSON: %s'
 const MSG_SCHEMA: string = '%s reports schema %d, and this plugin reads %d. Update the plugin.'
-const MSG_SUMMARY: string = '%d symbols, %d ghost, %d unresolved'
+const MSG_SUMMARY: string = '%d symbols, %d ghost'
 const MSG_SKIPPED: string = '%s skipped, %s'
 
 # FUNCTION: Scan path, or the working directory, and put every finding
@@ -155,7 +155,6 @@ def Fill(root: string, report: dict<any>): void
     MSG_SUMMARY,
     get(sum, 'symbols', 0),
     get(sum, 'ghost', 0),
-    get(sum, 'unresolved', 0),
   ))
 
   if !empty(qf)

@@ -110,12 +110,12 @@ fn paths_are_relative_to_the_root() {
 }
 
 #[test]
-fn unresolved_is_a_summary_number_and_never_a_finding() {
-    let dir = TempDir::new("unresolved");
+fn an_unplaced_name_is_a_summary_number_and_never_a_finding() {
+    let dir = TempDir::new("unplaced");
     dir.write("plugin/p.vim", "vim9script\nNoSuchFunction()\n");
 
     let r = run(&dir);
-    assert_eq!(r.summary.unresolved, 1, "the call named nothing");
+    assert_eq!(r.summary.unplaced_names, 1, "the call named nothing");
     assert!(r.findings.is_empty());
 }
 
@@ -189,7 +189,7 @@ fn json_carries_every_field_a_consumer_reads() {
         keys(&v),
         ["findings", "root", "schema", "skipped", "summary"]
     );
-    assert_eq!(keys(&v["summary"]), ["ghost", "symbols", "unresolved"]);
+    assert_eq!(keys(&v["summary"]), ["ghost", "symbols", "unplaced_names"]);
     assert_eq!(
         keys(&v["findings"][0]),
         ["class", "col", "file", "kind", "lang", "line", "name"]
