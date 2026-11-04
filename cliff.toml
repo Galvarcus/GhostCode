@@ -1,0 +1,41 @@
+# cliff.toml: the release notes of a tag, built from its commits.
+#
+# The subject of a commit here states the problem it fixed, so a list
+# of subjects reads as the list of defects a release closes. There are
+# no conventional-commit types in this project, so nothing is inferred
+# from a prefix: a commit that names an issue is a fix, and every
+# other commit is a change.
+#
+# License: GNU GPL 3.0
+
+[changelog]
+header = ""
+body = """
+{% for group, commits in commits | group_by(attribute="group") %}\
+### {{ group | split(pat="-->") | last | trim }}
+{% for commit in commits %}\
+{% set lines = commit.message | split(pat="\n") %}\
+- {{ lines | first | trim }}\
+{% for line in lines %}{% if line is starting_with("fixes:") %} ({{ line | replace(from="fixes:", to="") | trim }}){% endif %}{% endfor %}
+{% endfor %}
+{% endfor %}
+"""
+footer = ""
+trim = true
+
+[git]
+conventional_commits = false
+filter_unconventional = false
+filter_commits = false
+protect_breaking_commits = false
+sort_commits = "oldest"
+commit_parsers = [
+  # Written by the workflow itself, not by anyone releasing.
+  { message = "^docs: regenerate Vimdoc", skip = true },
+  { message = "^Merge ", skip = true },
+  # Dependabot's own subject, which it writes and nobody here does.
+  # Tested first, so that a body of its own cannot move it.
+  { message = "^Bump ", group = "<!-- 2 -->Dependencies" },
+  { message = "(?m)^fixes:", group = "<!-- 0 -->Fixes" },
+  { message = ".*", group = "<!-- 1 -->Other changes" },
+]

@@ -27,7 +27,7 @@ build.
   `autoload/ghostcode/log.vim`; in Rust it comes from `NAME` in
   `src/lib.rs`.
 - Do not edit `doc/ghostcode.txt`. It is generated from `README.md` by
-  `.github/workflows/vimdoc.yml` on a push to `main`.
+  `.github/workflows/ci.yml` on a push to `main`.
 - Do not edit `tests/fixtures/expected/`. Those files record what the
   Vim9 analyzer reported before it was deleted, and nothing can
   recreate them. A change to one needs a reason in the commit message.
@@ -65,6 +65,20 @@ hook adds `Signed-off-by:`, so never write one by hand and never pass
 fresh checkout needs it installed again.
 
 Always ask before pushing.
+
+## Releases
+
+A release is a tag of the form `vMAJOR.MINOR.PATCH`, and nothing else
+starts one: `.github/workflows/ci.yml` filters the trigger, so a tag
+such as `v0.2.0-rc.1` or `v0.2` starts no run at all and reports
+nothing. The tag must name the version in `Cargo.toml`, which a job
+checks before anything is built, because a crate cannot be published
+twice to correct it.
+
+The pipeline then builds the binaries, writes their checksums, attaches
+them with notes built from the commit subjects of the tag, attests
+them, and publishes the crate through crates.io trusted publishing,
+which is configured against `ci.yml` and needs no stored token.
 
 ## Architecture
 

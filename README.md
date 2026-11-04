@@ -37,6 +37,14 @@ install -m 755 ghostcode-x86_64-unknown-linux-gnu ~/.local/bin/ghostcode
 The assets are `ghostcode-x86_64-unknown-linux-gnu`,
 `ghostcode-x86_64-apple-darwin`, and `ghostcode-aarch64-apple-darwin`.
 
+Releases after v0.1.0 carry a build provenance attestation, which
+names the workflow and the commit that produced an asset. v0.1.0 has
+none:
+
+```bash
+gh attestation verify ghostcode-x86_64-unknown-linux-gnu -R Galvarcus/GhostCode
+```
+
 To build it instead, with a Rust toolchain:
 
 ```bash
@@ -274,7 +282,7 @@ cat tests/results.txt
 The file reads `All tests passed` when every test passes.
 
 `doc/ghostcode.txt` is generated from this README by
-`.github/workflows/vimdoc.yml`. Edit the README, not the help file.
+`.github/workflows/ci.yml`. Edit the README, not the help file.
 
 ## License
 
