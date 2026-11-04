@@ -272,3 +272,31 @@ fn a_name_used_in_a_parameter_default_counts_as_used() {
 
     assert!(ghosts("param-default", &files, false).is_empty());
 }
+
+#[test]
+fn a_class_named_in_an_interface_field_is_not_reported() {
+    let files = vec![
+        (
+            "plugin/p.vim",
+            "vim9script\nimport autoload 'lib.vim'\nlib.Hold()\n",
+        ),
+        (
+            "autoload/lib.vim",
+            "vim9script\n\
+             export class Thing\n\
+             endclass\n\
+             export interface Holder\n\
+             \x20 def One()\n\
+             \x20 var box: Thing\n\
+             endinterface\n\
+             export def Hold(h: Holder)\n\
+             enddef\n",
+        ),
+    ];
+
+    assert_eq!(
+        ghosts("interface_field", &files, false),
+        vec!["field box"],
+        "the annotation in the interface's body names the class"
+    );
+}

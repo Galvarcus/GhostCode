@@ -10,13 +10,17 @@ vim9script
 ##############################################################################
 
 import autoload 'ghostcode.vim' as G
+# Logger records every message it is given, whether or not it echoes
+# one, and -es hides an echo besides. Its history is the only place a
+# test can read the line the user is shown.
+import 'Logger/messages.vim' as LM
 
 const STUB: string = fnamemodify(resolve(expand('<script>')), ':h') .. '/stub/ghostcode'
 const ARGS: string = tempname()
 
 const REPORT: string = join([
   '{"schema": 1, "root": "/project",',
-  '"summary": {"symbols": 7, "ghost": 2, "unresolved": 1},',
+  '"summary": {"symbols": 7, "ghost": 2, "unplaced_names": 1},',
   '"findings": [',
   '{"class": "ghost", "kind": "method", "name": "Open",',
   '"file": "autoload/m.vim", "line": 12, "col": 1, "lang": "vim9"},',
@@ -42,6 +46,7 @@ def Scan(
     g:ghostcode_exports_are_api = api
   endif
 
+  delete(ARGS)
   setqflist([], 'r')
 
   try
@@ -56,6 +61,30 @@ enddef
 # FUNCTION: The arguments the stub was called with.
 def Args(): list<string>
   return filereadable(ARGS) ? readfile(ARGS) : []
+enddef
+
+# FUNCTION: Run the :GhostCode command itself against the stub,
+# rather than the function behind it, so that the command's own
+# argument handling is covered. A command that fails to parse raises
+# an error, which the suite must read as a failed test rather than
+# let abort the run.
+def Command(args: string): void
+  g:ghostcode_bin = STUB
+  $GHOSTCODE_STUB_OUT = REPORT
+  $GHOSTCODE_STUB_EXIT = '0'
+  $GHOSTCODE_STUB_ARGS = ARGS
+
+  delete(ARGS)
+  setqflist([], 'r')
+
+  try
+    execute 'GhostCode' args
+  catch
+    assert_report(v:exception)
+  finally
+    silent! cclose
+    unlet! g:ghostcode_bin
+  endtry
 enddef
 
 def Test_the_quickfix_text_matches_the_old_format(): void
@@ -116,6 +145,38 @@ def Test_a_root_with_spaces_is_passed_as_one_argument(): void
   assert_true(index(Args(), '/tmp/a folder/with space') >= 0, join(Args(), '|'))
 enddef
 
+def Test_the_command_passes_an_escaped_space_as_one_argument(): void
+  Command('/tmp/a\ folder/with\ space')
+
+  assert_true(index(Args(), '/tmp/a folder/with space') >= 0, join(Args(), '|'))
+enddef
+
+def Test_the_command_scans_the_working_directory_with_no_argument(): void
+  Command('')
+
+  assert_equal(getcwd(), get(Args(), -1, ''))
+enddef
+
+def Test_the_logged_summary_carries_no_count_the_user_cannot_act_on(): void
+  LM.Clear()
+  Scan()
+
+  assert_equal(
+    ['Ghostcode - ghostcode.vim - Fill: 7 symbols, 2 ghost'],
+    LM.History()->mapnew((_, m) => join(m.lines, ' '))->filter((_, l) => l =~# 'symbols')
+  )
+enddef
+
+def Test_a_report_from_an_older_binary_still_logs_its_two_counts(): void
+  LM.Clear()
+  Scan(substitute(REPORT, 'unplaced_names', 'unresolved', ''))
+
+  assert_equal(
+    ['Ghostcode - ghostcode.vim - Fill: 7 symbols, 2 ghost'],
+    LM.History()->mapnew((_, m) => join(m.lines, ' '))->filter((_, l) => l =~# 'symbols')
+  )
+enddef
+
 def Test_the_setting_is_not_passed_when_the_user_did_not_set_it(): void
   Scan()
 
@@ -143,7 +204,7 @@ enddef
 def Test_a_skipped_file_does_not_reach_the_quickfix_list(): void
   Scan(join([
     '{"schema": 1, "root": "/project",',
-    '"summary": {"symbols": 1, "ghost": 0, "unresolved": 0},',
+    '"summary": {"symbols": 1, "ghost": 0, "unplaced_names": 0},',
     '"findings": [],',
     '"skipped": [{"file": "autoload/old.vim", "why": "not UTF-8"}]}',
   ], "\n"))
@@ -164,6 +225,10 @@ export def RunAll(): void
   Test_output_that_is_not_json_does_not_throw()
   Test_an_unknown_schema_stops_rather_than_guessing()
   Test_a_root_with_spaces_is_passed_as_one_argument()
+  Test_the_command_passes_an_escaped_space_as_one_argument()
+  Test_the_command_scans_the_working_directory_with_no_argument()
+  Test_the_logged_summary_carries_no_count_the_user_cannot_act_on()
+  Test_a_report_from_an_older_binary_still_logs_its_two_counts()
   Test_the_setting_is_not_passed_when_the_user_did_not_set_it()
   Test_the_setting_is_passed_when_the_user_set_it()
   Test_the_setting_accepts_a_number()

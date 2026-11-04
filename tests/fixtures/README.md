@@ -21,7 +21,10 @@ setting of `g:ghostcode_exports_are_api`: `-api` for the default, true,
 and `-strict` for false. The `.txt` form is the line Bartleby's workflow
 writes, `file:line:col:text`, with the path relative to the corpus root.
 The `.json` form is derived from it by `tools/fixture-json.py`, so that
-both describe one run and cannot disagree.
+both describe one run and cannot disagree. `tests/parity.rs` compares
+both: the text form whole, and the JSON form's findings, which leaves
+out the root, because it is the absolute path of the machine that
+captured it, and the summary, which was never captured.
 
 ## Why three corpora report nothing
 

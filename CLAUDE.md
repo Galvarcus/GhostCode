@@ -115,6 +115,11 @@ Run from the root of the repository, with Logger reachable.
 - The parity suite is the acceptance test of the port. A difference is
   either a defect here or a fault in the old analyzer, and neither is
   accepted without being read.
+- A result that contradicts the code is the toolchain, not the code.
+  Cargo's fingerprint cache has twice gone stale on this machine and
+  run the old build, once ignoring a deliberate syntax error and once
+  failing a test the fix had already made pass. Clear
+  `target/*/.fingerprint` and measure again before debugging further.
 - To prove a test guards a change, break the change on purpose and
   confirm that a named test fails. The front-end suite needed this: a
   stale `tests/results.txt` once read as a pass while the suite was in

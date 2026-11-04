@@ -35,10 +35,12 @@ pub const SCHEMA: u32 = 1;
 pub struct Summary {
     pub symbols: usize,
     pub ghost: usize,
-    /// References that named nothing this project declares. It is a
-    /// number rather than a finding, because it measures what the
-    /// analyzer could not see rather than what it found.
-    pub unresolved: usize,
+    /// References that named nothing this project declares. It
+    /// counts the host language's own names too, so it measures what
+    /// the analyzer could not place rather than what a reader should
+    /// act on. The front end does not show it, and no part of the
+    /// report is derived from it.
+    pub unplaced_names: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -120,7 +122,7 @@ pub fn analyze(root: &Path, cfg: &Config) -> anyhow::Result<Report> {
     let resolved = resolve::all(&a);
     let reached = reach::walk(&a, &resolved);
 
-    let mut report = build(root, &a, &reached, resolved.unresolved, cfg);
+    let mut report = build(root, &a, &reached, resolved.unplaced, cfg);
 
     report.skipped = found
         .skipped
@@ -180,7 +182,7 @@ pub fn build(
     root: &Path,
     a: &Analysis,
     reached: &HashSet<SymbolId>,
-    unresolved: usize,
+    unplaced_names: usize,
     cfg: &Config,
 ) -> Report {
     let mut findings: Vec<Finding> = a
@@ -207,7 +209,7 @@ pub fn build(
         summary: Summary {
             symbols: a.syms.len(),
             ghost: findings.len(),
-            unresolved,
+            unplaced_names,
         },
         findings,
         skipped: Vec::new(),

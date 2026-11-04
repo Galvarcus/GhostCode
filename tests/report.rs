@@ -13,9 +13,23 @@ use ghostcode::model::Kind;
 use ghostcode::report;
 use ghostcode::report::Finding;
 use ghostcode::report::Report;
+use serde_json::Value;
 
 const LIB: &str = "vim9script\nexport def Used()\nenddef\ndef Dead()\nenddef\n";
 const ENTRY: &str = "vim9script\nimport autoload 'lib.vim' as lib\nlib.Used()\n";
+
+/// FUNCTION: The field names of one JSON object, sorted, so that a
+/// test states the whole shape rather than the fields it remembers.
+fn keys(v: &Value) -> Vec<&str> {
+    let mut out: Vec<&str> = v
+        .as_object()
+        .unwrap_or_else(|| panic!("an object: {v}"))
+        .keys()
+        .map(String::as_str)
+        .collect();
+    out.sort_unstable();
+    out
+}
 
 /// FUNCTION: Scan a project of the given files, strictly, so that an
 /// export that nothing uses is reported like anything else.
@@ -96,12 +110,12 @@ fn paths_are_relative_to_the_root() {
 }
 
 #[test]
-fn unresolved_is_a_summary_number_and_never_a_finding() {
-    let dir = TempDir::new("unresolved");
+fn an_unplaced_name_is_a_summary_number_and_never_a_finding() {
+    let dir = TempDir::new("unplaced");
     dir.write("plugin/p.vim", "vim9script\nNoSuchFunction()\n");
 
     let r = run(&dir);
-    assert_eq!(r.summary.unresolved, 1, "the call named nothing");
+    assert_eq!(r.summary.unplaced_names, 1, "the call named nothing");
     assert!(r.findings.is_empty());
 }
 
@@ -162,16 +176,33 @@ fn a_write_only_finding_prints_its_own_tag_not_ghost() {
     );
 }
 
+/// The names in this test are the JSON contract. The parity fixtures
+/// cannot pin them: they carry no summary, and their root is the
+/// absolute path of the machine that captured them.
 #[test]
-fn json_carries_the_schema_the_summary_and_the_findings() {
+fn json_carries_every_field_a_consumer_reads() {
     let dir = project("json");
     let text = report::json(&run(&dir));
+    let v: Value = serde_json::from_str(&text).expect("the report is JSON");
 
-    assert!(text.contains("\"schema\": 1"), "{text}");
-    assert!(text.contains("\"class\": \"ghost\""), "{text}");
-    assert!(text.contains("\"kind\": \"function\""), "{text}");
-    assert!(text.contains("\"name\": \"Dead\""), "{text}");
-    assert!(text.contains("\"unresolved\""), "{text}");
+    assert_eq!(
+        keys(&v),
+        ["findings", "root", "schema", "skipped", "summary"]
+    );
+    assert_eq!(keys(&v["summary"]), ["ghost", "symbols", "unplaced_names"]);
+    assert_eq!(
+        keys(&v["findings"][0]),
+        ["class", "col", "file", "kind", "lang", "line", "name"]
+    );
+
+    assert_eq!(
+        v["schema"],
+        report::SCHEMA,
+        "the front end refuses a schema it does not know"
+    );
+    assert_eq!(v["findings"][0]["class"], "ghost");
+    assert_eq!(v["findings"][0]["kind"], "function");
+    assert_eq!(v["findings"][0]["name"], "Dead");
 }
 
 #[test]
