@@ -206,13 +206,13 @@ fn lex_line(
             continue;
         }
 
-        if is_ident_start(c) {
+        if is_ident_start(c) && (!is_sigil(c) || src.get(i + 1).is_some_and(|n| is_ident(*n))) {
             let start = i;
 
-            // The first character is taken whatever it is, because a
-            // name may open with a sigil that cannot appear again:
-            // `&cp`, `$HOME`, `@a`. Testing the loop's condition
-            // against it would consume nothing and never advance.
+            // The first character is skipped rather than tested,
+            // because a sigil is not a name character and the loop
+            // would consume nothing and never advance: `&cp`,
+            // `$HOME`, `@a`.
             i += 1;
             while i < src.len() && is_ident(src[i]) {
                 i += 1;
@@ -359,7 +359,18 @@ fn is_num_dot(src: &[char], i: usize) -> bool {
 }
 
 fn is_ident_start(c: char) -> bool {
-    c.is_ascii_alphabetic() || c == '_' || c == '&' || c == '$' || c == '@'
+    c.is_ascii_alphabetic() || c == '_' || is_sigil(c)
+}
+
+/// FUNCTION: True when a character opens a name of Vim's own, which
+/// is a name it cannot appear inside.
+///
+/// A sigil with no name after it is punctuation, and reading it as a
+/// name of one character costs the operator that starts with it:
+/// `&&` lexed as two names before this rule, and every one of them
+/// was counted as a reference that resolved to nothing.
+fn is_sigil(c: char) -> bool {
+    c == '&' || c == '$' || c == '@'
 }
 
 // A scope prefix such as `g:` is three tokens, not one, because Vim9
@@ -407,6 +418,21 @@ mod tests {
         let toks = tokens("var x = 1 # why it is one\n");
 
         assert_eq!(texts(&toks, TokKind::Comment), vec!["# why it is one"]);
+    }
+
+    #[test]
+    fn a_logical_and_is_one_operator() {
+        let toks = tokens("if a && b\n");
+
+        assert_eq!(texts(&toks, TokKind::Ident), vec!["if", "a", "b"]);
+        assert_eq!(texts(&toks, TokKind::Op), vec!["&&"]);
+    }
+
+    #[test]
+    fn an_option_still_lexes_as_one_name() {
+        let toks = tokens("if &cp && !&wrap\n");
+
+        assert_eq!(texts(&toks, TokKind::Ident), vec!["if", "&cp", "&wrap"]);
     }
 
     #[test]
