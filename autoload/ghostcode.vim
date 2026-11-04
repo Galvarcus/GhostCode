@@ -63,7 +63,7 @@ export def Run(path: string = ''): void
 enddef
 
 # FUNCTION: The binary to run: the setting, then $PATH, then the copy
-# beside this plugin, which is where a release puts it.
+# beside this plugin, which the user fills from a release asset.
 def Bin(): string
   var set = get(g:, SETTING_BIN, '')
 
@@ -80,7 +80,7 @@ def Bin(): string
   return executable(bundled) ? bundled : ''
 enddef
 
-# FUNCTION: Where a release puts the binary inside the plugin.
+# FUNCTION: Where a copy of the binary sits inside the plugin.
 def Bundled(): string
   return fnamemodify(expand('<script>'), ':h:h') .. $'/{BIN_DIR}/{BIN}'
 enddef

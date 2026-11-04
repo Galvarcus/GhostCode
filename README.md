@@ -3,14 +3,13 @@
 ![Vim](https://img.shields.io/badge/vim-9.1%2B-019733)
 ![License](https://img.shields.io/badge/license-GPL--3.0-blue)
 
-Ghostcode finds unreferenced code in Vim9 plugins. It scans a project
-for functions, methods, classes, fields, enum values, and script-level
-variables, then reports every one that nothing in the project ever
-calls or reads.
+Ghostcode is an analyzer for unreferenced code in Vim9 script, with
+Vim plugin functionality. It scans a project for functions, methods,
+classes, fields, enum values, and script-level variables, then reports
+every one that nothing in the project ever calls or reads.
 
-It runs as a command line program and as a Vim plugin. The analysis is
-the program; the plugin runs it and puts the findings in the quickfix
-list.
+The analyzer is a command line program. The Vim plugin runs it and puts
+the findings in the quickfix list.
 
 ## Requirements
 
@@ -52,7 +51,7 @@ Install Ghostcode and Logger with your plugin manager.
 
 ```vim
 Plug 'Galvarcus/Logger'
-Plug 'Galvarcus/ghostcode'
+Plug 'Galvarcus/GhostCode'
 ```
 
 **Native package**
@@ -61,12 +60,14 @@ Plug 'Galvarcus/ghostcode'
 git clone https://github.com/Galvarcus/Logger.git \
   ~/.vim/pack/vendor/start/Logger
 git clone https://github.com/Galvarcus/GhostCode.git \
-  ~/.vim/pack/vendor/start/ghostcode
+  ~/.vim/pack/vendor/start/GhostCode
 ```
 
 The plugin looks for the binary at `g:ghostcode_bin`, then on `$PATH`,
-then in its own `bin/` directory. When it finds none, it says so
-through Logger and names each place it looked.
+then in a `bin/` directory of its own. Create that directory and put a
+release asset in it to keep the binary beside the plugin. When the
+plugin finds no binary, it says so through Logger and names each place
+it looked.
 
 ## Usage
 
@@ -186,12 +187,13 @@ A flag overrides the file:
 
 ## What Ghostcode scans
 
-Ghostcode reads the files git tracks. It skips what `.gitignore`
-excludes, so a scan agrees with what CI sees, and `--no-ignore` turns
-that off. It stops at the project root and follows no symlink out of
-it, because a finding outside the root is one you cannot act on. It
-skips hidden directories, as Vim's own `globpath` does; name a file in
-`entry` to scan one anyway.
+Ghostcode reads the files git does not ignore, whether git tracks them
+or not, and `--no-ignore` turns the exclusions off. Outside a
+repository nothing is ignored and every file is read. It stops at the
+project root and follows no symlink out of it, because a finding
+outside the root is one you cannot act on. It skips hidden
+directories, as Vim's own `globpath` does; name a file in `entry` to
+scan one anyway.
 
 ## What Ghostcode detects
 
