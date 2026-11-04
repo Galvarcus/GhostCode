@@ -141,6 +141,34 @@ fn an_interface_signature_declares_no_symbol_of_its_own() {
 }
 
 #[test]
+fn an_interface_field_after_a_signature_is_still_declared() {
+    let a = scan(
+        "autoload/p.vim",
+        "vim9script\nexport interface Thing\n  def Do()\n  var width: number\nendinterface\n",
+    );
+
+    assert_eq!(
+        decls(&a),
+        vec!["interface Thing", "field width"],
+        "a signature opens no body, so the field after it is the interface's"
+    );
+}
+
+#[test]
+fn a_field_after_an_abstract_signature_is_still_declared() {
+    let a = scan(
+        "autoload/p.vim",
+        "vim9script\nabstract class Base\n  abstract def M()\n  var width: number\nendclass\n",
+    );
+
+    assert_eq!(
+        decls(&a),
+        vec!["class Base", "method M", "field width"],
+        "an abstract method opens no body either"
+    );
+}
+
+#[test]
 fn an_entry_script_directory_roots_its_top_level_code() {
     let root = Path::new("/project");
 

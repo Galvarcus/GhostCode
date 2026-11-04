@@ -38,6 +38,24 @@ fn a_constructor_assignment_gives_the_variable_its_type() {
 }
 
 #[test]
+fn a_parameter_named_abstract_does_not_leak_a_local_into_the_fields() {
+    let text = "vim9script\nclass C\n  var inner: Helper\n  def Use(abstract: bool)\n    var inner: Other\n  enddef\n  def Go()\n    this.inner.Open()\n  enddef\nendclass\n";
+
+    assert_eq!(
+        recv_of(text, "Open"),
+        Some("Helper".to_string()),
+        "the local belongs to the method, whatever its parameters are called"
+    );
+}
+
+#[test]
+fn a_field_after_an_abstract_signature_keeps_its_type() {
+    let text = "vim9script\nabstract class Base\n  abstract def M()\n  var inner: Helper\n  def Use()\n    this.inner.Open()\n  enddef\nendclass\n";
+
+    assert_eq!(recv_of(text, "Open"), Some("Helper".to_string()));
+}
+
+#[test]
 fn a_parameter_type_gives_its_method_the_receiver_type() {
     let text = "vim9script\ndef F(menu: Menu)\n  menu.Open()\nenddef\n";
 

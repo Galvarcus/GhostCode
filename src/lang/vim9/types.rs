@@ -27,6 +27,7 @@ impl Types {
     pub fn of_file(stmts: &[Vec<Tok>]) -> Self {
         let mut types = Self::default();
         let mut owner: Option<String> = None;
+        let mut interface = false;
         let mut depth = 0u32;
 
         for stmt in stmts {
@@ -35,6 +36,7 @@ impl Types {
             match words.first().copied() {
                 Some("endclass" | "endenum" | "endinterface") => {
                     owner = None;
+                    interface = false;
                     depth = 0;
                     continue;
                 }
@@ -45,14 +47,18 @@ impl Types {
                 _ => {}
             }
 
-            if let Some(name) = opens_container(&words) {
+            if let Some((keyword, name)) = opens_container(&words) {
                 owner = Some(name.to_string());
+                interface = keyword == "interface";
                 depth = 0;
                 continue;
             }
 
             if is_def(stmt, &words) {
-                depth += 1;
+                if !interface {
+                    depth += 1;
+                }
+
                 continue;
             }
 
@@ -207,8 +213,9 @@ fn closing(stmt: &[Tok], open: usize) -> Option<usize> {
     None
 }
 
-/// FUNCTION: The name of the container a statement opens.
-fn opens_container<'a>(words: &'a [&'a str]) -> Option<&'a str> {
+/// FUNCTION: The container a statement opens, as the keyword that
+/// opens it and the name it gives it.
+fn opens_container<'a>(words: &'a [&'a str]) -> Option<(&'a str, &'a str)> {
     let rest = match words.split_first() {
         Some((&"export", rest)) => rest,
         _ => words,
@@ -219,14 +226,27 @@ fn opens_container<'a>(words: &'a [&'a str]) -> Option<&'a str> {
     };
 
     match rest.split_first() {
-        Some((&("class" | "enum" | "interface"), rest)) => rest.first().copied(),
+        Some((keyword @ &("class" | "enum" | "interface"), rest)) => {
+            rest.first().map(|name| (*keyword, *name))
+        }
         _ => None,
     }
 }
 
 /// FUNCTION: True when a statement opens a function body.
+///
+/// An abstract method is declared without one, and no `enddef`
+/// follows it, so a depth raised for it would swallow the fields
+/// declared after it.
 fn is_def(stmt: &[Tok], words: &[&str]) -> bool {
-    words.contains(&"def") && stmt.iter().any(|t| t.text == "(")
+    let Some(at) = words.iter().position(|w| *w == "def") else {
+        return false;
+    };
+
+    // Only a modifier before `def` can make it abstract. A parameter
+    // or a default value may be called anything, `abstract` among
+    // them, and says nothing about whether a body follows.
+    !words[..at].contains(&"abstract") && stmt.iter().any(|t| t.text == "(")
 }
 
 /// FUNCTION: The identifiers of a statement, in order.

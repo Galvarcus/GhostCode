@@ -111,7 +111,10 @@ pub fn declarations(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
         }
 
         if function(file, stmt, &words, line, &scope, out) {
-            scope.depth += 1;
+            if opens_def_body(&words, &scope) {
+                scope.depth += 1;
+            }
+
             continue;
         }
 
@@ -142,18 +145,8 @@ fn open_container(
     let (exported, rest) = strip_export(words);
     let rest = strip_modifiers(rest);
 
-    let Some((keyword, name)) = rest
-        .split_first()
-        .and_then(|(k, r)| r.first().map(|n| (*k, *n)))
-    else {
+    let Some((container, name)) = container_name(rest) else {
         return false;
-    };
-
-    let container = match keyword {
-        "class" => Container::Class,
-        "enum" => Container::Enum,
-        "interface" => Container::Interface,
-        _ => return false,
     };
 
     let kind = match container {
@@ -722,8 +715,9 @@ fn opens_body(file: &Path, stmt: &[Tok], words: &[&str], scope: &mut Scope) -> O
     let (_, rest) = strip_export(words);
     let rest = strip_modifiers(rest);
 
-    if let Some(name) = container_name(rest) {
+    if let Some((container, name)) = container_name(rest) {
         scope.owner = Some(name.to_string());
+        scope.container = container;
         return None;
     }
 
@@ -736,16 +730,50 @@ fn opens_body(file: &Path, stmt: &[Tok], words: &[&str], scope: &mut Scope) -> O
         return None;
     }
 
+    // A signature with no body declares nothing to credit, so the
+    // references after it keep the origin they had. Naming it would
+    // key them on a symbol the declarations never recorded, and the
+    // walk would drop every one of those edges.
+    if !opens_def_body(words, scope) {
+        return None;
+    }
+
     Some(SymbolId::of(file, scope.owner.as_deref(), name))
 }
 
-/// FUNCTION: The name of the class, enum or interface a statement
-/// opens, if it opens one.
-fn container_name<'a>(words: &'a [&'a str]) -> Option<&'a str> {
-    match words.split_first() {
-        Some((&("class" | "enum" | "interface"), rest)) => rest.first().copied(),
-        _ => None,
+/// FUNCTION: The container a statement opens and the name it gives
+/// it, if it opens one.
+fn container_name<'a>(words: &'a [&'a str]) -> Option<(Container, &'a str)> {
+    let (keyword, rest) = words.split_first()?;
+
+    let container = match *keyword {
+        "class" => Container::Class,
+        "enum" => Container::Enum,
+        "interface" => Container::Interface,
+        _ => return None,
+    };
+
+    Some((container, *rest.first()?))
+}
+
+/// FUNCTION: Whether a `def` statement opens a body that an `enddef`
+/// will close.
+///
+/// A signature in an interface and an abstract method both declare a
+/// method without writing one, so nothing follows them to skip and no
+/// `enddef` ever arrives. A depth raised for either is never lowered,
+/// and the rest of the container is read as that method's locals.
+fn opens_def_body(words: &[&str], scope: &Scope) -> bool {
+    if scope.container == Container::Interface {
+        return false;
     }
+
+    let (_, rest) = strip_export(words);
+
+    !rest
+        .iter()
+        .take_while(|w| MODIFIERS.contains(w))
+        .any(|w| *w == "abstract")
 }
 
 /// FUNCTION: True when a colon after a name introduces a type rather
