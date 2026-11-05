@@ -4,6 +4,7 @@
 //! License: GNU GPL 3.0
 
 mod builtins;
+mod excmds;
 pub mod lex;
 pub mod parse;
 pub mod rules;
