@@ -533,6 +533,13 @@ const KEYWORDS: &[&str] = &[
     "enum_value",
 ];
 
+// Vim's scope letters, which stand before a colon and name where a
+// variable lives rather than naming anything the project declares.
+// `a:` is legacy, for a function's arguments, and is here because the
+// scan reads legacy files too.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+const SCOPES: &[&str] = &["a", "b", "g", "l", "s", "t", "v", "w"];
+
 // Vim's command modifiers, which are the only words a command may
 // stand behind. Twenty-three are the list at `:help <mods>`, and
 // `legacy` is the Vim9 prefix at `:help :legacy`, which that list
@@ -716,6 +723,14 @@ impl Collect<'_> {
         // A name against a colon is a parameter or a key, not a use:
         // `{callback: OnDone}` uses OnDone, not callback.
         if stmt.get(i + 1).is_some_and(|t| t.text == ":") && !is_type_position(stmt, i) {
+            return;
+        }
+
+        // Vim's scope notation is three tokens, because the lexer
+        // cannot let a name swallow a colon that an annotation writes
+        // against it. The letter is Vim's own either way.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+        if scoped(stmt, i, tok.text.as_str()) {
             return;
         }
 
@@ -947,6 +962,29 @@ fn called(stmt: &[Tok], i: usize) -> bool {
 /// `g:`, which a stream of tokens cannot tell from an annotation.
 /// None of those costs a credit: the name is still resolved, and the
 /// answer is read only where nothing resolved.
+/// FUNCTION: Whether a name belongs to Vim's scope notation, as the
+/// `v` and the `version` of `v:version` both do.
+///
+/// The scope letter is Vim's wherever it stands. The name after the
+/// colon is Vim's only in `v:`, which is Vim's own namespace entirely;
+/// `g:`, `b:`, `w:` and `t:` hold names the project or the user chose,
+/// and those keep their references.
+///
+/// A dictionary excludes the second rule, because a key named like a
+/// scope letter would otherwise hide the value beside it: `{v: Wide}`
+/// uses `Wide`. A ternary excludes nothing, because the name before
+/// its colon is not a scope letter unless the project named a
+/// variable `v`, which it may, and which costs that variable one
+/// credit of the many it has.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+fn scoped(stmt: &[Tok], i: usize, word: &str) -> bool {
+    if SCOPES.contains(&word) && stmt.get(i + 1).is_some_and(|t| t.text == ":") {
+        return true;
+    }
+
+    i >= 2 && stmt[i - 1].text == ":" && stmt[i - 2].text == "v" && is_type_position(stmt, i)
+}
+
 /// FUNCTION: Whether a name stands where Vim reads a command: at the
 /// head of the statement, after nothing but command modifiers.
 ///
