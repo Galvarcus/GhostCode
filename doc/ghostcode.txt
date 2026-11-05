@@ -53,8 +53,18 @@ https://github.com/Galvarcus/GhostCode/releases/latest, check it against the
     shasum -a 256 -c ghostcode-x86_64-unknown-linux-gnu.sha256
     install -m 755 ghostcode-x86_64-unknown-linux-gnu ~/.local/bin/ghostcode
 <
-The assets are `ghostcode-x86_64-unknown-linux-gnu`,
-`ghostcode-x86_64-apple-darwin`, and `ghostcode-aarch64-apple-darwin`.
+
+    Asset                                  Runs on ~
+
+    `ghostcode-x86_64-unknown-linux-gnu`   Linux on x86-64, with glibc 2.34
+                                           or later: Ubuntu 22.04, Debian 12,
+                                           RHEL 9, and the later releases of
+                                           each
+
+    `ghostcode-x86_64-apple-darwin`        macOS 10.12 or later, on Intel
+
+    `ghostcode-aarch64-apple-darwin`       macOS 11.0 or later, on Apple
+                                           silicon
 
 Releases after v0.1.0 carry a build provenance attestation, which names the
 workflow and the commit that produced an asset. v0.1.0 has none:
