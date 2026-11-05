@@ -6,3 +6,17 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+
+  # Every Rust dependency is pinned to an exact version, by the rule in
+  # CLAUDE.md, so nothing moves without a pull request that says so.
+  # They are grouped, because a lockfile that moves one at a time costs
+  # a run of the suite for each.
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      cargo:
+        patterns:
+          - "*"
