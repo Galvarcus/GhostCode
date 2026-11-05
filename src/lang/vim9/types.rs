@@ -118,7 +118,7 @@ impl Locals {
 
         // A parameter with no type is still a variable, and knowing
         // that is what tells it from a class name used directly.
-        for param in stmt[open + 1..close].split(|t| t.text == ",") {
+        for param in params(&stmt[open + 1..close]) {
             if let Some((name, ty)) = annotated(param) {
                 locals.vars.insert(name, ty);
             } else if let Some(name) = param.first().filter(|t| t.kind == TokKind::Ident) {
@@ -137,6 +137,31 @@ impl Locals {
         }
     }
 
+    /// METHOD: Record the variables a `for` statement binds, as
+    /// `for f in xs` binds one and `for [k, v] in items(d)` binds two.
+    ///
+    /// The loop states no type, so the type is empty: what matters is
+    /// that the name is a variable of this body at all, which is what
+    /// keeps it out of the reference list and stops a receiver of that
+    /// name being read as a class naming itself.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+    pub fn bind_loop(&mut self, stmt: &[Tok]) {
+        if stmt.first().map(|t| t.text.as_str()) != Some("for") {
+            return;
+        }
+
+        let end = stmt
+            .iter()
+            .position(|t| t.text == "in")
+            .unwrap_or(stmt.len());
+
+        for tok in &stmt[1..end.max(1)] {
+            if tok.kind == TokKind::Ident {
+                self.vars.entry(tok.text.clone()).or_default();
+            }
+        }
+    }
+
     /// METHOD: The type of a name in this body, where it has one.
     pub fn get(&self, name: &str) -> Option<&str> {
         self.vars.get(name).map(String::as_str)
@@ -147,6 +172,94 @@ impl Locals {
     pub fn holds(&self, name: &str) -> bool {
         self.vars.contains_key(name)
     }
+}
+
+/// FUNCTION: The parameters of a list, cut at the commas that
+/// separate them and at no others.
+///
+/// A comma inside a parameter separates nothing: `func(string, Config)`
+/// is one parameter's type and `[One, Two]` is one parameter's
+/// default. Reading either comma as a separator takes the name after
+/// it for a parameter, and a parameter is dropped from the references,
+/// so the project symbol of that name loses a credit it is owed.
+///
+/// An angle bracket counts, because `tuple<number, Config>` holds a
+/// comma as well. A comparison in a default leaves the depth wrong,
+/// and the parameters after it are then not found, which costs the
+/// count a name it could have placed and no symbol a credit.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+fn params(toks: &[Tok]) -> Vec<&[Tok]> {
+    let mut out = Vec::new();
+    let mut depth = 0i32;
+    let mut start = 0;
+
+    for (i, tok) in toks.iter().enumerate() {
+        match tok.text.as_str() {
+            "(" | "[" | "{" | "<" => depth += 1,
+            ")" | "]" | "}" | ">" => depth -= 1,
+            ">>" => depth -= 2,
+            "," if depth == 0 => {
+                out.push(&toks[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+
+    out.push(&toks[start..]);
+    out
+}
+
+/// FUNCTION: The names a parameter list binds, as a signature and a
+/// lambda both write one: `(a, b: string, c = 1)`.
+///
+/// The first name of each parameter is its own, whether a type, a
+/// default, or the `...` of a variadic follows it.
+fn list_names(toks: &[Tok]) -> Vec<&str> {
+    params(toks)
+        .into_iter()
+        .filter_map(|param| param.iter().find(|t| t.kind == TokKind::Ident))
+        .map(|t| t.text.as_str())
+        .collect()
+}
+
+/// FUNCTION: The names the parameter list of a signature binds, which
+/// the signature declares rather than uses.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+pub fn param_names(stmt: &[Tok]) -> Vec<&str> {
+    let Some(open) = stmt.iter().position(|t| t.text == "(") else {
+        return Vec::new();
+    };
+    let close = closing(stmt, open).unwrap_or(stmt.len());
+
+    list_names(&stmt[open + 1..close])
+}
+
+/// FUNCTION: The parameters of every lambda in one statement, which
+/// are names of the lambda and of nothing else.
+///
+/// A lambda's parameters cannot join the body's variables, because the
+/// statement that holds the lambda is where they end: a body that
+/// writes `(_, Fmt) => Fmt` on one line may call its own `Fmt()` on
+/// the next. Vim9 writes `=>` for nothing else, so the arrow is what
+/// finds them.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+pub fn lambda_params(stmt: &[Tok]) -> Vec<&str> {
+    let mut names = Vec::new();
+
+    for at in 1..stmt.len() {
+        if stmt[at].text != "=>" || stmt[at - 1].text != ")" {
+            continue;
+        }
+
+        let Some(open) = opening(stmt, at - 1) else {
+            continue;
+        };
+
+        names.extend(list_names(&stmt[open + 1..at - 1]));
+    }
+
+    names
 }
 
 /// FUNCTION: The name a statement declares and the type it gives it,

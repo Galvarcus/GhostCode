@@ -591,6 +591,7 @@ pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
     let mut scope = Scope::default();
     let mut origin = SymbolId::script(file);
     let mut locals = Locals::default();
+    let mut in_def = false;
 
     for stmt in stmts {
         let words: Vec<&str> = stmt
@@ -602,12 +603,20 @@ pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
         if close_container(&words, &mut scope) {
             origin = SymbolId::script(file);
             locals = Locals::default();
+            in_def = false;
             continue;
         }
 
         // A declaration inside the body gives its name a type that
-        // the calls after it are resolved against.
+        // the calls after it are resolved against, and a loop binds
+        // its variables for the statements the loop holds.
         locals.declare(stmt);
+        locals.bind_loop(stmt);
+
+        // A declaration's own name is not a use of itself, so the
+        // statement is read from after it: a def's parameter types and
+        // defaults, and a var's initialiser, are still references.
+        let skip = declared_name_at(stmt, &words);
 
         let mut sink = Collect {
             file,
@@ -615,18 +624,18 @@ pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
             owner: scope.owner.as_deref(),
             locals: &locals,
             types: &types,
+            in_def,
+            own: skip.map(|at| stmt[at].text.as_str()),
+            bound: bound_names(stmt, &words),
             out,
         };
 
-        // A declaration's own name is not a use of itself, so the
-        // statement is read from after it: a def's parameter types and
-        // defaults, and a var's initialiser, are still references.
-        let skip = declared_name_at(stmt, &words);
         sink.statement(stmt, skip);
 
         if let Some(id) = opens_body(file, stmt, &words, &mut scope) {
             origin = id;
             locals = Locals::of_signature(stmt);
+            in_def = true;
         }
     }
 }
@@ -639,6 +648,9 @@ struct Collect<'a> {
     owner: Option<&'a str>,
     locals: &'a Locals,
     types: &'a Types,
+    in_def: bool,
+    own: Option<&'a str>,
+    bound: Vec<&'a str>,
     out: &'a mut dyn Sink,
 }
 
@@ -673,6 +685,15 @@ impl Collect<'_> {
 
         let recv = types::recv_type(stmt, i, self.owner, self.locals, self.types);
         let word = tok.text.as_str();
+
+        // A variable of this body is placed already. It is dropped
+        // rather than marked, because a mark is read only after
+        // resolution, and by then a project symbol of the same name
+        // has taken a credit the variable never gave it.
+        if recv.is_none() && self.local(word) {
+            return;
+        }
+
         let owned = NULLS.contains(&word)
             || (TYPES.contains(&word) && in_type(stmt, i) && !called(stmt, i));
 
@@ -685,6 +706,28 @@ impl Collect<'_> {
             target: None,
             owned,
         });
+    }
+
+    /// METHOD: Whether a name is a variable of the code around it: a
+    /// parameter, a declaration, a loop variable, or a parameter of a
+    /// lambda. None of them is a symbol of the project, so none of
+    /// them can be a reference to one.
+    ///
+    /// A name a parameter list binds is answered on any statement,
+    /// because a parameter is never a symbol. A variable of a body is
+    /// answered only inside one: at script level the same names are
+    /// script variables, which are symbols, and the reads of them are
+    /// the credits that keep them off the report. The name the
+    /// statement itself declares is left alone as well, because
+    /// `var Menu = Menu.new()` names the class on the right, and that
+    /// is a credit the class is owed.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+    fn local(&self, word: &str) -> bool {
+        if self.bound.contains(&word) {
+            return true;
+        }
+
+        self.in_def && Some(word) != self.own && self.locals.holds(word)
     }
 
     /// METHOD: Record what a string holds. A builtin that takes a name
@@ -721,6 +764,25 @@ impl Collect<'_> {
             });
         }
     }
+}
+
+/// FUNCTION: The names a statement binds as parameters: those of a
+/// signature, and those of every lambda the statement holds.
+///
+/// A signature declares its parameters exactly as a `var` declares
+/// its name, and the walk already skips that one. The colon rule
+/// cannot do it, because the colon of `amt: number` introduces a type
+/// and so is not the colon of a dictionary key.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+fn bound_names<'a>(stmt: &'a [Tok], words: &[&str]) -> Vec<&'a str> {
+    let mut names = types::lambda_params(stmt);
+
+    let (_, rest) = strip_export(words);
+    if strip_modifiers(rest).first().copied() == Some("def") {
+        names.extend(types::param_names(stmt));
+    }
+
+    names
 }
 
 /// FUNCTION: The index of the name a statement declares, which is a
