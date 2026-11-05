@@ -153,6 +153,23 @@ impl<'a> Index<'a> {
         self.cloned(self.members.get(r.name.as_str()))
     }
 
+    /// METHOD: Whether a reference names something the analyzer itself
+    /// recorded, which credits no symbol and is no unplaced name.
+    ///
+    /// An import's namespace alias is the case. `import 'c.vim' as CO`
+    /// registers the alias, and `CO.ROLE` is resolved through it, but
+    /// the parser emits a reference for the `CO` token as well, which
+    /// nothing declares. Counting it is counting the analyzer's own
+    /// data twice.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+    fn knows(&self, r: &Reference) -> bool {
+        r.recv.is_none()
+            && self
+                .aliases
+                .get(r.file.as_path())
+                .is_some_and(|a| a.contains_key(r.name.as_str()))
+    }
+
     /// METHOD: The symbol a classic autoload name states, as
     /// `foo#bar#Func` states `autoload/foo/bar.vim::Func`.
     fn autoload(&self, name: &str) -> Option<SymbolId> {
@@ -198,7 +215,10 @@ pub fn all(a: &Analysis) -> Resolved {
         let ids = idx.candidates(r);
 
         if ids.is_empty() {
-            out.unplaced += 1;
+            if !idx.knows(r) {
+                out.unplaced += 1;
+            }
+
             continue;
         }
 
@@ -383,6 +403,57 @@ mod tests {
             ids(&a, &re("plugin/p.vim", Some("util"), "Trim")),
             vec!["autoload/util.vim::Trim"]
         );
+    }
+
+    /// FUNCTION: One alias and the member reached through it, which
+    /// is what the parser emits for `util.Trim()`: a reference for
+    /// each token.
+    fn aliased(from: &str, alias: &str, to: &str, member: &str) -> Analysis {
+        Analysis {
+            syms: vec![sym(to, None, member, Kind::Function)],
+            imports: vec![Import {
+                from: PathBuf::from(from),
+                to: PathBuf::from(to),
+                alias: Some(alias.to_string()),
+                names: Vec::new(),
+            }],
+            refs: vec![re(from, None, alias), re(from, Some(alias), member)],
+            ..Analysis::default()
+        }
+    }
+
+    /// An alias is a name the analyzer registered itself, and
+    /// resolution reaches a member through it. Counting the alias
+    /// token as a name that could not be placed counts the analyzer's
+    /// own data twice.
+    #[test]
+    fn an_import_alias_is_not_an_unplaced_name() {
+        let out = all(&aliased(
+            "plugin/p.vim",
+            "util",
+            "autoload/util.vim",
+            "Trim",
+        ));
+        let member: Vec<String> = out.targets[&1].iter().map(SymbolId::to_string).collect();
+
+        assert_eq!(out.unplaced, 0);
+        assert_eq!(member, vec!["autoload/util.vim::Trim"]);
+        assert!(
+            !out.targets.contains_key(&0),
+            "the alias token credits nothing"
+        );
+    }
+
+    /// An alias belongs to the file that imported it. The same word in
+    /// another file is a name like any other.
+    #[test]
+    fn an_alias_of_another_file_is_still_an_unplaced_name() {
+        // The same import and symbol, with the alias read from a file
+        // that did not write the import.
+        let mut a = aliased("plugin/p.vim", "util", "autoload/util.vim", "Trim");
+        a.refs = vec![re("plugin/q.vim", None, "util")];
+
+        assert_eq!(all(&a).unplaced, 1);
     }
 
     #[test]
