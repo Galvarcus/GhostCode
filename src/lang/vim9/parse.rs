@@ -7,6 +7,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use crate::lang::vim9::builtins;
+use crate::lang::vim9::excmds;
 use crate::lang::vim9::lex::Tok;
 use crate::lang::vim9::lex::TokKind;
 use crate::lang::vim9::types;
@@ -532,6 +533,40 @@ const KEYWORDS: &[&str] = &[
     "enum_value",
 ];
 
+// Vim's command modifiers, which are the only words a command may
+// stand behind. Twenty-three are the list at `:help <mods>`, and
+// `legacy` is the Vim9 prefix at `:help :legacy`, which that list
+// predates. They are short and settled enough to hold by hand where
+// the commands themselves are generated. `filter` is a command but
+// not a modifier, which the help says outright.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+const MODS: &[&str] = &[
+    "aboveleft",
+    "belowright",
+    "botright",
+    "browse",
+    "confirm",
+    "hide",
+    "horizontal",
+    "keepalt",
+    "keepjumps",
+    "keepmarks",
+    "keeppatterns",
+    "leftabove",
+    "legacy",
+    "lockmarks",
+    "noautocmd",
+    "noswapfile",
+    "rightbelow",
+    "sandbox",
+    "silent",
+    "tab",
+    "topleft",
+    "unsilent",
+    "verbose",
+    "vertical",
+];
+
 // Vim9's own type names, marked where they stand as a type and not
 // where one of them is called: `string(x)` is a call to the builtin
 // of that name, and the builtins are a separate question. No class,
@@ -702,6 +737,16 @@ impl Collect<'_> {
         // hand it a credit from every call of Vim's function.
         // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
         if recv.is_none() && called(stmt, i) && builtins::has(word) {
+            return;
+        }
+
+        // A word at the head of a statement is where Vim reads a
+        // command, and a command is Vim's name rather than one the
+        // project could declare. Anywhere else the same word is a
+        // value: `echo` is itself a command, so the word after one
+        // may well be the project's.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+        if recv.is_none() && in_command(stmt, i) && excmds::has(word) {
             return;
         }
 
@@ -902,6 +947,32 @@ fn called(stmt: &[Tok], i: usize) -> bool {
 /// `g:`, which a stream of tokens cannot tell from an annotation.
 /// None of those costs a credit: the name is still resolved, and the
 /// answer is read only where nothing resolved.
+/// FUNCTION: Whether a name stands where Vim reads a command: at the
+/// head of the statement, after nothing but command modifiers.
+///
+/// What follows the name decides as well. A name that is assigned to,
+/// indexed, reached into, or piped from is the project's own, however
+/// much it looks like a command, because Vim reads none of those as a
+/// command line. A name that is called is answered by the builtins
+/// before this, and a project's own function cannot be here at all,
+/// since Vim requires a capital.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+fn in_command(stmt: &[Tok], i: usize) -> bool {
+    if !stmt[..i]
+        .iter()
+        .all(|t| t.text == "!" || MODS.contains(&t.text.as_str()))
+    {
+        return false;
+    }
+
+    !stmt.get(i + 1).is_some_and(|t| {
+        matches!(
+            t.text.as_str(),
+            "(" | "[" | "." | "->" | "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "..=" | "<<=" | ">>="
+        )
+    })
+}
+
 fn in_type(stmt: &[Tok], i: usize) -> bool {
     let mut at = i;
 
