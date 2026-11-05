@@ -11,8 +11,8 @@ name: CI
 # builds wait for the checks of the same run. The workflow this
 # replaced built and published a tag without running one test.
 #
-# Windows is not built. Adding it is one entry in the matrix, plus the
-# executable's extension where an asset is named.
+# Each matrix entry names the extension of its executable, because
+# only Windows has one.
 on:
   push:
     branches:
@@ -255,16 +255,27 @@ jobs:
     name: ${{ matrix.target }}
     needs: gate
     runs-on: ${{ matrix.os }}
+    # The step that names the asset is POSIX shell: a backslash joins
+    # its two lines, which PowerShell does not read.
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
+            ext: ''
           - target: x86_64-apple-darwin
             os: macos-15-intel
+            ext: ''
           - target: aarch64-apple-darwin
             os: macos-15
+            ext: ''
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            ext: .exe
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1
@@ -277,14 +288,18 @@ jobs:
       - name: Build
         run: cargo build --release --locked --target ${{ matrix.target }}
 
+      # The extension stays on the asset, so that Windows runs the
+      # file it downloads without being told to rename it.
       - name: Name the asset
-        run: cp "target/${{ matrix.target }}/release/ghostcode" "ghostcode-${{ matrix.target }}"
+        run: |
+          cp "target/${{ matrix.target }}/release/ghostcode${{ matrix.ext }}" \
+            "ghostcode-${{ matrix.target }}${{ matrix.ext }}"
 
       - name: Keep the asset for the release
         uses: actions/upload-artifact@v7.0.2
         with:
-          name: ghostcode-${{ matrix.target }}
-          path: ghostcode-${{ matrix.target }}
+          name: ghostcode-${{ matrix.target }}${{ matrix.ext }}
+          path: ghostcode-${{ matrix.target }}${{ matrix.ext }}
           if-no-files-found: error
 
   release:
