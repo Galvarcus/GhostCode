@@ -115,6 +115,7 @@ mod tests {
                 None => SymbolId::script(Path::new(file)),
             }),
             target: None,
+            owned: false,
         }
     }
 

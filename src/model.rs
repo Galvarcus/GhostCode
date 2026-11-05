@@ -134,6 +134,12 @@ pub struct Reference {
     /// through a variable of a declared type does. It bypasses every
     /// heuristic in resolution.
     pub target: Option<SymbolId>,
+    /// Set where the name is the language's own, as a Vim9 type word
+    /// in a type is. It is still resolved, because a project symbol of
+    /// that name must still be credited, and the mark is read only
+    /// where nothing resolved, to say that the gap is not one.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+    pub owned: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -35,11 +35,11 @@ pub const SCHEMA: u32 = 1;
 pub struct Summary {
     pub symbols: usize,
     pub ghost: usize,
-    /// References that named nothing this project declares. It
-    /// counts the host language's own names too, so it measures what
-    /// the analyzer could not place rather than what a reader should
-    /// act on. The front end does not show it, and no part of the
-    /// report is derived from it.
+    /// References that named nothing this project declares and that
+    /// the host language does not own. It measures what the analyzer
+    /// could not place rather than what a reader should act on. The
+    /// front end does not show it, and no part of the report is
+    /// derived from it.
     pub unplaced_names: usize,
 }
 
@@ -169,6 +169,7 @@ fn text_references(a: &mut Analysis) {
                 line: t.line,
                 origin: t.origin.clone(),
                 target: None,
+                owned: false,
             });
         }
     }

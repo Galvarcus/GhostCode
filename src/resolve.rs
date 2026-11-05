@@ -215,7 +215,10 @@ pub fn all(a: &Analysis) -> Resolved {
         let ids = idx.candidates(r);
 
         if ids.is_empty() {
-            if !idx.knows(r) {
+            // A name the language owns, and a name the analyzer
+            // recorded itself, are both names it placed: neither is a
+            // gap, and neither credits a symbol.
+            if !r.owned && !idx.knows(r) {
                 out.unplaced += 1;
             }
 
@@ -256,6 +259,7 @@ mod tests {
             line: 1,
             origin: Some(SymbolId::script(Path::new(file))),
             target: None,
+            owned: false,
         }
     }
 
@@ -442,6 +446,48 @@ mod tests {
             !out.targets.contains_key(&0),
             "the alias token credits nothing"
         );
+    }
+
+    /// The mark is read after resolution, never before it. A project
+    /// symbol whose name the language also owns, as a variable called
+    /// `string` is, keeps the credit of every use.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+    #[test]
+    fn a_name_the_language_owns_still_credits_a_symbol_of_that_name() {
+        let a = Analysis {
+            syms: vec![sym("plugin/p.vim", None, "string", Kind::Variable)],
+            refs: vec![Reference {
+                owned: true,
+                ..re("plugin/p.vim", None, "string")
+            }],
+            ..Analysis::default()
+        };
+
+        let out = all(&a);
+
+        assert_eq!(out.unplaced, 0);
+        assert_eq!(
+            out.targets[&0]
+                .iter()
+                .map(SymbolId::to_string)
+                .collect::<Vec<String>>(),
+            vec!["plugin/p.vim::string"]
+        );
+    }
+
+    /// A name the language owns that nothing declares is placed, and
+    /// raises no count.
+    #[test]
+    fn a_name_the_language_owns_is_not_an_unplaced_name() {
+        let a = Analysis {
+            refs: vec![Reference {
+                owned: true,
+                ..re("plugin/p.vim", None, "string")
+            }],
+            ..Analysis::default()
+        };
+
+        assert_eq!(all(&a).unplaced, 0);
     }
 
     /// An alias belongs to the file that imported it. The same word in
