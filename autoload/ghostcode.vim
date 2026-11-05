@@ -108,9 +108,12 @@ enddef
 def Cmd(bin: string, root: string): list<string>
   var cmd = [bin, FLAG_FORMAT]
 
+  # The value is whatever the user wrote, and Vim9 reads only 0 and 1
+  # as a condition. empty() takes any type, so a 2 or a word is passed
+  # on rather than thrown out of the scan.
   if exists($'g:{SETTING_API}')
     add(cmd, FLAG_API)
-    add(cmd, get(g:, SETTING_API) ? 'true' : 'false')
+    add(cmd, empty(get(g:, SETTING_API)) ? 'false' : 'true')
   endif
 
   add(cmd, root)
@@ -142,7 +145,10 @@ def Parse(text: string): dict<any>
     return {}
   endtry
 
+  # The schema is a number in every report the binary writes, and
+  # comparing anything else with one throws.
   if type(report) != v:t_dict || !has_key(report, 'schema')
+      || type(report.schema) != v:t_number
     log.Error(printf(MSG_NOT_JSON, BIN, text))
     return {}
   endif

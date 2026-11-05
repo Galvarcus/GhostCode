@@ -241,6 +241,27 @@ def Test_the_setting_accepts_a_number(): void
   assert_equal('false', args[index(args, '--exports-are-api') + 1])
 enddef
 
+# FUNCTION: A setting is whatever the user wrote, and Vim9 reads only
+# 0 and 1 as a condition, so a value outside them once threw out of
+# the scan instead of being passed on.
+def Test_a_setting_outside_zero_and_one_does_not_throw(): void
+  Scan(REPORT, 0, '/project', 2)
+
+  var args = Args()
+  var at = index(args, '--exports-are-api')
+  assert_true(at >= 0, join(args, '|'))
+  assert_equal('true', args[at + 1])
+enddef
+
+# FUNCTION: The schema is a number in every report the binary writes,
+# and a report that carries anything else is a report this plugin
+# cannot read, which is said rather than thrown.
+def Test_a_schema_that_is_not_a_number_does_not_throw(): void
+  Scan('{"schema": "1", "findings": []}')
+
+  assert_equal([], getqflist())
+enddef
+
 def Test_a_skipped_file_does_not_reach_the_quickfix_list(): void
   Scan(join([
     '{"schema": 1, "root": "/project",',
@@ -273,6 +294,8 @@ export def RunAll(): void
   Test_the_setting_is_not_passed_when_the_user_did_not_set_it()
   Test_the_setting_is_passed_when_the_user_set_it()
   Test_the_setting_accepts_a_number()
+  Test_a_setting_outside_zero_and_one_does_not_throw()
+  Test_a_schema_that_is_not_a_number_does_not_throw()
   Test_a_skipped_file_does_not_reach_the_quickfix_list()
   Test_the_plugin_script_defines_no_default_for_the_setting()
 enddef
