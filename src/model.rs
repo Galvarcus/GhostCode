@@ -5,6 +5,7 @@
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fmt;
+use std::path::Component;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -71,9 +72,11 @@ impl SymbolId {
     /// METHOD: The id of a declaration. `owner` is the name of the
     /// class, enum or interface that holds it, where one does.
     pub fn of(file: &Path, owner: Option<&str>, name: &str) -> Self {
+        let file = Self::text(file);
+
         match owner {
-            Some(owner) => Self(format!("{}::{owner}.{name}", file.display())),
-            None => Self(format!("{}::{name}", file.display())),
+            Some(owner) => Self(format!("{file}::{owner}.{name}")),
+            None => Self(format!("{file}::{name}")),
         }
     }
 
@@ -81,7 +84,19 @@ impl SymbolId {
     /// Angle brackets never appear in an identifier, so it cannot
     /// collide with a declaration's id.
     pub fn script(file: &Path) -> Self {
-        Self(format!("{}::<script>", file.display()))
+        Self(format!("{}::<script>", Self::text(file)))
+    }
+
+    /// METHOD: A file's path as an id carries it, with `/` between its
+    /// parts whatever the platform separates with. One file can be
+    /// named in more than one way, and an id built from the text of a
+    /// path would make each of those names a symbol of its own.
+    fn text(file: &Path) -> String {
+        file.components()
+            .filter(|c| *c != Component::CurDir)
+            .map(|c| c.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/")
     }
 }
 
@@ -252,5 +267,36 @@ mod tests {
         let file = Path::new("plugin/p.vim");
 
         assert_ne!(SymbolId::script(file), SymbolId::of(file, None, "script"));
+    }
+
+    /// One file can be named in more than one way: a `ghostcode.toml`
+    /// entry can carry a leading `./`, and a path built from text can
+    /// separate its parts with `/` where the platform separates with
+    /// `\`. Each of those names one file, so each must give one id.
+    #[test]
+    fn one_file_named_two_ways_gives_one_id() {
+        let plain = Path::new("autoload/ghostcode/log.vim");
+        let dotted = Path::new("./autoload/ghostcode/log.vim");
+
+        assert_eq!(
+            SymbolId::of(plain, None, "New"),
+            SymbolId::of(dotted, None, "New")
+        );
+        assert_eq!(SymbolId::script(plain), SymbolId::script(dotted));
+    }
+
+    /// The guard for Windows, where this cannot fail: the walker
+    /// separates a path with `\` there, and `src/resolve.rs` builds
+    /// an autoload path from text with `/`, so an id that kept the
+    /// platform separator would leave every nested autoload function
+    /// unreachable and reported as a ghost.
+    #[test]
+    fn an_id_separates_its_path_with_forward_slashes() {
+        let file = PathBuf::from("autoload").join("ghostcode").join("log.vim");
+
+        assert_eq!(
+            SymbolId::of(&file, None, "New").to_string(),
+            "autoload/ghostcode/log.vim::New"
+        );
     }
 }
