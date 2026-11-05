@@ -358,11 +358,62 @@ jobs:
         with:
           args: --latest
 
+      # The asset name is the target triple, so the Linux one carries
+      # an `unknown` vendor field that no distribution claims and a
+      # `gnu` that names glibc without a version. What decides whether
+      # the binary runs is the oldest glibc it can load against, which
+      # is a fact about the build rather than about the target. It is
+      # read from the asset here, at the only moment every asset of
+      # the release is in one place, so the note can never be stale.
+      # REFERENCE: https://github.com/Galvarcus/GhostCode/issues/9
+      - name: Write the notes, with the glibc floor of each Linux asset
+        env:
+          CHANGES: ${{ steps.notes.outputs.content }}
+        run: |
+          set -euo pipefail
+
+          notes="$RUNNER_TEMP/notes.md"
+          printf '%s\n' "$CHANGES" > "$notes"
+          shopt -s nullglob
+          paths=(dist/bin/*-linux-gnu)
+
+          if [ ${#paths[@]} -eq 0 ]; then
+            echo "::error::No Linux asset was found to measure."
+            exit 1
+          fi
+
+          printf '\n### Linux compatibility\n\n' >> "$notes"
+
+          # The symbol table is read on its own, so that a failure of
+          # `objdump` itself is not reported as an asset that names no
+          # version.
+          for path in "${paths[@]}"; do
+            name=$(basename "$path")
+            syms=$(objdump -T "$path")
+            need=$(printf '%s\n' "$syms" \
+              | grep -o 'GLIBC_[0-9.]*[0-9]' \
+              | sort -V | tail -1 || true)
+
+            if [ -z "$need" ]; then
+              echo "::error::$name names no glibc symbol version."
+              exit 1
+            fi
+
+            # The code span is built before the format, because
+            # `shellcheck` reads a backtick inside a single-quoted
+            # string as a command substitution and warns.
+            span="\`$name\`"
+            printf -- '- %s needs glibc %s or later.\n' \
+              "$span" "${need#GLIBC_}" >> "$notes"
+          done
+
+          cat "$notes"
+
       - name: Attach the assets and the notes
         uses: softprops/action-gh-release@v3.0.3
         with:
           tag_name: ${{ needs.gate.outputs.tag }}
-          body: ${{ steps.notes.outputs.content }}
+          body_path: ${{ runner.temp }}/notes.md
           files: |
             dist/bin/*
             dist/sums/*
