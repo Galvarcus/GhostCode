@@ -300,3 +300,23 @@ fn a_class_named_in_an_interface_field_is_not_reported() {
         "the annotation in the interface's body names the class"
     );
 }
+
+/// Vim9 reserves `null_object` and its siblings, and an enum value is
+/// the one declaration that may carry such a name. A word held in the
+/// parser's keywords emits no reference at all, and every enum value
+/// is credited today by the reference its own declaration line
+/// carries, so holding the word there made the value a finding on
+/// legal code.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+#[test]
+fn an_enum_value_named_like_a_null_literal_is_not_reported() {
+    let files = vec![(
+        "plugin/p.vim",
+        "vim9script\nenum Mode\n  null_list\n  Other\nendenum\necho Mode.null_list\n",
+    )];
+
+    assert_eq!(
+        ghosts("null_enum_value", &files, false),
+        Vec::<String>::new()
+    );
+}

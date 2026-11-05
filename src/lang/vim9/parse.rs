@@ -531,6 +531,37 @@ const KEYWORDS: &[&str] = &[
     "enum_value",
 ];
 
+// Vim9's own type names, marked where they stand as a type and not
+// where one of them is called: `string(x)` is a call to the builtin
+// of that name, and the builtins are a separate question. No class,
+// enum or interface can carry one of these names, because each has to
+// start with an uppercase letter, but a variable can, so what makes
+// the mark safe is that it is read only where nothing resolved.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+const TYPES: &[&str] = &[
+    "any", "blob", "bool", "channel", "dict", "float", "func", "job", "list", "number", "object",
+    "string", "tuple", "void",
+];
+
+// The names Vim9 reserves for its empty values. No declaration can
+// carry one, with a single exception: an enum value can, which is why
+// these are marked as the language's own rather than dropped with the
+// keywords. A word dropped there is a credit lost, and an enum value
+// of that name would be reported though every use of it stands.
+const NULLS: &[&str] = &[
+    "null_blob",
+    "null_channel",
+    "null_class",
+    "null_dict",
+    "null_function",
+    "null_job",
+    "null_list",
+    "null_object",
+    "null_partial",
+    "null_string",
+    "null_tuple",
+];
+
 // The builtins that take a name as text rather than as code, so that
 // the name inside the string is a call site like any other.
 const BY_NAME: &[&str] = &[
@@ -641,6 +672,9 @@ impl Collect<'_> {
         }
 
         let recv = types::recv_type(stmt, i, self.owner, self.locals, self.types);
+        let word = tok.text.as_str();
+        let owned = NULLS.contains(&word)
+            || (TYPES.contains(&word) && in_type(stmt, i) && !called(stmt, i));
 
         self.out.re(Reference {
             name: tok.text.clone(),
@@ -649,6 +683,7 @@ impl Collect<'_> {
             line: tok.line,
             origin: Some(self.origin.clone()),
             target: None,
+            owned,
         });
     }
 
@@ -682,6 +717,7 @@ impl Collect<'_> {
                 line: tok.line,
                 origin: Some(self.origin.clone()),
                 target: None,
+                owned: false,
             });
         }
     }
@@ -774,6 +810,41 @@ fn opens_def_body(words: &[&str], scope: &Scope) -> bool {
         .iter()
         .take_while(|w| MODIFIERS.contains(w))
         .any(|w| *w == "abstract")
+}
+
+/// FUNCTION: Whether a type word is called rather than named as a
+/// type. `func` is the one type word whose type carries a bracket of
+/// its own, as `func(number): bool` does.
+fn called(stmt: &[Tok], i: usize) -> bool {
+    stmt[i].text != "func" && stmt.get(i + 1).is_some_and(|t| t.text == "(")
+}
+
+/// FUNCTION: Whether the token at a position stands as a type.
+///
+/// A type follows the colon of an annotation or of a return type, and
+/// nests inside the brackets of another type, so the scan walks back
+/// over what a type can hold and reads what comes before it. A value
+/// after the colon of a dictionary entry or of a conditional answers
+/// yes as well, and so does a name behind a scope prefix such as
+/// `g:`, which a stream of tokens cannot tell from an annotation.
+/// None of those costs a credit: the name is still resolved, and the
+/// answer is read only where nothing resolved.
+fn in_type(stmt: &[Tok], i: usize) -> bool {
+    let mut at = i;
+
+    while at > 0 {
+        at -= 1;
+        let text = stmt[at].text.as_str();
+
+        if matches!(text, "<" | ">" | ">>" | "," | "(" | ")" | "?" | "...") || TYPES.contains(&text)
+        {
+            continue;
+        }
+
+        return text == ":";
+    }
+
+    false
 }
 
 /// FUNCTION: True when a colon after a name introduces a type rather
