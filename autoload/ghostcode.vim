@@ -31,6 +31,9 @@ const BIN_DIR: string = 'bin'
 const SETTING_BIN: string = 'ghostcode_bin'
 const SETTING_API: string = 'ghostcode_exports_are_api'
 const FLAG_FORMAT: string = '--format=json'
+# The patch where system() and systemlist() began to take the command
+# as a list. This plugin supports Vim 9.1, which has no such form.
+const PATCH_ARGV: string = 'patch-9.2.0250'
 const FLAG_API: string = '--exports-are-api'
 
 const MSG_NO_BIN: string = 'no %s found. Looked at g:%s, then $PATH, then %s. Install it from the project''s releases, or build it with `cargo install %s`.'
@@ -51,7 +54,7 @@ export def Run(path: string = ''): void
     return
   endif
 
-  var out = systemlist(Cmd(bin, root))
+  var out = Output(Cmd(bin, root))
 
   if v:shell_error != 0
     log.Error(printf(MSG_FAILED, BIN, v:shell_error, join(out, ' ')))
@@ -113,6 +116,18 @@ def Cmd(bin: string, root: string): list<string>
   add(cmd, root)
 
   return cmd
+enddef
+
+# FUNCTION: What the binary printed. A list of arguments keeps each
+# one whole, with no shell to quote for, and Vim takes a list only
+# from the patch above. Before it, every argument is quoted here and
+# the shell is asked to run the line.
+def Output(cmd: list<string>): list<string>
+  if has(PATCH_ARGV)
+    return systemlist(cmd)
+  endif
+
+  return systemlist(cmd->mapnew((_, a) => shellescape(a))->join(' '))
 enddef
 
 # FUNCTION: The report the binary printed, or an empty dictionary when
