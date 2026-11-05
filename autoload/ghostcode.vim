@@ -46,7 +46,11 @@ const MSG_SKIPPED: string = '%s skipped, %s'
 # FUNCTION: Scan path, or the working directory, and put every finding
 # in the quickfix list.
 export def Run(path: string = ''): void
-  var root = fnamemodify(empty(path) ? getcwd() : path, ':p')->substitute('/$', '', '')
+  # A full path ends with the separator of the platform, which the
+  # quickfix paths are built without. A root directory is its own
+  # separator, so that one is kept: dropping it passed no path at all.
+  var root = fnamemodify(empty(path) ? getcwd() : path, ':p')
+    ->substitute('\([^:\\/]\)[\\/]\+$', '\1', '')
   var bin = Bin()
 
   if empty(bin)

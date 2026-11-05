@@ -185,6 +185,15 @@ def Test_a_root_with_spaces_is_passed_as_one_argument(): void
   assert_true(index(Args(), '/tmp/a folder/with space') >= 0, join(Args(), '|'))
 enddef
 
+# FUNCTION: A trailing separator is dropped from the root, so that
+# the quickfix paths read as they always have. The separator of a root
+# directory is the directory, and dropping it passed no path at all.
+def Test_the_root_directory_is_passed_as_itself(): void
+  Scan(REPORT, 0, '/')
+
+  assert_equal('/', get(Args(), -1, ''))
+enddef
+
 def Test_the_command_passes_an_escaped_space_as_one_argument(): void
   Command('/tmp/a\ folder/with\ space')
 
@@ -287,6 +296,7 @@ export def RunAll(): void
   Test_output_that_is_not_json_does_not_throw()
   Test_an_unknown_schema_stops_rather_than_guessing()
   Test_a_root_with_spaces_is_passed_as_one_argument()
+  Test_the_root_directory_is_passed_as_itself()
   Test_the_command_passes_an_escaped_space_as_one_argument()
   Test_the_command_scans_the_working_directory_with_no_argument()
   Test_the_logged_summary_carries_no_count_the_user_cannot_act_on()
