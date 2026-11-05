@@ -16,6 +16,11 @@ import autoload 'ghostcode.vim' as G
 import 'Logger/messages.vim' as LM
 
 const STUB: string = fnamemodify(resolve(expand('<script>')), ':h') .. '/stub/ghostcode'
+# The file name of the binary on the platform running the suite. The
+# script under test derives this too, and a test that derived it from
+# the same place would prove nothing.
+const EXE: string = has('win32') || has('win32unix') ? 'ghostcode.exe' : 'ghostcode'
+const BIN_DIR: string = 'bin'
 const ARGS: string = tempname()
 
 const REPORT: string = join([
@@ -121,6 +126,41 @@ def Test_a_missing_binary_reports_and_does_not_throw(): void
   assert_equal([], getqflist())
 enddef
 
+# FUNCTION: A user who is told that nothing was found has to know
+# which file to go and get. On Windows that file is ghostcode.exe, in
+# the directory beside the plugin as much as on $PATH.
+def Test_a_missing_binary_message_names_the_file_it_wants(): void
+  # $PATH is emptied, because a machine that develops Ghostcode has
+  # the binary on it, and the message under test is the one for a
+  # machine that has none.
+  var path = $PATH
+  var bundled = fnamemodify(resolve(expand('<script>')), ':h:h') .. $'/{BIN_DIR}/{EXE}'
+
+  # A developer who keeps a binary beside the plugin would otherwise
+  # see both assertions fail without being told why.
+  assert_true(executable(bundled) != 1, $'{bundled} exists')
+
+  LM.Clear()
+  g:ghostcode_bin = '/nonexistent/ghostcode'
+  $PATH = ''
+
+  try
+    G.Run('/project')
+  finally
+    $PATH = path
+    unlet! g:ghostcode_bin
+  endtry
+
+  var said = LM.History()
+    ->mapnew((_, m) => join(m.lines, ' '))
+    ->filter((_, l) => l =~# 'Looked at')
+    ->join(' ')
+
+  assert_true(said =~# $'no {EXE} found\.', said)
+  assert_true(said =~# $'/bin/{EXE}\.', said)
+  LM.Clear()
+enddef
+
 def Test_a_non_zero_exit_leaves_the_list_alone(): void
   Scan('boom', 2)
 
@@ -143,6 +183,15 @@ def Test_a_root_with_spaces_is_passed_as_one_argument(): void
   Scan(REPORT, 0, '/tmp/a folder/with space')
 
   assert_true(index(Args(), '/tmp/a folder/with space') >= 0, join(Args(), '|'))
+enddef
+
+# FUNCTION: A trailing separator is dropped from the root, so that
+# the quickfix paths read as they always have. The separator of a root
+# directory is the directory, and dropping it passed no path at all.
+def Test_the_root_directory_is_passed_as_itself(): void
+  Scan(REPORT, 0, '/')
+
+  assert_equal('/', get(Args(), -1, ''))
 enddef
 
 def Test_the_command_passes_an_escaped_space_as_one_argument(): void
@@ -201,6 +250,27 @@ def Test_the_setting_accepts_a_number(): void
   assert_equal('false', args[index(args, '--exports-are-api') + 1])
 enddef
 
+# FUNCTION: A setting is whatever the user wrote, and Vim9 reads only
+# 0 and 1 as a condition, so a value outside them once threw out of
+# the scan instead of being passed on.
+def Test_a_setting_outside_zero_and_one_does_not_throw(): void
+  Scan(REPORT, 0, '/project', 2)
+
+  var args = Args()
+  var at = index(args, '--exports-are-api')
+  assert_true(at >= 0, join(args, '|'))
+  assert_equal('true', args[at + 1])
+enddef
+
+# FUNCTION: The schema is a number in every report the binary writes,
+# and a report that carries anything else is a report this plugin
+# cannot read, which is said rather than thrown.
+def Test_a_schema_that_is_not_a_number_does_not_throw(): void
+  Scan('{"schema": "1", "findings": []}')
+
+  assert_equal([], getqflist())
+enddef
+
 def Test_a_skipped_file_does_not_reach_the_quickfix_list(): void
   Scan(join([
     '{"schema": 1, "root": "/project",',
@@ -221,10 +291,12 @@ export def RunAll(): void
   Test_the_column_is_one_and_the_line_is_the_reported_one()
   Test_a_path_is_joined_to_the_root_again()
   Test_a_missing_binary_reports_and_does_not_throw()
+  Test_a_missing_binary_message_names_the_file_it_wants()
   Test_a_non_zero_exit_leaves_the_list_alone()
   Test_output_that_is_not_json_does_not_throw()
   Test_an_unknown_schema_stops_rather_than_guessing()
   Test_a_root_with_spaces_is_passed_as_one_argument()
+  Test_the_root_directory_is_passed_as_itself()
   Test_the_command_passes_an_escaped_space_as_one_argument()
   Test_the_command_scans_the_working_directory_with_no_argument()
   Test_the_logged_summary_carries_no_count_the_user_cannot_act_on()
@@ -232,6 +304,8 @@ export def RunAll(): void
   Test_the_setting_is_not_passed_when_the_user_did_not_set_it()
   Test_the_setting_is_passed_when_the_user_set_it()
   Test_the_setting_accepts_a_number()
+  Test_a_setting_outside_zero_and_one_does_not_throw()
+  Test_a_schema_that_is_not_a_number_does_not_throw()
   Test_a_skipped_file_does_not_reach_the_quickfix_list()
   Test_the_plugin_script_defines_no_default_for_the_setting()
 enddef

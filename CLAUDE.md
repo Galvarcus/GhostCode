@@ -103,10 +103,12 @@ needs no stored token.
 - `plugin/ghostcode.vim` defines the command and sets no defaults. A
   default assigned there cannot be told from a value the user chose,
   and would override a project's `ghostcode.toml` everywhere.
-- Both Vim scripts guard on `v:version < 901`, where the
-  `vim9script-plugin` skill states 902. The README and the release
-  promise Vim 9.1, and the front end needs less of Vim than the deleted
-  analyzer did, so raising the guard would drop a supported Vim.
+- Every Vim script guards on `v:version < 902`, which the README and
+  the release promise. A `v:version` number cannot name a patch, so
+  the floor the guard states is 9.2.0000, and a call that arrived in a
+  later patch needs a `has('patch-...')` test of its own. `Output()`
+  in `autoload/ghostcode.vim` is the one that has one: the list form
+  of `systemlist()` arrived in 9.2.0250.
 - `autoload/ghostcode.vim` finds the binary, runs it, and fills the
   quickfix list. Every failure goes through Logger, never through
   `:throw`.

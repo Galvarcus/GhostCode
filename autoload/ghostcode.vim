@@ -1,6 +1,6 @@
 vim9script
 
-if exists('s:is_loaded') || v:version < 901 || &cp
+if exists('s:is_loaded') || v:version < 902 || &cp
   finish
 endif
 
@@ -22,13 +22,21 @@ var log = L.New(expand('<sfile>:t'))
 const SCHEMA: number = 1
 
 const BIN: string = 'ghostcode'
+# The name of the file to run. Windows gives it an extension, and so
+# does Cygwin, whose Vim answers no to win32. The places that name a
+# file follow this: the copy beside the plugin, and the message that
+# says where the plugin looked.
+const EXE: string = BIN .. (has('win32') || has('win32unix') ? '.exe' : '')
 const BIN_DIR: string = 'bin'
 const SETTING_BIN: string = 'ghostcode_bin'
 const SETTING_API: string = 'ghostcode_exports_are_api'
 const FLAG_FORMAT: string = '--format=json'
+# The patch where system() and systemlist() began to take the command
+# as a list. This plugin supports Vim 9.1, which has no such form.
+const PATCH_ARGV: string = 'patch-9.2.0250'
 const FLAG_API: string = '--exports-are-api'
 
-const MSG_NO_BIN: string = 'no %s binary found. Looked at g:%s, then $PATH, then %s. Install it from the project''s releases, or build it with `cargo install %s`.'
+const MSG_NO_BIN: string = 'no %s found. Looked at g:%s, then $PATH, then %s. Install it from the project''s releases, or build it with `cargo install %s`.'
 const MSG_FAILED: string = '%s failed (status %d): %s'
 const MSG_NOT_JSON: string = '%s did not report JSON: %s'
 const MSG_SCHEMA: string = '%s reports schema %d, and this plugin reads %d. Update the plugin.'
@@ -38,15 +46,19 @@ const MSG_SKIPPED: string = '%s skipped, %s'
 # FUNCTION: Scan path, or the working directory, and put every finding
 # in the quickfix list.
 export def Run(path: string = ''): void
-  var root = fnamemodify(empty(path) ? getcwd() : path, ':p')->substitute('/$', '', '')
+  # A full path ends with the separator of the platform, which the
+  # quickfix paths are built without. A root directory is its own
+  # separator, so that one is kept: dropping it passed no path at all.
+  var root = fnamemodify(empty(path) ? getcwd() : path, ':p')
+    ->substitute('\([^:\\/]\)[\\/]\+$', '\1', '')
   var bin = Bin()
 
   if empty(bin)
-    log.Error(printf(MSG_NO_BIN, BIN, SETTING_BIN, Bundled(), BIN))
+    log.Error(printf(MSG_NO_BIN, EXE, SETTING_BIN, Bundled(), BIN))
     return
   endif
 
-  var out = systemlist(Cmd(bin, root))
+  var out = Output(Cmd(bin, root))
 
   if v:shell_error != 0
     log.Error(printf(MSG_FAILED, BIN, v:shell_error, join(out, ' ')))
@@ -64,25 +76,32 @@ enddef
 
 # FUNCTION: The binary to run: the setting, then $PATH, then the copy
 # beside this plugin, which the user fills from a release asset.
+# Each answer is compared with 1, because executable() also returns
+# -1, for a name it cannot decide about, which Vim9 refuses to read as
+# a condition. An empty $PATH is enough to see it.
 def Bin(): string
   var set = get(g:, SETTING_BIN, '')
 
-  if !empty(set) && executable(set)
+  if !empty(set) && executable(set) == 1
     return set
   endif
 
-  if executable(BIN)
-    return BIN
+  if executable(EXE) == 1
+    # The path the search found, rather than the bare name. A bare
+    # name is searched for again by whatever runs it, and on Windows
+    # that search reaches the working directory first, where a copy
+    # inside the project being scanned would win.
+    return exepath(EXE)
   endif
 
   var bundled = Bundled()
 
-  return executable(bundled) ? bundled : ''
+  return executable(bundled) == 1 ? bundled : ''
 enddef
 
 # FUNCTION: Where a copy of the binary sits inside the plugin.
 def Bundled(): string
-  return fnamemodify(expand('<script>'), ':h:h') .. $'/{BIN_DIR}/{BIN}'
+  return fnamemodify(expand('<script>'), ':h:h') .. $'/{BIN_DIR}/{EXE}'
 enddef
 
 # FUNCTION: The command to run, as a list, so that no path needs
@@ -93,14 +112,29 @@ enddef
 def Cmd(bin: string, root: string): list<string>
   var cmd = [bin, FLAG_FORMAT]
 
+  # The value is whatever the user wrote, and Vim9 reads only 0 and 1
+  # as a condition. empty() takes any type, so a 2 or a word is passed
+  # on rather than thrown out of the scan.
   if exists($'g:{SETTING_API}')
     add(cmd, FLAG_API)
-    add(cmd, get(g:, SETTING_API) ? 'true' : 'false')
+    add(cmd, empty(get(g:, SETTING_API)) ? 'false' : 'true')
   endif
 
   add(cmd, root)
 
   return cmd
+enddef
+
+# FUNCTION: What the binary printed. A list of arguments keeps each
+# one whole, with no shell to quote for, and Vim takes a list only
+# from the patch above. Before it, every argument is quoted here and
+# the shell is asked to run the line.
+def Output(cmd: list<string>): list<string>
+  if has(PATCH_ARGV)
+    return systemlist(cmd)
+  endif
+
+  return systemlist(cmd->mapnew((_, a) => shellescape(a))->join(' '))
 enddef
 
 # FUNCTION: The report the binary printed, or an empty dictionary when
@@ -115,7 +149,10 @@ def Parse(text: string): dict<any>
     return {}
   endtry
 
+  # The schema is a number in every report the binary writes, and
+  # comparing anything else with one throws.
   if type(report) != v:t_dict || !has_key(report, 'schema')
+      || type(report.schema) != v:t_number
     log.Error(printf(MSG_NOT_JSON, BIN, text))
     return {}
   endif
