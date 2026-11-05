@@ -6,6 +6,7 @@ use std::path::Component;
 use std::path::Path;
 use std::path::PathBuf;
 
+use crate::lang::vim9::builtins;
 use crate::lang::vim9::lex::Tok;
 use crate::lang::vim9::lex::TokKind;
 use crate::lang::vim9::types;
@@ -691,6 +692,16 @@ impl Collect<'_> {
         // resolution, and by then a project symbol of the same name
         // has taken a credit the variable never gave it.
         if recv.is_none() && self.local(word) {
+            return;
+        }
+
+        // A called lowercase name is Vim's own, because Vim refuses a
+        // `def` and a funcref variable whose name does not start with
+        // a capital. It is dropped for the same reason a local is: a
+        // script variable may carry the name, and resolution would
+        // hand it a credit from every call of Vim's function.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+        if recv.is_none() && called(stmt, i) && builtins::has(word) {
             return;
         }
 
