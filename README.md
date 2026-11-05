@@ -81,9 +81,9 @@ git clone https://github.com/Galvarcus/GhostCode.git \
 
 The plugin looks for the binary at `g:ghostcode_bin`, then on `$PATH`,
 then in a `bin/` directory of its own. Create that directory and put a
-release asset in it to keep the binary beside the plugin. When the
-plugin finds no binary, it says so through Logger and names each place
-it looked.
+release asset in it, named `ghostcode`, or `ghostcode.exe` on Windows,
+to keep the binary beside the plugin. When the plugin finds no binary,
+it says so through Logger and names each place it looked.
 
 ## Usage
 

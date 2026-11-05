@@ -16,6 +16,11 @@ import autoload 'ghostcode.vim' as G
 import 'Logger/messages.vim' as LM
 
 const STUB: string = fnamemodify(resolve(expand('<script>')), ':h') .. '/stub/ghostcode'
+# The file name of the binary on the platform running the suite. The
+# script under test derives this too, and a test that derived it from
+# the same place would prove nothing.
+const EXE: string = has('win32') || has('win32unix') ? 'ghostcode.exe' : 'ghostcode'
+const BIN_DIR: string = 'bin'
 const ARGS: string = tempname()
 
 const REPORT: string = join([
@@ -121,6 +126,41 @@ def Test_a_missing_binary_reports_and_does_not_throw(): void
   assert_equal([], getqflist())
 enddef
 
+# FUNCTION: A user who is told that nothing was found has to know
+# which file to go and get. On Windows that file is ghostcode.exe, in
+# the directory beside the plugin as much as on $PATH.
+def Test_a_missing_binary_message_names_the_file_it_wants(): void
+  # $PATH is emptied, because a machine that develops Ghostcode has
+  # the binary on it, and the message under test is the one for a
+  # machine that has none.
+  var path = $PATH
+  var bundled = fnamemodify(resolve(expand('<script>')), ':h:h') .. $'/{BIN_DIR}/{EXE}'
+
+  # A developer who keeps a binary beside the plugin would otherwise
+  # see both assertions fail without being told why.
+  assert_true(executable(bundled) != 1, $'{bundled} exists')
+
+  LM.Clear()
+  g:ghostcode_bin = '/nonexistent/ghostcode'
+  $PATH = ''
+
+  try
+    G.Run('/project')
+  finally
+    $PATH = path
+    unlet! g:ghostcode_bin
+  endtry
+
+  var said = LM.History()
+    ->mapnew((_, m) => join(m.lines, ' '))
+    ->filter((_, l) => l =~# 'Looked at')
+    ->join(' ')
+
+  assert_true(said =~# $'no {EXE} found\.', said)
+  assert_true(said =~# $'/bin/{EXE}\.', said)
+  LM.Clear()
+enddef
+
 def Test_a_non_zero_exit_leaves_the_list_alone(): void
   Scan('boom', 2)
 
@@ -221,6 +261,7 @@ export def RunAll(): void
   Test_the_column_is_one_and_the_line_is_the_reported_one()
   Test_a_path_is_joined_to_the_root_again()
   Test_a_missing_binary_reports_and_does_not_throw()
+  Test_a_missing_binary_message_names_the_file_it_wants()
   Test_a_non_zero_exit_leaves_the_list_alone()
   Test_output_that_is_not_json_does_not_throw()
   Test_an_unknown_schema_stops_rather_than_guessing()

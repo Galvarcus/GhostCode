@@ -22,13 +22,18 @@ var log = L.New(expand('<sfile>:t'))
 const SCHEMA: number = 1
 
 const BIN: string = 'ghostcode'
+# The name of the file to run. Windows gives it an extension, and so
+# does Cygwin, whose Vim answers no to win32. The places that name a
+# file follow this: the copy beside the plugin, and the message that
+# says where the plugin looked.
+const EXE: string = BIN .. (has('win32') || has('win32unix') ? '.exe' : '')
 const BIN_DIR: string = 'bin'
 const SETTING_BIN: string = 'ghostcode_bin'
 const SETTING_API: string = 'ghostcode_exports_are_api'
 const FLAG_FORMAT: string = '--format=json'
 const FLAG_API: string = '--exports-are-api'
 
-const MSG_NO_BIN: string = 'no %s binary found. Looked at g:%s, then $PATH, then %s. Install it from the project''s releases, or build it with `cargo install %s`.'
+const MSG_NO_BIN: string = 'no %s found. Looked at g:%s, then $PATH, then %s. Install it from the project''s releases, or build it with `cargo install %s`.'
 const MSG_FAILED: string = '%s failed (status %d): %s'
 const MSG_NOT_JSON: string = '%s did not report JSON: %s'
 const MSG_SCHEMA: string = '%s reports schema %d, and this plugin reads %d. Update the plugin.'
@@ -42,7 +47,7 @@ export def Run(path: string = ''): void
   var bin = Bin()
 
   if empty(bin)
-    log.Error(printf(MSG_NO_BIN, BIN, SETTING_BIN, Bundled(), BIN))
+    log.Error(printf(MSG_NO_BIN, EXE, SETTING_BIN, Bundled(), BIN))
     return
   endif
 
@@ -64,25 +69,32 @@ enddef
 
 # FUNCTION: The binary to run: the setting, then $PATH, then the copy
 # beside this plugin, which the user fills from a release asset.
+# Each answer is compared with 1, because executable() also returns
+# -1, for a name it cannot decide about, which Vim9 refuses to read as
+# a condition. An empty $PATH is enough to see it.
 def Bin(): string
   var set = get(g:, SETTING_BIN, '')
 
-  if !empty(set) && executable(set)
+  if !empty(set) && executable(set) == 1
     return set
   endif
 
-  if executable(BIN)
-    return BIN
+  if executable(EXE) == 1
+    # The path the search found, rather than the bare name. A bare
+    # name is searched for again by whatever runs it, and on Windows
+    # that search reaches the working directory first, where a copy
+    # inside the project being scanned would win.
+    return exepath(EXE)
   endif
 
   var bundled = Bundled()
 
-  return executable(bundled) ? bundled : ''
+  return executable(bundled) == 1 ? bundled : ''
 enddef
 
 # FUNCTION: Where a copy of the binary sits inside the plugin.
 def Bundled(): string
-  return fnamemodify(expand('<script>'), ':h:h') .. $'/{BIN_DIR}/{BIN}'
+  return fnamemodify(expand('<script>'), ':h:h') .. $'/{BIN_DIR}/{EXE}'
 enddef
 
 # FUNCTION: The command to run, as a list, so that no path needs
