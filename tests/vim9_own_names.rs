@@ -53,14 +53,16 @@ fn a_type_word_inside_another_type_is_the_languages_own() {
     assert_eq!(owned(text, "string"), vec![true]);
 }
 
-/// A type word is also a builtin function, and a call is a call. The
-/// builtins are a bucket of their own in the issue this belongs to.
+/// `string` is the one name that is both a type word and a function
+/// Vim defines. Called, it is Vim's function, and Vim's own names are
+/// dropped rather than marked, so the reference list holds nothing for
+/// it. In an annotation it is the type word above.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 #[test]
-fn a_type_word_that_is_called_is_a_reference_like_any_other() {
+fn a_type_word_that_is_called_is_vims_own_function() {
     let text = "vim9script\ndef F()\n  var s = string(1)\nenddef\n";
 
-    assert_eq!(owned(text, "string"), vec![false]);
+    assert!(owned(text, "string").is_empty());
 }
 
 #[test]
@@ -115,11 +117,11 @@ fn a_type_inside_a_func_type_is_the_languages_own() {
     assert_eq!(owned(text, "channel"), vec![true]);
 }
 
-/// A dictionary entry whose value calls the builtin of a type word's
-/// name: the value is a call, whatever the colon before it suggests.
+/// A dictionary entry whose value is a call: the value is a use of
+/// the name it calls, whatever the colon before it suggests.
 #[test]
 fn a_call_after_a_colon_is_a_reference_like_any_other() {
-    let text = "vim9script\ndef F()\n  var d = {days: string(30)}\nenddef\n";
+    let text = "vim9script\ndef F()\n  var d = {days: Width(30)}\nenddef\n";
 
-    assert_eq!(owned(text, "string"), vec![false]);
+    assert_eq!(owned(text, "Width"), vec![false]);
 }
