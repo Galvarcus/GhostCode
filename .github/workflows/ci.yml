@@ -3,16 +3,19 @@ name: CI
 # One pipeline for every event, with each job running only for the
 # events that concern it:
 #
-#   pull request      Analyzer, Front end
-#   push to main      Analyzer, Front end, Vimdoc
-#   version tag      Analyzer, Front end, then the release jobs
+#   pull request      the three checks
+#   push to main      the three checks, then Vimdoc
+#   version tag      the three checks, then the release jobs
+#
+# The three checks are the Analyzer, the Analyzer on Windows, and the
+# Front end.
 #
 # A tag therefore cannot ship a binary whose suite never ran: the
 # builds wait for the checks of the same run. The workflow this
 # replaced built and published a tag without running one test.
 #
-# Windows is not built. Adding it is one entry in the matrix, plus the
-# executable's extension where an asset is named.
+# Each matrix entry names the extension of its executable, because
+# only Windows has one.
 on:
   push:
     branches:
@@ -95,6 +98,63 @@ jobs:
               lnum=${rest%%:*}
               echo "::error file=$file,line=$lnum::${line#*:*:*:}"
             done
+            exit 1
+          fi
+
+          echo "No ghost code found."
+
+  # The release matrix builds Windows, and it runs for a tag alone, so
+  # nothing would compile that target until the release itself. This
+  # job compiles it on a pull request, and runs what can pass there.
+  # The parity suite cannot: it compares a report against fixtures
+  # whose paths are written with forward slashes, and a Windows report
+  # separates with a backslash, which is an open question of its own.
+  # REFERENCE: https://github.com/Galvarcus/GhostCode/issues/14
+  windows:
+    name: Analyzer on Windows
+    runs-on: windows-latest
+    # The scan below is POSIX shell, which the runner's own PowerShell
+    # does not read.
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.inputs.tag || github.sha }}
+
+      - name: Cache the build
+        uses: actions/cache@v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      - name: Rust version
+        run: cargo --version && rustc --version
+
+      - name: Tests
+        run: cargo test --lib
+
+      - name: Release build
+        run: cargo build --release --locked
+
+      # The same scan the Analyzer runs, which is here because it is
+      # the one check that walks a real tree and resolves what it
+      # finds on this platform.
+      - name: Run Ghostcode on its own code
+        run: |
+          set -euo pipefail
+
+          out=$(./target/release/ghostcode.exe --format=text .)
+
+          if [ -n "$out" ]; then
+            echo "Ghost code findings:"
+            printf '%s\n' "$out"
             exit 1
           fi
 
@@ -216,6 +276,7 @@ jobs:
       || github.event.inputs.tag != ''
     needs:
       - rust
+      - windows
       - front-end
     runs-on: ubuntu-latest
     outputs:
@@ -255,16 +316,27 @@ jobs:
     name: ${{ matrix.target }}
     needs: gate
     runs-on: ${{ matrix.os }}
+    # The step that names the asset is POSIX shell: a backslash joins
+    # its two lines, which PowerShell does not read.
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
+            ext: ''
           - target: x86_64-apple-darwin
             os: macos-15-intel
+            ext: ''
           - target: aarch64-apple-darwin
             os: macos-15
+            ext: ''
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            ext: .exe
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1
@@ -277,14 +349,18 @@ jobs:
       - name: Build
         run: cargo build --release --locked --target ${{ matrix.target }}
 
+      # The extension stays on the asset, so that Windows runs the
+      # file it downloads without being told to rename it.
       - name: Name the asset
-        run: cp "target/${{ matrix.target }}/release/ghostcode" "ghostcode-${{ matrix.target }}"
+        run: |
+          cp "target/${{ matrix.target }}/release/ghostcode${{ matrix.ext }}" \
+            "ghostcode-${{ matrix.target }}${{ matrix.ext }}"
 
       - name: Keep the asset for the release
         uses: actions/upload-artifact@v7.0.2
         with:
-          name: ghostcode-${{ matrix.target }}
-          path: ghostcode-${{ matrix.target }}
+          name: ghostcode-${{ matrix.target }}${{ matrix.ext }}
+          path: ghostcode-${{ matrix.target }}${{ matrix.ext }}
           if-no-files-found: error
 
   release:

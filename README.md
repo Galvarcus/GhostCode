@@ -13,7 +13,8 @@ the findings in the quickfix list.
 
 ## Requirements
 
-- The `ghostcode` binary, for macOS or Linux. See Installation.
+- The `ghostcode` binary, for Linux, macOS, or Windows. See
+  Installation.
 - For the Vim plugin: Vim 9.1 or later, and
   [Logger](https://github.com/Galvarcus/Logger), which shows
   Ghostcode's messages.
@@ -39,6 +40,10 @@ install -m 755 ghostcode-x86_64-unknown-linux-gnu ~/.local/bin/ghostcode
 | `ghostcode-x86_64-unknown-linux-gnu` | Linux on x86-64, with glibc 2.34 or later: Ubuntu 22.04, Debian 12, RHEL 9, and the later releases of each |
 | `ghostcode-x86_64-apple-darwin` | macOS 10.12 or later, on Intel |
 | `ghostcode-aarch64-apple-darwin` | macOS 11.0 or later, on Apple silicon |
+| `ghostcode-x86_64-pc-windows-msvc.exe` | Windows 10 or later, on x86-64 |
+
+On Windows, put the `.exe` on your `PATH`, or name it with its
+extension in `g:ghostcode_bin`.
 
 Releases after v0.1.0 carry a build provenance attestation, which
 names the workflow and the commit that produced an asset. v0.1.0 has
