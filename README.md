@@ -1,6 +1,6 @@
 # Ghostcode
 
-![Vim](https://img.shields.io/badge/vim-9.1%2B-019733)
+![Vim](https://img.shields.io/badge/vim-9.2%2B-019733)
 ![License](https://img.shields.io/badge/license-GPL--3.0-blue)
 
 Ghostcode is an analyzer for unreferenced code in Vim9 script, with
@@ -15,7 +15,7 @@ the findings in the quickfix list.
 
 - The `ghostcode` binary, for Linux, macOS, or Windows. See
   Installation.
-- For the Vim plugin: Vim 9.1 or later, and
+- For the Vim plugin: Vim 9.2 or later, and
   [Logger](https://github.com/Galvarcus/Logger), which shows
   Ghostcode's messages.
 
