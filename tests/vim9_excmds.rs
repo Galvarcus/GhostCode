@@ -94,3 +94,21 @@ fn a_project_function_called_in_statement_position_is_still_a_reference() {
 
     assert_eq!(count(text, "Setup"), 1);
 }
+
+/// A command word is Vim's at the head of a statement and the
+/// project's anywhere else. A project that declares a variable of
+/// such a name keeps every read of it.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/31
+#[test]
+fn a_variable_named_after_a_command_keeps_the_read_of_it() {
+    let text = "vim9script\nvar set = 1\ndef F()\n  echo set\nenddef\n";
+
+    assert_eq!(count(text, "set"), 1);
+}
+
+#[test]
+fn a_command_word_at_the_head_of_a_statement_is_still_not_a_reference() {
+    let text = "vim9script\ndef F()\n  echo 1\nenddef\n";
+
+    assert_eq!(count(text, "echo"), 0);
+}

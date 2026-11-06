@@ -365,3 +365,32 @@ fn an_unused_enum_value_is_reported() {
         vec!["enum_value Beta".to_string()]
     );
 }
+
+/// FUNCTION: A plugin whose script variable is named after one of
+/// Vim's commands, which Vim9 accepts: only `this`, `super`, `true`,
+/// `false` and `null` cannot name a variable.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/31
+fn named_after_a_command(body: &'static str) -> Vec<(&'static str, &'static str)> {
+    vec![("autoload/p.vim", body)]
+}
+
+#[test]
+fn a_variable_named_after_a_command_is_not_reported_when_code_reads_it() {
+    let files = named_after_a_command(
+        "vim9script\nvar set = 1\nexport def F(): number\n  return set\nenddef\n",
+    );
+
+    assert!(ghosts("command-name-read", &files, true).is_empty());
+}
+
+#[test]
+fn a_variable_named_after_a_command_is_reported_when_nothing_reads_it() {
+    let files = named_after_a_command(
+        "vim9script\nvar set = 1\nexport def F(): number\n  return 1\nenddef\n",
+    );
+
+    assert_eq!(
+        ghosts("command-name-unread", &files, true),
+        vec!["variable set".to_string()]
+    );
+}

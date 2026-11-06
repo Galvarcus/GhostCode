@@ -555,14 +555,29 @@ fn unquote(text: &str) -> String {
 
 // The language's own words, dropped wherever they stand.
 //
-// Only some of them cannot name a symbol: Vim9 refuses a declaration
-// called `this`, `super`, `true`, `false` or `null`. It accepts
-// `var set = 1` and `var in = 1`, so the command words and the
-// operators are here by choice, and a project that spells a variable
-// that way loses the credits that name carries. What the list must
-// never hold is a word Vim9 does not have at all, because that costs
-// a project a name of its own for nothing.
+// Vim9 refuses a declaration called `this`, `super`, `true`, `false`
+// or `null`, so those five can never be a project's name. Every other
+// word here is one Vim accepts as a variable name, and three reasons
+// keep them.
+//
+// The declaration words stand in the middle of a statement, as the
+// second word of `export def` or `public var`, where no
+// statement-position rule reaches them. The operators `in`, `is`, `as`
+// and `autoload` have no such rule at all. The rest, from `if` to
+// `endfunction`, Vim reads at the head of a statement alone, so
+// `in_command` could answer them, and they stay only because no
+// measured project names a variable after one: a reference restored
+// for nothing can credit a symbol that nothing else credits.
+//
+// The command words a project may reasonably use as a name are not
+// here. `set`, `command`, `normal`, `echo` and their kin left, because
+// dropping one wherever it stood cost a real project every read of
+// `var set: dict<bool>`, and `in_command` suppresses Vim's own use.
+//
+// What the list must never hold is a word Vim9 does not have at all,
+// because that costs a project a name of its own for nothing.
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/28
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/31
 const KEYWORDS: &[&str] = &[
     "vim9script",
     "def",
@@ -611,27 +626,11 @@ const KEYWORDS: &[&str] = &[
     "is#",
     "isnot",
     "isnot#",
-    "echo",
-    "echomsg",
-    "echoerr",
-    "echohl",
-    "echon",
     "true",
     "false",
     "null",
-    "silent",
-    "unsilent",
-    "legacy",
     "function",
     "endfunction",
-    "let",
-    "unlet",
-    "command",
-    "augroup",
-    "autocmd",
-    "set",
-    "setlocal",
-    "normal",
 ];
 
 // The assignments that write a variable without reading it first.
