@@ -463,10 +463,16 @@ fn unquote(text: &str) -> String {
     chars.collect()
 }
 
-// The language's own words. None of them can name a symbol, because
-// Vim9 will not let a declaration take one of these names, so emitting
-// them as references would only inflate the count of what resolved to
-// nothing.
+// The language's own words, dropped wherever they stand.
+//
+// Only some of them cannot name a symbol: Vim9 refuses a declaration
+// called `this`, `super`, `true`, `false` or `null`. It accepts
+// `var set = 1` and `var in = 1`, so the command words and the
+// operators are here by choice, and a project that spells a variable
+// that way loses the credits that name carries. What the list must
+// never hold is a word Vim9 does not have at all, because that costs
+// a project a name of its own for nothing.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/28
 const KEYWORDS: &[&str] = &[
     "vim9script",
     "def",
@@ -479,7 +485,6 @@ const KEYWORDS: &[&str] = &[
     "enum",
     "export",
     "import",
-    "from",
     "as",
     "autoload",
     "var",
@@ -537,7 +542,6 @@ const KEYWORDS: &[&str] = &[
     "set",
     "setlocal",
     "normal",
-    "enum_value",
 ];
 
 // Vim's scope letters, which stand before a colon and name where a

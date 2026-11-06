@@ -320,3 +320,23 @@ fn an_enum_value_named_like_a_null_literal_is_not_reported() {
         Vec::<String>::new()
     );
 }
+
+/// A variable spelled like one of the words the report prints was
+/// suppressed wherever it stood, so the read that credits it was lost
+/// and the variable itself was reported.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/28
+#[test]
+fn a_variable_named_like_a_kind_word_is_not_reported() {
+    let files = vec![
+        (
+            "autoload/lib.vim",
+            "vim9script\nvar enum_value = 1\nexport def Run()\n  echo enum_value\nenddef\n",
+        ),
+        (
+            "plugin/p.vim",
+            "vim9script\nimport autoload 'lib.vim' as L\nL.Run()\n",
+        ),
+    ];
+
+    assert_eq!(ghosts("kind_word", &files, false), Vec::<String>::new());
+}
