@@ -768,6 +768,13 @@ impl Collect<'_> {
             return;
         }
 
+        // A `:command` line states Vim's attributes and then the name
+        // it declares, and a user command is Vim's name thereafter.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+        if in_command_def(stmt, i) {
+            return;
+        }
+
         // A name against a colon is a parameter or a key, not a use:
         // `{callback: OnDone}` uses OnDone, not callback.
         if stmt.get(i + 1).is_some_and(|t| t.text == ":") && !is_type_position(stmt, i) {
@@ -1020,7 +1027,8 @@ fn head(stmt: &[Tok]) -> Option<&str> {
 
 /// FUNCTION: Whether a command's arguments carry Vim's angle-bracket
 /// notation, which the mapping, menu and abbreviation commands do,
-/// and so does an autocommand in its pattern.
+/// and so do an autocommand in its pattern and the body of a
+/// `:command`, where `<q-args>` hands the arguments to the handler.
 ///
 /// Vim has 84 of the first kind and builds every one from four stems,
 /// so the stem is what this tests, against the generated table so
@@ -1030,7 +1038,7 @@ fn head(stmt: &[Tok]) -> Option<&str> {
 /// on recognising the command.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 fn notation(word: &str) -> bool {
-    if matches!(word, "autocmd" | "doautocmd" | "doautoall") {
+    if matches!(word, "autocmd" | "doautocmd" | "doautoall" | "command") {
         return true;
     }
 
@@ -1133,6 +1141,71 @@ fn scoped(stmt: &[Tok], i: usize, word: &str) -> bool {
     }
 
     i >= 2 && stmt[i - 1].text == ":" && stmt[i - 2].text == "v" && is_type_position(stmt, i)
+}
+
+/// FUNCTION: Where a `:command` statement names the command, after
+/// Vim's attributes and before the handler.
+///
+/// An attribute carries no delimiter the lexer keeps, so each is
+/// consumed by its shape: `-bar`, or `-nargs=?`, or
+/// `-complete=customlist,Func`, where the word after the comma names
+/// a function of the project's. A shape this does not expect ends the
+/// walk, which leaves the rest of the line counted rather than
+/// dropping a name the project owns.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+fn command_name_at(stmt: &[Tok]) -> Option<usize> {
+    let head_at = stmt
+        .iter()
+        .position(|t| t.text != "!" && !MODS.contains(&t.text.as_str()))?;
+
+    let mut i = head_at + 1;
+    while let Some(tok) = stmt.get(i) {
+        if tok.text == "!" {
+            i += 1;
+            continue;
+        }
+
+        if tok.text != "-" {
+            return Some(i);
+        }
+
+        i += 2;
+        if stmt.get(i).is_some_and(|t| t.text == "=") {
+            i += 2;
+
+            if stmt.get(i).is_some_and(|t| t.text == ",") {
+                i += 2;
+            }
+        }
+    }
+
+    None
+}
+
+/// FUNCTION: Whether a token of a `:command` or `:delcommand`
+/// statement is Vim's own: an attribute, an attribute's value, or the
+/// name the statement declares or removes.
+///
+/// A user command is a name Vim owns once the plugin defines it, so
+/// no symbol of the project's is ever credited by one. What the line
+/// does carry is the completion function after a comma and the
+/// handler after the name, and both are left alone: the handler is
+/// often the only caller the function has.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+fn in_command_def(stmt: &[Tok], i: usize) -> bool {
+    if !matches!(head(stmt), Some("command" | "delcommand")) {
+        return false;
+    }
+
+    let Some(name_at) = command_name_at(stmt) else {
+        return false;
+    };
+
+    if i == name_at {
+        return true;
+    }
+
+    i > 0 && i < name_at && stmt[i - 1].text != ","
 }
 
 /// FUNCTION: Whether a name stands where Vim reads a command: at the
