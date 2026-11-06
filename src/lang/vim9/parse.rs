@@ -135,9 +135,11 @@ pub fn declarations(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
             continue;
         }
 
-        // Everything below is module level or class level. A
-        // declaration inside a function body is a local.
+        // A declaration inside a function body is a local, which is
+        // a symbol of that body and of nothing wider.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
         if scope.depth() > 0 {
+            local(file, &words, line, &scope, out);
             continue;
         }
 
@@ -282,6 +284,45 @@ fn variable(file: &Path, words: &[&str], line: u32, scope: &Scope, out: &mut dyn
         exported,
         owner: scope.owner.clone(),
         scope: None,
+    });
+}
+
+/// FUNCTION: Record a `var` or `const` inside a function body, scoped
+/// to that body.
+///
+/// The declaring words are those `variable` accepts at module level,
+/// so the same statement is not read differently one scope out. The
+/// discard placeholder declares nothing worth recording.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+fn local(file: &Path, words: &[&str], line: u32, scope: &Scope, out: &mut dyn Sink) {
+    let Some(body) = scope.body() else {
+        return;
+    };
+
+    let (_, rest) = strip_export(words);
+    let rest = strip_modifiers(rest);
+
+    if !matches!(rest.first().copied(), Some("var" | "const")) {
+        return;
+    }
+
+    let Some(name) = rest.get(1) else {
+        return;
+    };
+
+    if *name == DISCARD {
+        return;
+    }
+
+    out.sym(Symbol {
+        id: SymbolId::in_scope(body, name),
+        kind: Kind::Variable,
+        name: (*name).to_string(),
+        file: file.to_path_buf(),
+        line,
+        exported: false,
+        owner: scope.owner.clone(),
+        scope: Some(body.clone()),
     });
 }
 
@@ -590,6 +631,11 @@ const KEYWORDS: &[&str] = &[
 // since Vim9 requires a capital, so the test cannot meet a project's
 // own type of that name.
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+// Vim9's discard placeholder. A value assigned to it is stated to be
+// unwanted, so there is nothing to report and nothing to record.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+const DISCARD: &str = "_";
+
 const DICT: &str = "dict";
 
 // Vim's scope letters, which stand before a colon and name where a
@@ -896,7 +942,19 @@ impl Collect<'_> {
             return true;
         }
 
-        self.in_def && Some(word) != self.own && self.locals.holds(word)
+        if !self.in_def || Some(word) == self.own {
+            return false;
+        }
+
+        // A declared local is a symbol now, so its read is a
+        // reference that resolves to it. A parameter and a loop
+        // variable are not symbols, so their reads are still dropped:
+        // resolution has nothing to place them on.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+        matches!(
+            self.locals.bound_by(word),
+            Some(types::Bound::Parameter | types::Bound::Loop)
+        )
     }
 
     /// METHOD: Record what a string holds. A builtin that takes a name

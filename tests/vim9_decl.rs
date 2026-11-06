@@ -116,14 +116,29 @@ fn nothing_is_api_when_the_setting_is_off() {
     assert!(!Vim9.is_api(&a.syms[0], &cfg(false)));
 }
 
+/// A local is a declaration now, and what tells it from a script
+/// variable is the scope it carries rather than its absence.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 #[test]
-fn a_script_level_var_is_a_variable_and_a_local_var_is_not() {
+fn a_script_level_var_is_a_variable_and_a_local_var_is_scoped_to_its_body() {
     let a = scan(
         "autoload/p.vim",
         "vim9script\nvar count = 0\ndef F()\n  var local = 1\nenddef\n",
     );
 
-    assert_eq!(decls(&a), vec!["variable count", "function F"]);
+    assert_eq!(
+        decls(&a),
+        vec!["variable count", "function F", "variable local"]
+    );
+
+    let script = a.syms.iter().find(|s| s.name == "count").expect("count");
+    let body = a.syms.iter().find(|s| s.name == "local").expect("local");
+
+    assert!(script.scope.is_none(), "a script variable has no scope");
+    assert_eq!(
+        body.scope.as_ref().map(ToString::to_string),
+        Some("autoload/p.vim::F".to_string())
+    );
 }
 
 #[test]
@@ -224,10 +239,15 @@ fn a_local_after_a_nested_def_is_still_a_local() {
         "vim9script\ndef Outer()\n  def Inner()\n  enddef\n  Inner()\n  var local = 1\nenddef\n",
     );
 
+    let local = a
+        .syms
+        .iter()
+        .find(|s| s.name == "local")
+        .expect("the local of Outer");
+
     assert_eq!(
-        decls(&a),
-        vec!["function Outer", "function Inner"],
-        "the nested enddef closed Inner, not Outer: {:?}",
-        decls(&a)
+        local.scope.as_ref().map(ToString::to_string),
+        Some("plugin/main.vim::Outer".to_string()),
+        "the nested enddef closed Inner, not Outer"
     );
 }

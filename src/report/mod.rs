@@ -152,13 +152,36 @@ pub fn analyze(root: &Path, cfg: &Config) -> anyhow::Result<Report> {
 /// Only a name the project declares becomes a reference. A word in a
 /// message that matches nothing stays a word, so the count of what
 /// resolved to nothing keeps its meaning.
+///
+/// A variable of a function body is named only by text inside that
+/// body. Matching one from anywhere would turn every string holding a
+/// short word into a reference that resolves to nothing, because a
+/// body's `md` or `n` is a word thousands of strings contain.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 fn text_references(a: &mut Analysis) {
-    let names: HashSet<&str> = a.syms.iter().map(|s| s.name.as_str()).collect();
+    let names: HashSet<&str> = a
+        .syms
+        .iter()
+        .filter(|s| s.scope.is_none())
+        .map(|s| s.name.as_str())
+        .collect();
+
+    let scoped: HashSet<(&crate::model::SymbolId, &str)> = a
+        .syms
+        .iter()
+        .filter_map(|s| s.scope.as_ref().map(|at| (at, s.name.as_str())))
+        .collect();
+
     let mut found: Vec<crate::model::Reference> = Vec::new();
 
     for t in &a.texts {
         for name in lang::vim9::parse::identifiers(&t.text) {
-            if !names.contains(name.as_str()) {
+            let visible = names.contains(name.as_str())
+                || t.origin
+                    .as_ref()
+                    .is_some_and(|at| scoped.contains(&(at, name.as_str())));
+
+            if !visible {
                 continue;
             }
 
@@ -189,6 +212,7 @@ pub fn build(
     let mut findings: Vec<Finding> = a
         .syms
         .iter()
+        .filter(|s| s.scope.is_none())
         .filter(|s| !reached.contains(&s.id))
         .filter(|s| !is_api(s, cfg))
         .map(|s| Finding {

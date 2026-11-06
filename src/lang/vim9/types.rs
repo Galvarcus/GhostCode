@@ -98,12 +98,26 @@ impl Types {
     }
 }
 
+/// What bound a name inside a function body. Only a declaration makes
+/// a symbol, so the rest keep being dropped from the references; the
+/// distinction is what lets one be kept without keeping all of them.
+///
+/// A lambda's parameter is absent on purpose: `bound_names` carries it
+/// and the reference walk checks that first.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Bound {
+    Declared,
+    Parameter,
+    Loop,
+}
+
 /// The types in scope inside one function body: its parameters and the
 /// variables it declares. A body's locals say nothing about any other
 /// body, so this is rebuilt at each `def`.
 #[derive(Debug, Clone, Default)]
 pub struct Locals {
-    vars: HashMap<String, String>,
+    vars: HashMap<String, (Bound, String)>,
 }
 
 impl Locals {
@@ -120,9 +134,12 @@ impl Locals {
         // that is what tells it from a class name used directly.
         for param in params(&stmt[open + 1..close]) {
             if let Some((name, ty)) = annotated(param) {
-                locals.vars.insert(name, ty);
+                locals.vars.insert(name, (Bound::Parameter, ty));
             } else if let Some(name) = param.first().filter(|t| t.kind == TokKind::Ident) {
-                locals.vars.entry(name.text.clone()).or_default();
+                locals
+                    .vars
+                    .entry(name.text.clone())
+                    .or_insert((Bound::Parameter, String::new()));
             }
         }
 
@@ -133,7 +150,7 @@ impl Locals {
     /// whether it states one or builds one with a constructor.
     pub fn declare(&mut self, stmt: &[Tok]) {
         if let Some((name, ty)) = declared_name(stmt) {
-            self.vars.insert(name, ty);
+            self.vars.insert(name, (Bound::Declared, ty));
         }
     }
 
@@ -157,14 +174,21 @@ impl Locals {
 
         for tok in &stmt[1..end.max(1)] {
             if tok.kind == TokKind::Ident {
-                self.vars.entry(tok.text.clone()).or_default();
+                self.vars
+                    .entry(tok.text.clone())
+                    .or_insert((Bound::Loop, String::new()));
             }
         }
     }
 
     /// METHOD: The type of a name in this body, where it has one.
     pub fn get(&self, name: &str) -> Option<&str> {
-        self.vars.get(name).map(String::as_str)
+        self.vars.get(name).map(|(_, ty)| ty.as_str())
+    }
+
+    /// METHOD: What bound a name in this body, where it binds one.
+    pub fn bound_by(&self, name: &str) -> Option<Bound> {
+        self.vars.get(name).map(|(bound, _)| *bound)
     }
 
     /// METHOD: True when this body declares the name at all, which is
