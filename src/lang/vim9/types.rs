@@ -98,12 +98,33 @@ impl Types {
     }
 }
 
+/// What bound a name inside a function body. Only a `var` or a
+/// `const` makes a symbol, so the rest keep being dropped from the
+/// references; the distinction is what lets one be kept without
+/// keeping all of them.
+///
+/// `Final` is apart from `Declared` because `strip_modifiers` eats
+/// the word before the symbol emitter can see it, so a `final` can
+/// never have a symbol for its read to resolve to. Keeping the read
+/// dropped is what stops it crediting a project symbol of the name.
+///
+/// A lambda's parameter is absent on purpose: `bound_names` carries it
+/// and the reference walk checks that first.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Bound {
+    Declared,
+    Final,
+    Parameter,
+    Loop,
+}
+
 /// The types in scope inside one function body: its parameters and the
 /// variables it declares. A body's locals say nothing about any other
 /// body, so this is rebuilt at each `def`.
 #[derive(Debug, Clone, Default)]
 pub struct Locals {
-    vars: HashMap<String, String>,
+    vars: HashMap<String, (Bound, String)>,
 }
 
 impl Locals {
@@ -120,9 +141,12 @@ impl Locals {
         // that is what tells it from a class name used directly.
         for param in params(&stmt[open + 1..close]) {
             if let Some((name, ty)) = annotated(param) {
-                locals.vars.insert(name, ty);
+                locals.vars.insert(name, (Bound::Parameter, ty));
             } else if let Some(name) = param.first().filter(|t| t.kind == TokKind::Ident) {
-                locals.vars.entry(name.text.clone()).or_default();
+                locals
+                    .vars
+                    .entry(name.text.clone())
+                    .or_insert((Bound::Parameter, String::new()));
             }
         }
 
@@ -133,7 +157,12 @@ impl Locals {
     /// whether it states one or builds one with a constructor.
     pub fn declare(&mut self, stmt: &[Tok]) {
         if let Some((name, ty)) = declared_name(stmt) {
-            self.vars.insert(name, ty);
+            let bound = match declaring_word(stmt) {
+                Some("final") => Bound::Final,
+                _ => Bound::Declared,
+            };
+
+            self.vars.insert(name, (bound, ty));
         }
     }
 
@@ -157,14 +186,21 @@ impl Locals {
 
         for tok in &stmt[1..end.max(1)] {
             if tok.kind == TokKind::Ident {
-                self.vars.entry(tok.text.clone()).or_default();
+                self.vars
+                    .entry(tok.text.clone())
+                    .or_insert((Bound::Loop, String::new()));
             }
         }
     }
 
     /// METHOD: The type of a name in this body, where it has one.
     pub fn get(&self, name: &str) -> Option<&str> {
-        self.vars.get(name).map(String::as_str)
+        self.vars.get(name).map(|(_, ty)| ty.as_str())
+    }
+
+    /// METHOD: What bound a name in this body, where it binds one.
+    pub fn bound_by(&self, name: &str) -> Option<Bound> {
+        self.vars.get(name).map(|(bound, _)| *bound)
     }
 
     /// METHOD: True when this body declares the name at all, which is
@@ -266,6 +302,19 @@ pub fn lambda_params(stmt: &[Tok]) -> Vec<&str> {
 /// as `var x: Foo` states one and `var x = Foo.new()` implies one. The
 /// type is empty where the declaration gives none, because knowing a
 /// name is a variable at all is what tells it from a class name.
+/// FUNCTION: Which of the three declaring words opened a statement.
+///
+/// `strip_modifiers` removes `final` wherever it stands, so the word
+/// cannot be read back from the stripped list and has to be taken
+/// from the tokens.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+fn declaring_word(stmt: &[Tok]) -> Option<&str> {
+    stmt.iter()
+        .take(4)
+        .map(|t| t.text.as_str())
+        .find(|w| matches!(*w, "var" | "const" | "final"))
+}
+
 fn declared_name(stmt: &[Tok]) -> Option<(String, String)> {
     let at = stmt
         .iter()

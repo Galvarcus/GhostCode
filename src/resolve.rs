@@ -37,6 +37,11 @@ pub struct Index<'a> {
     /// Per file, a named import's local name and the file and original
     /// name it stands for.
     named: HashMap<&'a Path, HashMap<&'a str, (&'a Path, &'a str)>>,
+    /// Per body, the symbols only that body can name. A local lives
+    /// here and in no index keyed by name alone, which is what stops
+    /// a reference elsewhere in the project from crediting it.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+    scoped: HashMap<&'a SymbolId, HashMap<&'a str, &'a SymbolId>>,
 }
 
 impl<'a> Index<'a> {
@@ -47,6 +52,16 @@ impl<'a> Index<'a> {
 
         for sym in &a.syms {
             idx.by_id.insert(&sym.id, sym);
+
+            // A scoped symbol enters no index keyed by name alone.
+            if let Some(scope) = &sym.scope {
+                idx.scoped
+                    .entry(scope)
+                    .or_default()
+                    .insert(&sym.name, &sym.id);
+                continue;
+            }
+
             idx.by_name.entry(&sym.name).or_default().push(&sym.id);
 
             if matches!(sym.kind, Kind::Method | Kind::Field | Kind::EnumValue) {
@@ -92,6 +107,13 @@ impl<'a> Index<'a> {
 
         if let Some(recv) = &r.recv {
             return self.dotted(r, recv);
+        }
+
+        // A variable of the body making the reference wins over
+        // everything, because nothing else can be meant: Vim9 resolves
+        // a bare name to the innermost declaration of it.
+        if let Some(id) = self.in_scope(r) {
+            return vec![id];
         }
 
         // A function of the same file needs no import and wins over
@@ -168,6 +190,17 @@ impl<'a> Index<'a> {
                 .aliases
                 .get(r.file.as_path())
                 .is_some_and(|a| a.contains_key(r.name.as_str()))
+    }
+
+    /// METHOD: The variable of the body that made this reference, by
+    /// that name, where the body declares one.
+    fn in_scope(&self, r: &Reference) -> Option<SymbolId> {
+        let origin = r.origin.as_ref()?;
+
+        self.scoped
+            .get(origin)?
+            .get(r.name.as_str())
+            .map(|id| (*id).clone())
     }
 
     /// METHOD: The symbol a classic autoload name states, as
@@ -247,6 +280,31 @@ mod tests {
             line: 1,
             exported: false,
             owner: owner.map(str::to_string),
+            scope: None,
+        }
+    }
+
+    /// FUNCTION: A variable of a function body, scoped to that body.
+    fn local_sym(file: &str, body: &str, name: &str) -> Symbol {
+        let scope = SymbolId::of(Path::new(file), None, body);
+
+        Symbol {
+            id: SymbolId::in_scope(&scope, name),
+            kind: Kind::Variable,
+            name: name.to_string(),
+            file: PathBuf::from(file),
+            line: 1,
+            exported: false,
+            owner: None,
+            scope: Some(scope),
+        }
+    }
+
+    /// FUNCTION: A reference made from inside a named function body.
+    fn re_in(file: &str, body: &str, name: &str) -> Reference {
+        Reference {
+            origin: Some(SymbolId::of(Path::new(file), None, body)),
+            ..re(file, None, name)
         }
     }
 
@@ -268,6 +326,85 @@ mod tests {
         let mut out: Vec<String> = idx.candidates(r).iter().map(|i| i.to_string()).collect();
         out.sort();
         out
+    }
+
+    /// A variable of a body is a symbol only that body can name, and
+    /// the read inside it is the credit that keeps it off the report.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+    #[test]
+    fn a_scoped_symbol_is_reached_only_from_its_own_scope() {
+        let a = Analysis {
+            syms: vec![local_sym("autoload/a.vim", "F", "row")],
+            ..Analysis::default()
+        };
+
+        assert_eq!(
+            ids(&a, &re_in("autoload/a.vim", "F", "row")),
+            vec!["autoload/a.vim::F.row"]
+        );
+    }
+
+    /// A body sees its own variables and no other body's, which is
+    /// what Vim9 compiles. A def nested inside a body does read that
+    /// body's variables, and the inner body's id does not name the
+    /// outer one, so such a read is left unplaced rather than
+    /// credited to a guess: `unplaced_names_by_file` then keeps the
+    /// variable off the report.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+    #[test]
+    fn a_scoped_symbol_is_invisible_from_another_scope() {
+        let a = Analysis {
+            syms: vec![local_sym("autoload/a.vim", "F", "row")],
+            ..Analysis::default()
+        };
+
+        assert!(ids(&a, &re_in("autoload/a.vim", "G", "row")).is_empty());
+    }
+
+    /// A name the file also declares at script level is reached by
+    /// the same-file rule, as it was before scopes existed.
+    #[test]
+    fn a_script_variable_still_wins_over_a_variable_of_some_body() {
+        let a = Analysis {
+            syms: vec![
+                local_sym("autoload/a.vim", "F", "row"),
+                sym("autoload/a.vim", None, "row", Kind::Variable),
+            ],
+            ..Analysis::default()
+        };
+
+        assert_eq!(
+            ids(&a, &re_in("autoload/a.vim", "G", "row")),
+            vec!["autoload/a.vim::row"]
+        );
+    }
+
+    #[test]
+    fn a_scoped_symbol_is_invisible_to_a_bare_name_elsewhere() {
+        let a = Analysis {
+            syms: vec![local_sym("autoload/a.vim", "F", "row")],
+            ..Analysis::default()
+        };
+
+        assert!(ids(&a, &re("plugin/p.vim", None, "row")).is_empty());
+    }
+
+    /// The anti-goal of the design, as a test: a body's own variable
+    /// must take nothing from a script variable of the same name.
+    #[test]
+    fn a_scoped_symbol_does_not_shadow_a_script_variable_of_its_name() {
+        let a = Analysis {
+            syms: vec![
+                local_sym("autoload/a.vim", "F", "row"),
+                sym("autoload/a.vim", None, "row", Kind::Variable),
+            ],
+            ..Analysis::default()
+        };
+
+        assert_eq!(
+            ids(&a, &re("autoload/a.vim", None, "row")),
+            vec!["autoload/a.vim::row"]
+        );
     }
 
     #[test]

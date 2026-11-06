@@ -55,6 +55,88 @@ fn run(corpus: &str, strict: bool, format: &str) -> String {
     String::from_utf8(out.stdout).expect("the report is UTF-8")
 }
 
+/// FUNCTION: Every local finding of one corpus, with the class turned
+/// on, each line carrying the corpus it came from.
+fn locals(corpus: &str) -> Vec<String> {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_ghostcode"));
+    let out = cmd
+        .args([
+            "--format=text",
+            "--exports-are-api",
+            "false",
+            "--locals",
+            "true",
+        ])
+        .arg(root().join("tests/fixtures/corpora").join(corpus))
+        .output()
+        .expect("run the built binary");
+
+    assert!(
+        out.status.success(),
+        "{corpus}: the scan failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    String::from_utf8(out.stdout)
+        .expect("the report is UTF-8")
+        .lines()
+        .filter(|l| l.contains("[local]"))
+        .map(|l| format!("{corpus}/{l}"))
+        .collect()
+}
+
+/// The counts, not the findings. The captured fixtures hold what each
+/// corpus reports, and nothing held what it counted, so a change could
+/// trade false credits for real gaps and still read as an improvement.
+///
+/// These move deliberately. A fall is usually right, because placing a
+/// name is the point of issue 12, but it is only right when nothing
+/// new became unplaced, and the fixtures above cannot tell you that.
+/// Update a number here with the reason in the commit message.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+#[test]
+fn each_corpus_counts_what_it_counted() {
+    // corpus, ghost findings, unplaced names
+    const COUNTS: &[(&str, u64, u64)] = &[
+        ("bartleby", 0, 2360),
+        ("ghostcode", 0, 25),
+        ("logger", 0, 74),
+        ("nested", 2, 194),
+    ];
+
+    let mut differences: Vec<String> = Vec::new();
+
+    for (corpus, ghost, unplaced) in COUNTS {
+        let got: Value =
+            serde_json::from_str(&run(corpus, false, "json")).expect("the report is JSON");
+        let summary = &got["summary"];
+
+        for (field, want) in [("ghost", ghost), ("unplaced_names", unplaced)] {
+            let is = summary[field].as_u64().unwrap_or_default();
+
+            if is != *want {
+                differences.push(format!("{corpus}: {field} {is}, recorded {want}"));
+            }
+        }
+    }
+
+    assert!(differences.is_empty(), "{}", differences.join("\n"));
+}
+
+/// The class's own fixture. Every line was read against its source
+/// before being recorded: a line that is not a variable the author
+/// would want to hear about is a defect in the rule, not a fixture to
+/// accept.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+#[test]
+fn the_local_class_finds_what_the_corpora_hold() {
+    let found: Vec<String> = CORPORA.iter().flat_map(|c| locals(c)).collect();
+    let want = std::fs::read_to_string(root().join("tests/fixtures/expected/locals.txt"))
+        .expect("the local fixture");
+
+    assert_eq!(found, want.lines().collect::<Vec<&str>>());
+}
+
 /// FUNCTION: What the core reports for one corpus, in the text form
 /// that Vim's own workflow writes out of the quickfix list.
 fn scan(corpus: &str, strict: bool) -> String {

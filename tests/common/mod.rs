@@ -98,6 +98,18 @@ pub fn source(rel: &str, text: &str) -> ghostcode::project::Source {
     }
 }
 
+/// FUNCTION: The settings a test needs, with the local finding class
+/// turned on.
+pub fn cfg_with_locals(exports_are_api: bool) -> ghostcode::config::Config {
+    ghostcode::config::Config {
+        findings: ghostcode::config::FindingFlags {
+            write_only: false,
+            locals: true,
+        },
+        ..cfg(exports_are_api)
+    }
+}
+
 /// FUNCTION: The settings a test needs, with everything but the
 /// exports rule left at its default.
 pub fn cfg(exports_are_api: bool) -> ghostcode::config::Config {

@@ -51,11 +51,26 @@ pub struct Scope {
     owner: Option<String>,
     owner_exported: bool,
     container: Container,
-    /// How many function bodies enclose the statement. Vim9 allows a
-    /// def inside a def, so one `enddef` closes one body and not the
-    /// one around it. A declaration is a local while this is above
-    /// zero, and the analyzer does not report a local.
-    depth: u32,
+    /// The function bodies enclosing the statement, innermost last.
+    /// Vim9 allows a def inside a def, so one `enddef` closes one
+    /// body and not the one around it, and a counter cannot say which
+    /// body the statements after the inner `enddef` belong to.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+    bodies: Vec<SymbolId>,
+}
+
+impl Scope {
+    /// METHOD: The body a statement sits in, innermost first, or none
+    /// at the top level of the file.
+    fn body(&self) -> Option<&SymbolId> {
+        self.bodies.last()
+    }
+
+    /// METHOD: How many bodies enclose the statement. A declaration is
+    /// a local while this is above zero.
+    fn depth(&self) -> usize {
+        self.bodies.len()
+    }
 }
 
 /// FUNCTION: Split a file's tokens into statements, dropping comments
@@ -113,16 +128,18 @@ pub fn declarations(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
         }
 
         if function(file, stmt, &words, line, &scope, out) {
-            if opens_def_body(&words, &scope) {
-                scope.depth += 1;
+            if let Some(id) = body_id(file, stmt, &words, &scope) {
+                scope.bodies.push(id);
             }
 
             continue;
         }
 
-        // Everything below is module level or class level. A
-        // declaration inside a function body is a local.
-        if scope.depth > 0 {
+        // A declaration inside a function body is a local, which is
+        // a symbol of that body and of nothing wider.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+        if scope.depth() > 0 {
+            local(file, &words, line, &scope, out);
             continue;
         }
 
@@ -161,7 +178,7 @@ fn open_container(
     scope.owner = Some(name.to_string());
     scope.owner_exported = exported;
     scope.container = container;
-    scope.depth = 0;
+    scope.bodies.clear();
 
     out.sym(Symbol {
         id: SymbolId::of(file, None, name),
@@ -171,6 +188,7 @@ fn open_container(
         line,
         exported,
         owner: None,
+        scope: None,
     });
 
     true
@@ -185,7 +203,7 @@ fn close_container(words: &[&str], scope: &mut Scope) -> bool {
             true
         }
         Some("enddef") => {
-            scope.depth = scope.depth.saturating_sub(1);
+            scope.bodies.pop();
             true
         }
         _ => false,
@@ -235,6 +253,7 @@ fn function(
         line,
         exported,
         owner: scope.owner.clone(),
+        scope: None,
     });
 
     true
@@ -264,6 +283,55 @@ fn variable(file: &Path, words: &[&str], line: u32, scope: &Scope, out: &mut dyn
         line,
         exported,
         owner: scope.owner.clone(),
+        scope: None,
+    });
+}
+
+/// FUNCTION: Record a `var` or `const` inside a function body, scoped
+/// to that body.
+///
+/// The declaring words are those `variable` accepts at module level,
+/// so the same statement is not read differently one scope out. The
+/// discard placeholder declares nothing worth recording.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+fn local(file: &Path, words: &[&str], line: u32, scope: &Scope, out: &mut dyn Sink) {
+    let Some(body) = scope.body() else {
+        return;
+    };
+
+    let (_, rest) = strip_export(words);
+    let rest = strip_modifiers(rest);
+
+    if !matches!(rest.first().copied(), Some("var" | "const")) {
+        return;
+    }
+
+    let Some(name) = rest.get(1) else {
+        return;
+    };
+
+    if *name == DISCARD {
+        return;
+    }
+
+    // A name the language owns is dropped wherever it stands, so no
+    // read of this variable ever reaches the reference list and the
+    // analyzer cannot know whether it is used. Recording it would
+    // make a finding of `var set = {}` read on the next line.
+    // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/31
+    if KEYWORDS.contains(name) {
+        return;
+    }
+
+    out.sym(Symbol {
+        id: SymbolId::in_scope(body, name),
+        kind: Kind::Variable,
+        name: (*name).to_string(),
+        file: file.to_path_buf(),
+        line,
+        exported: false,
+        owner: scope.owner.clone(),
+        scope: Some(body.clone()),
     });
 }
 
@@ -281,6 +349,7 @@ fn enum_values(file: &Path, stmt: &[Tok], line: u32, scope: &Scope, out: &mut dy
             line,
             exported: false,
             owner: scope.owner.clone(),
+            scope: None,
         });
     }
 }
@@ -565,6 +634,20 @@ const KEYWORDS: &[&str] = &[
     "normal",
 ];
 
+// The assignments that write a variable without reading it first.
+// `=` is the plain one and `=<<` opens a heredoc, which the lexer
+// keeps whole. Every other assignment Vim9 has is compound: `n += 1`
+// reads `n` before it writes it, so it is a read, and `n += 1` and
+// `n = n + 1` must not give different answers for one statement
+// spelled two ways.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+const WRITES: &[&str] = &["=", "=<<"];
+
+// Vim9's discard placeholder. A value assigned to it is stated to be
+// unwanted, so there is nothing to report and nothing to record.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+const DISCARD: &str = "_";
+
 // Vim9's keyed container. A member access on one reads a key, which
 // `recv_type` reports as this type because it reports the outermost
 // one: `dict<string, Config>` is a dict. No class can carry the name,
@@ -672,9 +755,7 @@ const BY_NAME: &[&str] = &[
 pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
     let types = Types::of_file(stmts);
     let mut scope = Scope::default();
-    let mut origin = SymbolId::script(file);
     let mut locals = Locals::default();
-    let mut in_def = false;
 
     for stmt in stmts {
         let words: Vec<&str> = stmt
@@ -684,11 +765,18 @@ pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
             .collect();
 
         if close_container(&words, &mut scope) {
-            origin = SymbolId::script(file);
             locals = Locals::default();
-            in_def = false;
             continue;
         }
+
+        // The body a statement sits in, read from the one stack both
+        // passes keep, so that a nested `enddef` returns to the body
+        // around it rather than to the file.
+        let origin = scope
+            .body()
+            .cloned()
+            .unwrap_or_else(|| SymbolId::script(file));
+        let in_def = scope.depth() > 0;
 
         // A declaration inside the body gives its name a type that
         // the calls after it are resolved against, and a loop binds
@@ -724,9 +812,8 @@ pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
         sink.statement(stmt, &skip);
 
         if let Some(id) = opens_body(file, stmt, &words, &mut scope) {
-            origin = id;
+            scope.bodies.push(id);
             locals = Locals::of_signature(stmt);
-            in_def = true;
         }
     }
 }
@@ -820,6 +907,22 @@ impl Collect<'_> {
             return;
         }
 
+        // A write is not a read. A variable the body declares and only
+        // ever assigns to is exactly what the local class exists to
+        // find, so an assignment must not credit it.
+        //
+        // Only inside a body. `Locals` records a script-level
+        // declaration as well, and a script variable's write still
+        // credits it: that is the write-only class, not this one.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+        if recv.is_none()
+            && self.in_def
+            && self.locals.bound_by(word) == Some(types::Bound::Declared)
+            && written(stmt, i)
+        {
+            return;
+        }
+
         // A called lowercase name is Vim's own, because Vim refuses a
         // `def` and a funcref variable whose name does not start with
         // a capital. It is dropped for the same reason a local is: a
@@ -873,7 +976,21 @@ impl Collect<'_> {
             return true;
         }
 
-        self.in_def && Some(word) != self.own && self.locals.holds(word)
+        if !self.in_def || Some(word) == self.own {
+            return false;
+        }
+
+        // A `var` or `const` of this body is a symbol now, so its
+        // read is a reference that resolves to it. A `final`, a
+        // parameter and a loop variable are not symbols, so their
+        // reads are still dropped: resolution has nothing to place
+        // them on, and an emitted read would fall through to a
+        // project symbol of the same name and credit it.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+        matches!(
+            self.locals.bound_by(word),
+            Some(types::Bound::Final | types::Bound::Parameter | types::Bound::Loop)
+        )
     }
 
     /// METHOD: Record what a string holds. A builtin that takes a name
@@ -962,8 +1079,22 @@ fn opens_body(file: &Path, stmt: &[Tok], words: &[&str], scope: &mut Scope) -> O
     if let Some((container, name)) = container_name(rest) {
         scope.owner = Some(name.to_string());
         scope.container = container;
+        scope.bodies.clear();
         return None;
     }
+
+    body_id(file, stmt, words, scope)
+}
+
+/// FUNCTION: The id of the body a `def` statement opens, or none when
+/// the statement is not a `def` or opens no body.
+///
+/// Both passes read this, so that neither can disagree with the other
+/// about which body a statement belongs to.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+fn body_id(file: &Path, stmt: &[Tok], words: &[&str], scope: &Scope) -> Option<SymbolId> {
+    let (_, rest) = strip_export(words);
+    let rest = strip_modifiers(rest);
 
     if rest.first().copied() != Some("def") {
         return None;
@@ -1226,6 +1357,21 @@ fn in_command_def(stmt: &[Tok], i: usize) -> bool {
     }
 
     i > 0 && i < name_at && stmt[i - 1].text != ","
+}
+
+/// FUNCTION: Whether the name at a position is being written without
+/// being read.
+///
+/// Only a name opening the statement, because that is where Vim reads
+/// an assignment target. A destructuring assignment is not caught,
+/// which leaves its write crediting the variable: that misses a
+/// finding rather than inventing one.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+fn written(stmt: &[Tok], i: usize) -> bool {
+    i == 0
+        && stmt
+            .get(1)
+            .is_some_and(|t| WRITES.contains(&t.text.as_str()))
 }
 
 /// FUNCTION: Whether a name stands where Vim reads a command: at the

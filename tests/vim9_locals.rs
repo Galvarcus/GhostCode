@@ -1,6 +1,11 @@
 //! The variables of a function body: which names the scan keeps out of
 //! the reference list because the body itself declares them.
 //!
+//! A `var` or `const` is no longer one of them. It is a symbol scoped
+//! to its body, so its read is a reference that resolves there, and
+//! what the old suppression protected is resolution's job now.
+//! REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+//!
 //! License: GNU GPL 3.0
 
 mod common;
@@ -25,11 +30,25 @@ fn count(text: &str, name: &str) -> usize {
     refs(text).iter().filter(|r| r.name == name).count()
 }
 
+/// A read of the body's own variable is a reference, because the
+/// variable is now a symbol for it to resolve to, and that read is
+/// the credit keeping it off the report. The false credit the old
+/// suppression prevented is prevented by the scope instead, which
+/// `tests/vim9_local_symbols.rs` holds.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 #[test]
-fn a_variable_the_body_declares_is_not_a_reference() {
+fn a_variable_the_body_declares_is_a_reference_carrying_that_body() {
     let text = "vim9script\ndef F()\n  var row = 1\n  echo row\nenddef\n";
 
-    assert_eq!(count(text, "row"), 0);
+    assert_eq!(count(text, "row"), 1);
+    assert_eq!(
+        refs(text)
+            .iter()
+            .find(|r| r.name == "row")
+            .and_then(|r| r.origin.as_ref())
+            .map(ToString::to_string),
+        Some("autoload/p.vim::F".to_string())
+    );
 }
 
 #[test]
@@ -114,12 +133,14 @@ fn a_script_variable_read_inside_a_body_is_still_a_reference() {
 
 /// `var Menu = Menu.new()` names the class on the right of the
 /// assignment, which the declaration on the left must not hide: the
-/// class has to keep that credit.
+/// class has to keep that credit. The later `Menu.Open()` names the
+/// variable holding the object, which is a second reference and
+/// resolves to the body's own symbol.
 #[test]
 fn a_name_the_statement_declares_still_credits_a_symbol_of_that_name() {
     let text = "vim9script\ndef F()\n  var Menu = Menu.new()\n  Menu.Open()\nenddef\n";
 
-    assert_eq!(count(text, "Menu"), 1);
+    assert_eq!(count(text, "Menu"), 2);
 }
 
 /// A parameter list is separated by its own commas. A comma inside a
@@ -146,12 +167,15 @@ fn a_parameter_after_a_nested_comma_is_not_a_reference() {
     assert_eq!(count(text, "amt"), 0);
 }
 
-/// A body outside the one that declared the name knows nothing of it,
-/// so the name is a reference there.
+/// A body outside the one that declared the name knows nothing of it.
+/// Both reads are references; only the one inside F has a symbol to
+/// reach, which `a_scoped_symbol_is_invisible_from_another_scope` in
+/// `src/resolve.rs` holds. G's read resolves to nothing, which is
+/// what keeps F's variable off the report rather than crediting it.
 #[test]
 fn a_variable_of_another_body_is_still_a_reference() {
     let text =
         "vim9script\ndef F()\n  var row = 1\n  echo row\nenddef\ndef G()\n  echo row\nenddef\n";
 
-    assert_eq!(count(text, "row"), 1);
+    assert_eq!(count(text, "row"), 2);
 }

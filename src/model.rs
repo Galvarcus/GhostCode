@@ -80,6 +80,18 @@ impl SymbolId {
         }
     }
 
+    /// METHOD: The id of a name inside another symbol's body, as a
+    /// local variable of `F` is. A dot joins it to the body's own id,
+    /// exactly as a member is joined to its container, so a local of
+    /// a method nests without a second spelling.
+    ///
+    /// A class and a function cannot share a name in one file, so this
+    /// cannot collide with a member id built by `of`.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+    pub fn in_scope(scope: &Self, name: &str) -> Self {
+        Self(format!("{scope}.{name}"))
+    }
+
     /// METHOD: The id standing for "this file's top-level code ran".
     /// Angle brackets never appear in an identifier, so it cannot
     /// collide with a declaration's id.
@@ -118,6 +130,14 @@ pub struct Symbol {
     /// rather than an id, because a class-qualified call such as
     /// `M.Menu.new()` names a class without naming its file.
     pub owner: Option<String>,
+
+    /// The symbol whose body owns this one, where one does. A local
+    /// variable carries the id of its function; everything a whole
+    /// file can see carries `None`. Resolution reads it to keep a
+    /// scoped symbol out of every by-name lookup, so that a body's
+    /// own variable cannot be credited from anywhere else.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+    pub scope: Option<SymbolId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

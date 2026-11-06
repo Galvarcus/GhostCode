@@ -1,0 +1,2 @@
+bartleby/tests/test_tree.vim:64:1:[local] variable chapter1Row
+ghostcode/autoload/ghostcode.vim:745:1:[local] variable inDefBody

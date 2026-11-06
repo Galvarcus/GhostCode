@@ -35,6 +35,12 @@ pub const SCHEMA: u32 = 1;
 pub struct Summary {
     pub symbols: usize,
     pub ghost: usize,
+
+    /// How many variables of a function body nothing reads. Zero
+    /// unless the class is asked for, and counted apart from the
+    /// ghosts because a build that counts ghosts must not see one.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+    pub local: usize,
     /// References that named nothing this project declares and that
     /// the host language does not own. It measures what the analyzer
     /// could not place rather than what a reader should act on. The
@@ -122,7 +128,8 @@ pub fn analyze(root: &Path, cfg: &Config) -> anyhow::Result<Report> {
     let resolved = resolve::all(&a);
     let reached = reach::walk(&a, &resolved);
 
-    let mut report = build(root, &a, &reached, resolved.unplaced, cfg);
+    let blind = unplaced_names_by_file(&a, &resolved);
+    let mut report = build(root, &a, &reached, &blind, resolved.unplaced, cfg);
 
     report.skipped = found
         .skipped
@@ -152,13 +159,36 @@ pub fn analyze(root: &Path, cfg: &Config) -> anyhow::Result<Report> {
 /// Only a name the project declares becomes a reference. A word in a
 /// message that matches nothing stays a word, so the count of what
 /// resolved to nothing keeps its meaning.
+///
+/// A variable of a function body is named only by text inside that
+/// body. Matching one from anywhere would turn every string holding a
+/// short word into a reference that resolves to nothing, because a
+/// body's `md` or `n` is a word thousands of strings contain.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 fn text_references(a: &mut Analysis) {
-    let names: HashSet<&str> = a.syms.iter().map(|s| s.name.as_str()).collect();
+    let names: HashSet<&str> = a
+        .syms
+        .iter()
+        .filter(|s| s.scope.is_none())
+        .map(|s| s.name.as_str())
+        .collect();
+
+    let scoped: HashSet<(&crate::model::SymbolId, &str)> = a
+        .syms
+        .iter()
+        .filter_map(|s| s.scope.as_ref().map(|at| (at, s.name.as_str())))
+        .collect();
+
     let mut found: Vec<crate::model::Reference> = Vec::new();
 
     for t in &a.texts {
         for name in lang::vim9::parse::identifiers(&t.text) {
-            if !names.contains(name.as_str()) {
+            let visible = names.contains(name.as_str())
+                || t.origin
+                    .as_ref()
+                    .is_some_and(|at| scoped.contains(&(at, name.as_str())));
+
+            if !visible {
                 continue;
             }
 
@@ -183,22 +213,23 @@ pub fn build(
     root: &Path,
     a: &Analysis,
     reached: &HashSet<SymbolId>,
+    blind: &HashSet<(&Path, &str)>,
     unplaced_names: usize,
     cfg: &Config,
 ) -> Report {
     let mut findings: Vec<Finding> = a
         .syms
         .iter()
-        .filter(|s| !reached.contains(&s.id))
-        .filter(|s| !is_api(s, cfg))
-        .map(|s| Finding {
-            class: Class::Ghost,
-            kind: s.kind,
-            name: s.name.clone(),
-            file: s.file.clone(),
-            line: s.line,
-            col: 1,
-            lang: lang::for_path(&s.file).map_or("", |l| l.name()),
+        .filter_map(|s| {
+            classify(s, reached, blind, cfg).map(|class| Finding {
+                class,
+                kind: s.kind,
+                name: s.name.clone(),
+                file: s.file.clone(),
+                line: s.line,
+                col: 1,
+                lang: lang::for_path(&s.file).map_or("", |l| l.name()),
+            })
         })
         .collect();
 
@@ -209,12 +240,68 @@ pub fn build(
         root: root.to_path_buf(),
         summary: Summary {
             symbols: a.syms.len(),
-            ghost: findings.len(),
+            ghost: count(&findings, Class::Ghost),
+            local: count(&findings, Class::Local),
             unplaced_names,
         },
         findings,
         skipped: Vec::new(),
     }
+}
+
+/// FUNCTION: Which class a symbol is reported as, or none when it is
+/// not reported at all.
+///
+/// A variable of a function body is reported when its body is reached
+/// and nothing credits it. The body being reached is the test that
+/// matters: a dead function is itself the finding, and naming its
+/// variables beside it would report the symptom several times over
+/// and the cause once. A local cannot be exported, so the API rule
+/// has nothing to say about one.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+fn classify(
+    sym: &crate::model::Symbol,
+    reached: &HashSet<SymbolId>,
+    blind: &HashSet<(&Path, &str)>,
+    cfg: &Config,
+) -> Option<Class> {
+    if let Some(body) = &sym.scope {
+        let unread = cfg.findings.locals
+            && reached.contains(body)
+            && !reached.contains(&sym.id)
+            && !blind.contains(&(sym.file.as_path(), sym.name.as_str()));
+
+        return unread.then_some(Class::Local);
+    }
+
+    (!reached.contains(&sym.id) && !is_api(sym, cfg)).then_some(Class::Ghost)
+}
+
+/// FUNCTION: The names a file holds a reference to that resolution
+/// could not place.
+///
+/// A def inside a def reads the enclosing body's variables, and the
+/// inner body's id does not name the outer one, so such a read is
+/// placed only where the file declares the name once. Where it is not
+/// placed, the analyzer has seen a read of that name and cannot say
+/// which variable it meant, so it must not claim any variable of that
+/// name is unread.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+fn unplaced_names_by_file<'a>(
+    a: &'a Analysis,
+    r: &crate::resolve::Resolved,
+) -> HashSet<(&'a Path, &'a str)> {
+    a.refs
+        .iter()
+        .enumerate()
+        .filter(|(at, _)| !r.targets.contains_key(at))
+        .map(|(_, re)| (re.file.as_path(), re.name.as_str()))
+        .collect()
+}
+
+/// FUNCTION: How many findings carry one class.
+fn count(findings: &[Finding], class: Class) -> usize {
+    findings.iter().filter(|f| f.class == class).count()
 }
 
 /// FUNCTION: Whether a symbol is public API, asked of the language
