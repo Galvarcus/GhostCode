@@ -77,13 +77,15 @@ fn a_variable_reached_through_an_arrow_is_still_a_reference() {
     assert_eq!(count(text, "sort"), 1);
 }
 
-/// Every scope prefix is one letter, and a name of one letter is left
-/// out of the table, so `g:flag = 1` keeps the reference it owes.
+/// A scope prefix is one letter, and a name of one letter is left out
+/// of the table, so nothing here reads `g:flag = 1` as a command. The
+/// prefix itself is dropped as Vim's scope notation, which is a rule
+/// of its own, and the name the project chose keeps its reference.
 #[test]
-fn a_scope_prefix_in_statement_position_is_still_a_reference() {
+fn a_scoped_name_written_in_statement_position_is_still_a_reference() {
     let text = "vim9script\ng:flag = 1\n";
 
-    assert_eq!(count(text, "g"), 1);
+    assert_eq!(count(text, "flag"), 1);
 }
 
 #[test]
