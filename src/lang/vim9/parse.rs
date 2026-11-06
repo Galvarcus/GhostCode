@@ -51,11 +51,26 @@ pub struct Scope {
     owner: Option<String>,
     owner_exported: bool,
     container: Container,
-    /// How many function bodies enclose the statement. Vim9 allows a
-    /// def inside a def, so one `enddef` closes one body and not the
-    /// one around it. A declaration is a local while this is above
-    /// zero, and the analyzer does not report a local.
-    depth: u32,
+    /// The function bodies enclosing the statement, innermost last.
+    /// Vim9 allows a def inside a def, so one `enddef` closes one
+    /// body and not the one around it, and a counter cannot say which
+    /// body the statements after the inner `enddef` belong to.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+    bodies: Vec<SymbolId>,
+}
+
+impl Scope {
+    /// METHOD: The body a statement sits in, innermost first, or none
+    /// at the top level of the file.
+    fn body(&self) -> Option<&SymbolId> {
+        self.bodies.last()
+    }
+
+    /// METHOD: How many bodies enclose the statement. A declaration is
+    /// a local while this is above zero.
+    fn depth(&self) -> usize {
+        self.bodies.len()
+    }
 }
 
 /// FUNCTION: Split a file's tokens into statements, dropping comments
@@ -113,8 +128,8 @@ pub fn declarations(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
         }
 
         if function(file, stmt, &words, line, &scope, out) {
-            if opens_def_body(&words, &scope) {
-                scope.depth += 1;
+            if let Some(id) = body_id(file, stmt, &words, &scope) {
+                scope.bodies.push(id);
             }
 
             continue;
@@ -122,7 +137,7 @@ pub fn declarations(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
 
         // Everything below is module level or class level. A
         // declaration inside a function body is a local.
-        if scope.depth > 0 {
+        if scope.depth() > 0 {
             continue;
         }
 
@@ -161,7 +176,7 @@ fn open_container(
     scope.owner = Some(name.to_string());
     scope.owner_exported = exported;
     scope.container = container;
-    scope.depth = 0;
+    scope.bodies.clear();
 
     out.sym(Symbol {
         id: SymbolId::of(file, None, name),
@@ -186,7 +201,7 @@ fn close_container(words: &[&str], scope: &mut Scope) -> bool {
             true
         }
         Some("enddef") => {
-            scope.depth = scope.depth.saturating_sub(1);
+            scope.bodies.pop();
             true
         }
         _ => false,
@@ -676,9 +691,7 @@ const BY_NAME: &[&str] = &[
 pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
     let types = Types::of_file(stmts);
     let mut scope = Scope::default();
-    let mut origin = SymbolId::script(file);
     let mut locals = Locals::default();
-    let mut in_def = false;
 
     for stmt in stmts {
         let words: Vec<&str> = stmt
@@ -688,11 +701,18 @@ pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
             .collect();
 
         if close_container(&words, &mut scope) {
-            origin = SymbolId::script(file);
             locals = Locals::default();
-            in_def = false;
             continue;
         }
+
+        // The body a statement sits in, read from the one stack both
+        // passes keep, so that a nested `enddef` returns to the body
+        // around it rather than to the file.
+        let origin = scope
+            .body()
+            .cloned()
+            .unwrap_or_else(|| SymbolId::script(file));
+        let in_def = scope.depth() > 0;
 
         // A declaration inside the body gives its name a type that
         // the calls after it are resolved against, and a loop binds
@@ -728,9 +748,8 @@ pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
         sink.statement(stmt, &skip);
 
         if let Some(id) = opens_body(file, stmt, &words, &mut scope) {
-            origin = id;
+            scope.bodies.push(id);
             locals = Locals::of_signature(stmt);
-            in_def = true;
         }
     }
 }
@@ -966,8 +985,22 @@ fn opens_body(file: &Path, stmt: &[Tok], words: &[&str], scope: &mut Scope) -> O
     if let Some((container, name)) = container_name(rest) {
         scope.owner = Some(name.to_string());
         scope.container = container;
+        scope.bodies.clear();
         return None;
     }
+
+    body_id(file, stmt, words, scope)
+}
+
+/// FUNCTION: The id of the body a `def` statement opens, or none when
+/// the statement is not a `def` or opens no body.
+///
+/// Both passes read this, so that neither can disagree with the other
+/// about which body a statement belongs to.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+fn body_id(file: &Path, stmt: &[Tok], words: &[&str], scope: &Scope) -> Option<SymbolId> {
+    let (_, rest) = strip_export(words);
+    let rest = strip_modifiers(rest);
 
     if rest.first().copied() != Some("def") {
         return None;
