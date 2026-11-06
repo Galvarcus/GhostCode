@@ -144,3 +144,54 @@ fn one_name_declared_in_two_blocks_of_a_body_is_not_reported() {
     )
     .is_empty());
 }
+
+/// `final` is a declaring word Vim9 treats as a `const` assigned
+/// once, and `strip_modifiers` eats it before the local emitter can
+/// see it. So no symbol was recorded while the read was no longer
+/// dropped, and the read fell through to a project symbol of the same
+/// name, taking a credit it was not owed. That is the design's first
+/// anti-goal: a ghost that silently stops being reported.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+#[test]
+fn a_final_in_a_body_does_not_credit_a_script_variable_of_its_name() {
+    let dir = TempDir::new("final-credit");
+    dir.write(
+        "autoload/lib.vim",
+        "vim9script\nvar helper = 1\nexport def Run()\n  final helper = 2\n  echo helper\nenddef\n",
+    );
+    dir.write(
+        "plugin/p.vim",
+        "vim9script\nimport autoload 'lib.vim' as lib\nlib.Run()\n",
+    );
+
+    let r = report::analyze(dir.path(), &common::cfg(false)).expect("the scan runs");
+
+    assert_eq!(
+        r.findings
+            .iter()
+            .map(|f| format!("{} {}", f.class, f.name))
+            .collect::<Vec<String>>(),
+        vec!["ghost helper"],
+        "the script variable is read by nothing"
+    );
+}
+
+/// A compound assignment reads the variable before it writes it, so
+/// it is a read. `n += 1` and `n = n + 1` are the same statement
+/// spelled two ways and must give one answer.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+#[test]
+fn a_compound_assignment_counts_as_a_read_however_it_is_spelled() {
+    assert!(found("compound", "  var n = 0\n  n += 1\n").is_empty());
+    assert!(found("longhand", "  var n = 0\n  n = n + 1\n").is_empty());
+}
+
+/// A plain assignment is a pure write, which is the fault the class
+/// exists to find.
+#[test]
+fn a_plain_assignment_is_still_only_a_write() {
+    assert_eq!(
+        found("plain", "  var f = false\n  f = true\n"),
+        vec!["local variable f"]
+    );
+}

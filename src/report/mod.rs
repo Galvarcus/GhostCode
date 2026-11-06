@@ -249,8 +249,6 @@ pub fn build(
     }
 }
 
-/// FUNCTION: Whether a symbol is public API, asked of the language
-/// that declared it.
 /// FUNCTION: Which class a symbol is reported as, or none when it is
 /// not reported at all.
 ///
@@ -306,6 +304,8 @@ fn count(findings: &[Finding], class: Class) -> usize {
     findings.iter().filter(|f| f.class == class).count()
 }
 
+/// FUNCTION: Whether a symbol is public API, asked of the language
+/// that declared it.
 fn is_api(sym: &crate::model::Symbol, cfg: &Config) -> bool {
     lang::for_path(&sym.file).is_some_and(|l| l.is_api(sym, cfg))
 }

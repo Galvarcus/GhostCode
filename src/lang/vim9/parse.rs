@@ -634,17 +634,26 @@ const KEYWORDS: &[&str] = &[
     "normal",
 ];
 
+// The assignments that write a variable without reading it first.
+// `=` is the plain one and `=<<` opens a heredoc, which the lexer
+// keeps whole. Every other assignment Vim9 has is compound: `n += 1`
+// reads `n` before it writes it, so it is a read, and `n += 1` and
+// `n = n + 1` must not give different answers for one statement
+// spelled two ways.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+const WRITES: &[&str] = &["=", "=<<"];
+
+// Vim9's discard placeholder. A value assigned to it is stated to be
+// unwanted, so there is nothing to report and nothing to record.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+const DISCARD: &str = "_";
+
 // Vim9's keyed container. A member access on one reads a key, which
 // `recv_type` reports as this type because it reports the outermost
 // one: `dict<string, Config>` is a dict. No class can carry the name,
 // since Vim9 requires a capital, so the test cannot meet a project's
 // own type of that name.
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-// Vim9's discard placeholder. A value assigned to it is stated to be
-// unwanted, so there is nothing to report and nothing to record.
-// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-const DISCARD: &str = "_";
-
 const DICT: &str = "dict";
 
 // Vim's scope letters, which stand before a colon and name where a
@@ -971,14 +980,16 @@ impl Collect<'_> {
             return false;
         }
 
-        // A declared local is a symbol now, so its read is a
-        // reference that resolves to it. A parameter and a loop
-        // variable are not symbols, so their reads are still dropped:
-        // resolution has nothing to place them on.
+        // A `var` or `const` of this body is a symbol now, so its
+        // read is a reference that resolves to it. A `final`, a
+        // parameter and a loop variable are not symbols, so their
+        // reads are still dropped: resolution has nothing to place
+        // them on, and an emitted read would fall through to a
+        // project symbol of the same name and credit it.
         // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
         matches!(
             self.locals.bound_by(word),
-            Some(types::Bound::Parameter | types::Bound::Loop)
+            Some(types::Bound::Final | types::Bound::Parameter | types::Bound::Loop)
         )
     }
 
@@ -1348,8 +1359,8 @@ fn in_command_def(stmt: &[Tok], i: usize) -> bool {
     i > 0 && i < name_at && stmt[i - 1].text != ","
 }
 
-/// FUNCTION: Whether the name at a position is being assigned to
-/// rather than read.
+/// FUNCTION: Whether the name at a position is being written without
+/// being read.
 ///
 /// Only a name opening the statement, because that is where Vim reads
 /// an assignment target. A destructuring assignment is not caught,
@@ -1358,12 +1369,9 @@ fn in_command_def(stmt: &[Tok], i: usize) -> bool {
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 fn written(stmt: &[Tok], i: usize) -> bool {
     i == 0
-        && stmt.get(1).is_some_and(|t| {
-            matches!(
-                t.text.as_str(),
-                "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "..=" | "<<=" | ">>="
-            )
-        })
+        && stmt
+            .get(1)
+            .is_some_and(|t| WRITES.contains(&t.text.as_str()))
 }
 
 /// FUNCTION: Whether a name stands where Vim reads a command: at the

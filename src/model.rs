@@ -129,7 +129,6 @@ pub struct Symbol {
     /// The name of the class, enum or interface that holds it. A name
     /// rather than an id, because a class-qualified call such as
     /// `M.Menu.new()` names a class without naming its file.
-    /// The class, enum or interface that holds it, by name.
     pub owner: Option<String>,
 
     /// The symbol whose body owns this one, where one does. A local

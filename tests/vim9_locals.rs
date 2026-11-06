@@ -170,7 +170,8 @@ fn a_parameter_after_a_nested_comma_is_not_a_reference() {
 /// A body outside the one that declared the name knows nothing of it.
 /// Both reads are references; only the one inside F has a symbol to
 /// reach, which `a_scoped_symbol_is_invisible_from_another_scope` in
-/// `src/resolve.rs` holds.
+/// `src/resolve.rs` holds. G's read resolves to nothing, which is
+/// what keeps F's variable off the report rather than crediting it.
 #[test]
 fn a_variable_of_another_body_is_still_a_reference() {
     let text =

@@ -98,9 +98,15 @@ impl Types {
     }
 }
 
-/// What bound a name inside a function body. Only a declaration makes
-/// a symbol, so the rest keep being dropped from the references; the
-/// distinction is what lets one be kept without keeping all of them.
+/// What bound a name inside a function body. Only a `var` or a
+/// `const` makes a symbol, so the rest keep being dropped from the
+/// references; the distinction is what lets one be kept without
+/// keeping all of them.
+///
+/// `Final` is apart from `Declared` because `strip_modifiers` eats
+/// the word before the symbol emitter can see it, so a `final` can
+/// never have a symbol for its read to resolve to. Keeping the read
+/// dropped is what stops it crediting a project symbol of the name.
 ///
 /// A lambda's parameter is absent on purpose: `bound_names` carries it
 /// and the reference walk checks that first.
@@ -108,6 +114,7 @@ impl Types {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Bound {
     Declared,
+    Final,
     Parameter,
     Loop,
 }
@@ -150,7 +157,12 @@ impl Locals {
     /// whether it states one or builds one with a constructor.
     pub fn declare(&mut self, stmt: &[Tok]) {
         if let Some((name, ty)) = declared_name(stmt) {
-            self.vars.insert(name, (Bound::Declared, ty));
+            let bound = match declaring_word(stmt) {
+                Some("final") => Bound::Final,
+                _ => Bound::Declared,
+            };
+
+            self.vars.insert(name, (bound, ty));
         }
     }
 
@@ -290,6 +302,19 @@ pub fn lambda_params(stmt: &[Tok]) -> Vec<&str> {
 /// as `var x: Foo` states one and `var x = Foo.new()` implies one. The
 /// type is empty where the declaration gives none, because knowing a
 /// name is a variable at all is what tells it from a class name.
+/// FUNCTION: Which of the three declaring words opened a statement.
+///
+/// `strip_modifiers` removes `final` wherever it stands, so the word
+/// cannot be read back from the stripped list and has to be taken
+/// from the tokens.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+fn declaring_word(stmt: &[Tok]) -> Option<&str> {
+    stmt.iter()
+        .take(4)
+        .map(|t| t.text.as_str())
+        .find(|w| matches!(*w, "var" | "const" | "final"))
+}
+
 fn declared_name(stmt: &[Tok]) -> Option<(String, String)> {
     let at = stmt
         .iter()

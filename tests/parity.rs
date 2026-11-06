@@ -85,6 +85,44 @@ fn locals(corpus: &str) -> Vec<String> {
         .collect()
 }
 
+/// The counts, not the findings. The captured fixtures hold what each
+/// corpus reports, and nothing held what it counted, so a change could
+/// trade false credits for real gaps and still read as an improvement.
+///
+/// These move deliberately. A fall is usually right, because placing a
+/// name is the point of issue 12, but it is only right when nothing
+/// new became unplaced, and the fixtures above cannot tell you that.
+/// Update a number here with the reason in the commit message.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+#[test]
+fn each_corpus_counts_what_it_counted() {
+    // corpus, ghost findings, unplaced names
+    const COUNTS: &[(&str, u64, u64)] = &[
+        ("bartleby", 0, 2360),
+        ("ghostcode", 0, 25),
+        ("logger", 0, 74),
+        ("nested", 2, 194),
+    ];
+
+    let mut differences: Vec<String> = Vec::new();
+
+    for (corpus, ghost, unplaced) in COUNTS {
+        let got: Value =
+            serde_json::from_str(&run(corpus, false, "json")).expect("the report is JSON");
+        let summary = &got["summary"];
+
+        for (field, want) in [("ghost", ghost), ("unplaced_names", unplaced)] {
+            let is = summary[field].as_u64().unwrap_or_default();
+
+            if is != *want {
+                differences.push(format!("{corpus}: {field} {is}, recorded {want}"));
+            }
+        }
+    }
+
+    assert!(differences.is_empty(), "{}", differences.join("\n"));
+}
+
 /// The class's own fixture. Every line was read against its source
 /// before being recorded: a line that is not a variable the author
 /// would want to hear about is a defect in the rule, not a fixture to

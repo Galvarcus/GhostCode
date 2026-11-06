@@ -42,12 +42,6 @@ pub struct Index<'a> {
     /// a reference elsewhere in the project from crediting it.
     /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
     scoped: HashMap<&'a SymbolId, HashMap<&'a str, &'a SymbolId>>,
-    /// Per file, the scoped symbols of each name. A nested def closes
-    /// over the body around it, and the inner body's id does not name
-    /// the outer one, so this is the last resort for a read that no
-    /// other rule placed.
-    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-    scoped_in_file: HashMap<(&'a Path, &'a str), Vec<&'a SymbolId>>,
 }
 
 impl<'a> Index<'a> {
@@ -65,10 +59,6 @@ impl<'a> Index<'a> {
                     .entry(scope)
                     .or_default()
                     .insert(&sym.name, &sym.id);
-                idx.scoped_in_file
-                    .entry((sym.file.as_path(), &sym.name))
-                    .or_default()
-                    .push(&sym.id);
                 continue;
             }
 
@@ -141,34 +131,7 @@ impl<'a> Index<'a> {
             return vec![id];
         }
 
-        let by_name = self.cloned(self.by_name.get(r.name.as_str()));
-        if !by_name.is_empty() {
-            return by_name;
-        }
-
-        self.captured(r).into_iter().collect()
-    }
-
-    /// METHOD: The variable a nested def closed over, where nothing
-    /// else placed the read.
-    ///
-    /// Vim9 lets a def inside a def read the enclosing body's
-    /// variables, and the inner body's id does not name the outer
-    /// one, so the scoped lookup cannot walk outwards. Where the file
-    /// declares exactly one variable of the name, that is the one
-    /// meant. Where it declares several this answers nothing, so a
-    /// name two bodies share is left unplaced rather than credited to
-    /// a guess.
-    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-    fn captured(&self, r: &Reference) -> Option<SymbolId> {
-        let ids = self
-            .scoped_in_file
-            .get(&(r.file.as_path(), r.name.as_str()))?;
-        let [one] = ids.as_slice() else {
-            return None;
-        };
-
-        Some((*one).clone())
+        self.cloned(self.by_name.get(r.name.as_str()))
     }
 
     /// METHOD: Resolve `recv.name`, where `recv` is already the type
@@ -381,41 +344,25 @@ mod tests {
         );
     }
 
-    /// Two bodies of one file declaring the name means the read
-    /// cannot be placed on either: a nested def closes over one body
-    /// only, and which one is not knowable from the id.
+    /// A body sees its own variables and no other body's, which is
+    /// what Vim9 compiles. A def nested inside a body does read that
+    /// body's variables, and the inner body's id does not name the
+    /// outer one, so such a read is left unplaced rather than
+    /// credited to a guess: `unplaced_names_by_file` then keeps the
+    /// variable off the report.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
     #[test]
     fn a_scoped_symbol_is_invisible_from_another_scope() {
         let a = Analysis {
-            syms: vec![
-                local_sym("autoload/a.vim", "F", "row"),
-                local_sym("autoload/a.vim", "G", "row"),
-            ],
+            syms: vec![local_sym("autoload/a.vim", "F", "row")],
             ..Analysis::default()
         };
 
-        assert!(ids(&a, &re_in("autoload/a.vim", "H", "row")).is_empty());
+        assert!(ids(&a, &re_in("autoload/a.vim", "G", "row")).is_empty());
     }
 
-    /// A def inside a def reads the enclosing body's variables, and
-    /// the inner body's id does not name the outer one. Where the
-    /// file declares one variable of the name, that is the one meant.
-    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-    #[test]
-    fn a_variable_a_nested_def_closed_over_is_still_reached() {
-        let a = Analysis {
-            syms: vec![local_sym("autoload/a.vim", "Outer", "bufs")],
-            ..Analysis::default()
-        };
-
-        assert_eq!(
-            ids(&a, &re_in("autoload/a.vim", "Walk", "bufs")),
-            vec!["autoload/a.vim::Outer.bufs"]
-        );
-    }
-
-    /// The fallback is the last resort, so a name the file also
-    /// declares at script level still reaches the script variable.
+    /// A name the file also declares at script level is reached by
+    /// the same-file rule, as it was before scopes existed.
     #[test]
     fn a_script_variable_still_wins_over_a_variable_of_some_body() {
         let a = Analysis {
