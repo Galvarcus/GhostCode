@@ -40,6 +40,7 @@ def Scan(
   status: number = 0,
   path: string = '/project',
   api: any = null,
+  locals: any = null,
 ): void
 
   g:ghostcode_bin = STUB
@@ -51,6 +52,10 @@ def Scan(
     g:ghostcode_exports_are_api = api
   endif
 
+  if locals != null
+    g:ghostcode_locals = locals
+  endif
+
   delete(ARGS)
   setqflist([], 'r')
 
@@ -60,6 +65,7 @@ def Scan(
     silent! cclose
     unlet! g:ghostcode_bin
     unlet! g:ghostcode_exports_are_api
+    unlet! g:ghostcode_locals
   endtry
 enddef
 
@@ -286,6 +292,25 @@ def Test_the_plugin_script_defines_no_default_for_the_setting(): void
   assert_false(exists('g:ghostcode_exports_are_api'))
 enddef
 
+def Test_the_locals_setting_is_not_passed_when_the_user_did_not_set_it(): void
+  Scan()
+
+  assert_equal(-1, index(Args(), '--locals'))
+enddef
+
+def Test_the_locals_setting_is_passed_when_the_user_set_it(): void
+  Scan(REPORT, 0, '/project', null, true)
+
+  var args = Args()
+  var at = index(args, '--locals')
+  assert_true(at >= 0, join(args, '|'))
+  assert_equal('true', args[at + 1])
+enddef
+
+def Test_the_plugin_script_defines_no_default_for_the_locals_setting(): void
+  assert_false(exists('g:ghostcode_locals'))
+enddef
+
 export def RunAll(): void
   Test_the_quickfix_text_matches_the_old_format()
   Test_the_column_is_one_and_the_line_is_the_reported_one()
@@ -308,4 +333,7 @@ export def RunAll(): void
   Test_a_schema_that_is_not_a_number_does_not_throw()
   Test_a_skipped_file_does_not_reach_the_quickfix_list()
   Test_the_plugin_script_defines_no_default_for_the_setting()
+  Test_the_locals_setting_is_not_passed_when_the_user_did_not_set_it()
+  Test_the_locals_setting_is_passed_when_the_user_set_it()
+  Test_the_plugin_script_defines_no_default_for_the_locals_setting()
 enddef

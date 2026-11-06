@@ -30,11 +30,13 @@ const EXE: string = BIN .. (has('win32') || has('win32unix') ? '.exe' : '')
 const BIN_DIR: string = 'bin'
 const SETTING_BIN: string = 'ghostcode_bin'
 const SETTING_API: string = 'ghostcode_exports_are_api'
+const SETTING_LOCALS: string = 'ghostcode_locals'
 const FLAG_FORMAT: string = '--format=json'
 # The patch where system() and systemlist() began to take the command
 # as a list. This plugin supports Vim 9.1, which has no such form.
 const PATCH_ARGV: string = 'patch-9.2.0250'
 const FLAG_API: string = '--exports-are-api'
+const FLAG_LOCALS: string = '--locals'
 
 const MSG_NO_BIN: string = 'no %s found. Looked at g:%s, then $PATH, then %s. Install it from the project''s releases, or build it with `cargo install %s`.'
 const MSG_FAILED: string = '%s failed (status %d): %s'
@@ -104,22 +106,29 @@ def Bundled(): string
   return fnamemodify(expand('<script>'), ':h:h') .. $'/{BIN_DIR}/{EXE}'
 enddef
 
+# FUNCTION: Add flag to cmd for a setting the user set, and nothing
+# for one they did not, so that a project's ghostcode.toml is not
+# overridden from here by a default nobody chose.
+#
+# The value is whatever the user wrote, and Vim9 reads only 0 and 1 as
+# a condition. empty() takes any type, so a 2 or a word is passed on
+# rather than thrown out of the scan.
+def AddSetting(cmd: list<string>, setting: string, flag: string): void
+  if !exists($'g:{setting}')
+    return
+  endif
+
+  add(cmd, flag)
+  add(cmd, empty(get(g:, setting)) ? 'false' : 'true')
+enddef
+
 # FUNCTION: The command to run, as a list, so that no path needs
 # quoting and a folder whose name holds a space still scans.
-#
-# The setting is passed only when the user set it, so that a project's
-# ghostcode.toml is not overridden from here by a default nobody chose.
 def Cmd(bin: string, root: string): list<string>
   var cmd = [bin, FLAG_FORMAT]
 
-  # The value is whatever the user wrote, and Vim9 reads only 0 and 1
-  # as a condition. empty() takes any type, so a 2 or a word is passed
-  # on rather than thrown out of the scan.
-  if exists($'g:{SETTING_API}')
-    add(cmd, FLAG_API)
-    add(cmd, empty(get(g:, SETTING_API)) ? 'false' : 'true')
-  endif
-
+  AddSetting(cmd, SETTING_API, FLAG_API)
+  AddSetting(cmd, SETTING_LOCALS, FLAG_LOCALS)
   add(cmd, root)
 
   return cmd
