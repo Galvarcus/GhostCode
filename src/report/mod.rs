@@ -35,6 +35,12 @@ pub const SCHEMA: u32 = 1;
 pub struct Summary {
     pub symbols: usize,
     pub ghost: usize,
+
+    /// How many variables of a function body nothing reads. Zero
+    /// unless the class is asked for, and counted apart from the
+    /// ghosts because a build that counts ghosts must not see one.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+    pub local: usize,
     /// References that named nothing this project declares and that
     /// the host language does not own. It measures what the analyzer
     /// could not place rather than what a reader should act on. The
@@ -212,17 +218,16 @@ pub fn build(
     let mut findings: Vec<Finding> = a
         .syms
         .iter()
-        .filter(|s| s.scope.is_none())
-        .filter(|s| !reached.contains(&s.id))
-        .filter(|s| !is_api(s, cfg))
-        .map(|s| Finding {
-            class: Class::Ghost,
-            kind: s.kind,
-            name: s.name.clone(),
-            file: s.file.clone(),
-            line: s.line,
-            col: 1,
-            lang: lang::for_path(&s.file).map_or("", |l| l.name()),
+        .filter_map(|s| {
+            classify(s, reached, cfg).map(|class| Finding {
+                class,
+                kind: s.kind,
+                name: s.name.clone(),
+                file: s.file.clone(),
+                line: s.line,
+                col: 1,
+                lang: lang::for_path(&s.file).map_or("", |l| l.name()),
+            })
         })
         .collect();
 
@@ -233,7 +238,8 @@ pub fn build(
         root: root.to_path_buf(),
         summary: Summary {
             symbols: a.syms.len(),
-            ghost: findings.len(),
+            ghost: count(&findings, Class::Ghost),
+            local: count(&findings, Class::Local),
             unplaced_names,
         },
         findings,
@@ -243,6 +249,35 @@ pub fn build(
 
 /// FUNCTION: Whether a symbol is public API, asked of the language
 /// that declared it.
+/// FUNCTION: Which class a symbol is reported as, or none when it is
+/// not reported at all.
+///
+/// A variable of a function body is reported when its body is reached
+/// and nothing credits it. The body being reached is the test that
+/// matters: a dead function is itself the finding, and naming its
+/// variables beside it would report the symptom several times over
+/// and the cause once. A local cannot be exported, so the API rule
+/// has nothing to say about one.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+fn classify(
+    sym: &crate::model::Symbol,
+    reached: &HashSet<SymbolId>,
+    cfg: &Config,
+) -> Option<Class> {
+    if let Some(body) = &sym.scope {
+        let unread = cfg.findings.locals && reached.contains(body) && !reached.contains(&sym.id);
+
+        return unread.then_some(Class::Local);
+    }
+
+    (!reached.contains(&sym.id) && !is_api(sym, cfg)).then_some(Class::Ghost)
+}
+
+/// FUNCTION: How many findings carry one class.
+fn count(findings: &[Finding], class: Class) -> usize {
+    findings.iter().filter(|f| f.class == class).count()
+}
+
 fn is_api(sym: &crate::model::Symbol, cfg: &Config) -> bool {
     lang::for_path(&sym.file).is_some_and(|l| l.is_api(sym, cfg))
 }

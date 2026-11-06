@@ -119,6 +119,75 @@ fn an_unplaced_name_is_a_summary_number_and_never_a_finding() {
     assert!(r.findings.is_empty());
 }
 
+/// FUNCTION: A project whose only fault is a variable of a body that
+/// nothing reads.
+fn with_unread_local(tag: &str) -> TempDir {
+    let dir = TempDir::new(tag);
+    dir.write(
+        "autoload/lib.vim",
+        "vim9script\nexport def Used()\n  var row = 1\nenddef\n",
+    );
+    dir.write("plugin/p.vim", ENTRY);
+    dir
+}
+
+/// FUNCTION: Scan with the local class turned on.
+fn run_with_locals(dir: &TempDir) -> Report {
+    let cfg = common::cfg_with_locals(false);
+    report::analyze(dir.path(), &cfg).expect("the scan runs")
+}
+
+/// The class waits behind its flag, so a run that did not ask for it
+/// reads exactly as it did before the class existed.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+#[test]
+fn the_local_class_is_off_unless_its_flag_is_set() {
+    let dir = with_unread_local("local-off");
+    let r = run(&dir);
+
+    assert!(r.findings.is_empty());
+    assert_eq!(r.summary.local, 0);
+}
+
+/// `summary.ghost` is the count of ghosts, not of findings. A build
+/// that counts ghosts must not see a local among them.
+#[test]
+fn a_local_finding_does_not_raise_the_ghost_count() {
+    let dir = with_unread_local("local-count");
+    let r = run_with_locals(&dir);
+
+    assert_eq!(r.summary.ghost, 0);
+    assert_eq!(r.summary.local, 1);
+}
+
+/// The tag is a contract: Bartleby's build counts the lines carrying
+/// `[ghost]`, so a local must never print one.
+#[test]
+fn a_local_prints_its_own_tag_and_never_the_ghost_tag() {
+    let dir = with_unread_local("local-tag");
+    let r = run_with_locals(&dir);
+
+    assert_eq!(lines(&r), vec!["autoload/lib.vim:3:1:[local] variable row"]);
+}
+
+/// A dead function is the finding. Reporting its locals beside it
+/// would name the symptom several times over and the cause once.
+#[test]
+fn a_local_of_a_dead_function_is_not_reported_beside_it() {
+    let dir = TempDir::new("local-dead");
+    dir.write(
+        "autoload/lib.vim",
+        "vim9script\nexport def Used()\nenddef\ndef Dead()\n  var row = 1\nenddef\n",
+    );
+    dir.write("plugin/p.vim", ENTRY);
+    let r = run_with_locals(&dir);
+
+    assert_eq!(
+        lines(&r),
+        vec!["autoload/lib.vim:4:1:[ghost] function Dead"]
+    );
+}
+
 #[test]
 fn the_summary_counts_every_symbol() {
     let dir = project("summary");
@@ -189,7 +258,14 @@ fn json_carries_every_field_a_consumer_reads() {
         keys(&v),
         ["findings", "root", "schema", "skipped", "summary"]
     );
-    assert_eq!(keys(&v["summary"]), ["ghost", "symbols", "unplaced_names"]);
+    // `local` joined the summary with the local finding class. A
+    // reader that does not know the key is not broken by it, which is
+    // the test the schema sets, so SCHEMA stays where it is.
+    // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+    assert_eq!(
+        keys(&v["summary"]),
+        ["ghost", "local", "symbols", "unplaced_names"]
+    );
     assert_eq!(
         keys(&v["findings"][0]),
         ["class", "col", "file", "kind", "lang", "line", "name"]

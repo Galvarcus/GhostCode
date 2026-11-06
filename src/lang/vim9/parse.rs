@@ -889,6 +889,22 @@ impl Collect<'_> {
             return;
         }
 
+        // A write is not a read. A variable the body declares and only
+        // ever assigns to is exactly what the local class exists to
+        // find, so an assignment must not credit it.
+        //
+        // Only inside a body. `Locals` records a script-level
+        // declaration as well, and a script variable's write still
+        // credits it: that is the write-only class, not this one.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+        if recv.is_none()
+            && self.in_def
+            && self.locals.bound_by(word) == Some(types::Bound::Declared)
+            && written(stmt, i)
+        {
+            return;
+        }
+
         // A called lowercase name is Vim's own, because Vim refuses a
         // `def` and a funcref variable whose name does not start with
         // a capital. It is dropped for the same reason a local is: a
@@ -1321,6 +1337,24 @@ fn in_command_def(stmt: &[Tok], i: usize) -> bool {
     }
 
     i > 0 && i < name_at && stmt[i - 1].text != ","
+}
+
+/// FUNCTION: Whether the name at a position is being assigned to
+/// rather than read.
+///
+/// Only a name opening the statement, because that is where Vim reads
+/// an assignment target. A destructuring assignment is not caught,
+/// which leaves its write crediting the variable: that misses a
+/// finding rather than inventing one.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+fn written(stmt: &[Tok], i: usize) -> bool {
+    i == 0
+        && stmt.get(1).is_some_and(|t| {
+            matches!(
+                t.text.as_str(),
+                "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "..=" | "<<=" | ">>="
+            )
+        })
 }
 
 /// FUNCTION: Whether a name stands where Vim reads a command: at the
