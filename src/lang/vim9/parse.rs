@@ -735,6 +735,10 @@ impl Collect<'_> {
             return;
         }
 
+        if in_notation(stmt, i) || in_autocmd(stmt, i) {
+            return;
+        }
+
         // A name against a colon is a parameter or a key, not a use:
         // `{callback: OnDone}` uses OnDone, not callback.
         if stmt.get(i + 1).is_some_and(|t| t.text == ":") && !is_type_position(stmt, i) {
@@ -977,6 +981,88 @@ fn called(stmt: &[Tok], i: usize) -> bool {
 /// `g:`, which a stream of tokens cannot tell from an annotation.
 /// None of those costs a credit: the name is still resolved, and the
 /// answer is read only where nothing resolved.
+/// FUNCTION: The command a statement runs, past any modifier before
+/// it, which is what tells the rules of one command from another.
+fn head(stmt: &[Tok]) -> Option<&str> {
+    stmt.iter()
+        .find(|t| t.text != "!" && !MODS.contains(&t.text.as_str()))
+        .map(|t| t.text.as_str())
+}
+
+/// FUNCTION: Whether a command's arguments carry Vim's angle-bracket
+/// notation, which the mapping, menu and abbreviation commands do,
+/// and so does an autocommand in its pattern.
+///
+/// Vim has 84 of the first kind and builds every one from four stems,
+/// so the stem is what this tests, against the generated table so
+/// that a name of the project's cannot match. A command this misses
+/// only leaves its notation counted, which is the safe direction: the
+/// notation is never a name the project declares, so no credit rests
+/// on recognising the command.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+fn notation(word: &str) -> bool {
+    if matches!(word, "autocmd" | "doautocmd" | "doautoall") {
+        return true;
+    }
+
+    excmds::has(word)
+        && (word.ends_with("map")
+            || word.ends_with("mapclear")
+            || word.ends_with("menu")
+            || word.ends_with("abbrev")
+            || word.ends_with("abbreviate"))
+}
+
+/// FUNCTION: Whether a name is part of an autocommand's own syntax
+/// rather than a name the project declares.
+///
+/// `:augroup` takes the name of a group and nothing else, and a group
+/// lives in Vim's namespace. The `++once`, `++nested` and
+/// `++nomodeline` flags are Vim's as well, and nothing else in Vim9
+/// writes a word behind two plus signs.
+///
+/// The event names are not here. They are capitalised, so `User` or
+/// `Signal` could be a class of the project's, and telling them apart
+/// needs Vim's list of events rather than a position.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+fn in_autocmd(stmt: &[Tok], i: usize) -> bool {
+    if head(stmt) == Some("augroup") {
+        return true;
+    }
+
+    i >= 2 && stmt[i - 1].text == "+" && stmt[i - 2].text == "+"
+}
+
+/// FUNCTION: Whether a name is one of Vim's key words, standing
+/// inside the angle brackets of a mapping statement.
+///
+/// Nothing the project owns can be in there. `<SID>Func`,
+/// `<Plug>(Name)` and `<ScriptCmd>Close()` each put the name after
+/// the closing bracket, which is why what a mapping runs keeps its
+/// reference while `<buffer>`, `<nowait>` and the parts of `<C-x>` do
+/// not.
+///
+/// The rule is anchored to the statement rather than to the brackets
+/// alone, because `list<string>` and `a < b` wear the same brackets
+/// and neither is notation.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+fn in_notation(stmt: &[Tok], i: usize) -> bool {
+    if !head(stmt).is_some_and(notation) {
+        return false;
+    }
+
+    // The nearest bracket behind the name says whether it is inside a
+    // span, and a span has to close for the brackets to be notation
+    // rather than a comparison.
+    let open = stmt[..i]
+        .iter()
+        .rev()
+        .find(|t| t.text == "<" || t.text == ">")
+        .is_some_and(|t| t.text == "<");
+
+    open && stmt[i + 1..].iter().any(|t| t.text == ">")
+}
+
 /// FUNCTION: Whether a name is Vim's own because it opens with one of
 /// Vim's sigils: `&` an option, `$` an environment variable, `@` a
 /// register.
