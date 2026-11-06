@@ -55,6 +55,50 @@ fn run(corpus: &str, strict: bool, format: &str) -> String {
     String::from_utf8(out.stdout).expect("the report is UTF-8")
 }
 
+/// FUNCTION: Every local finding of one corpus, with the class turned
+/// on, each line carrying the corpus it came from.
+fn locals(corpus: &str) -> Vec<String> {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_ghostcode"));
+    let out = cmd
+        .args([
+            "--format=text",
+            "--exports-are-api",
+            "false",
+            "--locals",
+            "true",
+        ])
+        .arg(root().join("tests/fixtures/corpora").join(corpus))
+        .output()
+        .expect("run the built binary");
+
+    assert!(
+        out.status.success(),
+        "{corpus}: the scan failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    String::from_utf8(out.stdout)
+        .expect("the report is UTF-8")
+        .lines()
+        .filter(|l| l.contains("[local]"))
+        .map(|l| format!("{corpus}/{l}"))
+        .collect()
+}
+
+/// The class's own fixture. Every line was read against its source
+/// before being recorded: a line that is not a variable the author
+/// would want to hear about is a defect in the rule, not a fixture to
+/// accept.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+#[test]
+fn the_local_class_finds_what_the_corpora_hold() {
+    let found: Vec<String> = CORPORA.iter().flat_map(|c| locals(c)).collect();
+    let want = std::fs::read_to_string(root().join("tests/fixtures/expected/locals.txt"))
+        .expect("the local fixture");
+
+    assert_eq!(found, want.lines().collect::<Vec<&str>>());
+}
+
 /// FUNCTION: What the core reports for one corpus, in the text form
 /// that Vim's own workflow writes out of the quickfix list.
 fn scan(corpus: &str, strict: bool) -> String {

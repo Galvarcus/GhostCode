@@ -314,6 +314,15 @@ fn local(file: &Path, words: &[&str], line: u32, scope: &Scope, out: &mut dyn Si
         return;
     }
 
+    // A name the language owns is dropped wherever it stands, so no
+    // read of this variable ever reaches the reference list and the
+    // analyzer cannot know whether it is used. Recording it would
+    // make a finding of `var set = {}` read on the next line.
+    // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/31
+    if KEYWORDS.contains(name) {
+        return;
+    }
+
     out.sym(Symbol {
         id: SymbolId::in_scope(body, name),
         kind: Kind::Variable,

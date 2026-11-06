@@ -128,7 +128,8 @@ pub fn analyze(root: &Path, cfg: &Config) -> anyhow::Result<Report> {
     let resolved = resolve::all(&a);
     let reached = reach::walk(&a, &resolved);
 
-    let mut report = build(root, &a, &reached, resolved.unplaced, cfg);
+    let blind = unplaced_names_by_file(&a, &resolved);
+    let mut report = build(root, &a, &reached, &blind, resolved.unplaced, cfg);
 
     report.skipped = found
         .skipped
@@ -212,6 +213,7 @@ pub fn build(
     root: &Path,
     a: &Analysis,
     reached: &HashSet<SymbolId>,
+    blind: &HashSet<(&Path, &str)>,
     unplaced_names: usize,
     cfg: &Config,
 ) -> Report {
@@ -219,7 +221,7 @@ pub fn build(
         .syms
         .iter()
         .filter_map(|s| {
-            classify(s, reached, cfg).map(|class| Finding {
+            classify(s, reached, blind, cfg).map(|class| Finding {
                 class,
                 kind: s.kind,
                 name: s.name.clone(),
@@ -262,15 +264,41 @@ pub fn build(
 fn classify(
     sym: &crate::model::Symbol,
     reached: &HashSet<SymbolId>,
+    blind: &HashSet<(&Path, &str)>,
     cfg: &Config,
 ) -> Option<Class> {
     if let Some(body) = &sym.scope {
-        let unread = cfg.findings.locals && reached.contains(body) && !reached.contains(&sym.id);
+        let unread = cfg.findings.locals
+            && reached.contains(body)
+            && !reached.contains(&sym.id)
+            && !blind.contains(&(sym.file.as_path(), sym.name.as_str()));
 
         return unread.then_some(Class::Local);
     }
 
     (!reached.contains(&sym.id) && !is_api(sym, cfg)).then_some(Class::Ghost)
+}
+
+/// FUNCTION: The names a file holds a reference to that resolution
+/// could not place.
+///
+/// A def inside a def reads the enclosing body's variables, and the
+/// inner body's id does not name the outer one, so such a read is
+/// placed only where the file declares the name once. Where it is not
+/// placed, the analyzer has seen a read of that name and cannot say
+/// which variable it meant, so it must not claim any variable of that
+/// name is unread.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+fn unplaced_names_by_file<'a>(
+    a: &'a Analysis,
+    r: &crate::resolve::Resolved,
+) -> HashSet<(&'a Path, &'a str)> {
+    a.refs
+        .iter()
+        .enumerate()
+        .filter(|(at, _)| !r.targets.contains_key(at))
+        .map(|(_, re)| (re.file.as_path(), re.name.as_str()))
+        .collect()
 }
 
 /// FUNCTION: How many findings carry one class.
