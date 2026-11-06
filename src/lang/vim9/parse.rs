@@ -171,6 +171,7 @@ fn open_container(
         line,
         exported,
         owner: None,
+        scope: None,
     });
 
     true
@@ -235,6 +236,7 @@ fn function(
         line,
         exported,
         owner: scope.owner.clone(),
+        scope: None,
     });
 
     true
@@ -264,6 +266,7 @@ fn variable(file: &Path, words: &[&str], line: u32, scope: &Scope, out: &mut dyn
         line,
         exported,
         owner: scope.owner.clone(),
+        scope: None,
     });
 }
 
@@ -281,6 +284,7 @@ fn enum_values(file: &Path, stmt: &[Tok], line: u32, scope: &Scope, out: &mut dy
             line,
             exported: false,
             owner: scope.owner.clone(),
+            scope: None,
         });
     }
 }

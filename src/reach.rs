@@ -100,6 +100,7 @@ mod tests {
             line: 1,
             exported: false,
             owner: None,
+            scope: None,
         }
     }
 
