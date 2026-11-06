@@ -137,7 +137,7 @@ It puts the findings in the quickfix list, opens the list when it finds
 any, and shows a summary through Logger:
 
 ```text
-Ghostcode - ghostcode.vim - Fill: 23 symbols, 7 ghost
+Ghostcode - ghostcode.vim - Report: 23 symbols, 7 ghost
 ```
 
 Each entry names the kind of symbol, its name, its file, and its line:

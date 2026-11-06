@@ -211,7 +211,7 @@ def Test_the_logged_summary_carries_no_count_the_user_cannot_act_on(): void
   Scan()
 
   assert_equal(
-    ['Ghostcode - ghostcode.vim - Fill: 7 symbols, 2 ghost'],
+    ['Ghostcode - ghostcode.vim - Report: 7 symbols, 2 ghost'],
     LM.History()->mapnew((_, m) => join(m.lines, ' '))->filter((_, l) => l =~# 'symbols')
   )
 enddef
@@ -221,7 +221,7 @@ def Test_a_report_from_an_older_binary_still_logs_its_two_counts(): void
   Scan(substitute(REPORT, 'unplaced_names', 'unresolved', ''))
 
   assert_equal(
-    ['Ghostcode - ghostcode.vim - Fill: 7 symbols, 2 ghost'],
+    ['Ghostcode - ghostcode.vim - Report: 7 symbols, 2 ghost'],
     LM.History()->mapnew((_, m) => join(m.lines, ' '))->filter((_, l) => l =~# 'symbols')
   )
 enddef

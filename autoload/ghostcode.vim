@@ -71,7 +71,7 @@ export def Run(path: string = ''): void
     return
   endif
 
-  Fill(root, report)
+  Report(root, report)
 enddef
 
 # FUNCTION: The binary to run: the setting, then $PATH, then the copy
@@ -168,7 +168,11 @@ enddef
 # FUNCTION: Put the findings in the quickfix list and say what was
 # found. A path comes back relative to the root, and is joined to it
 # again here, so that the list reads as it always has.
-def Fill(root: string, report: dict<any>): void
+#
+# Logger names the function it was called from in every line the user
+# reads, so this name is part of what the summary says. It states what
+# the user is being told, not how the list is built.
+def Report(root: string, report: dict<any>): void
   var findings = get(report, 'findings', [])
 
   var qf = findings->mapnew((_, f) => ({
