@@ -565,6 +565,14 @@ const KEYWORDS: &[&str] = &[
     "normal",
 ];
 
+// Vim9's keyed container. A member access on one reads a key, which
+// `recv_type` reports as this type because it reports the outermost
+// one: `dict<string, Config>` is a dict. No class can carry the name,
+// since Vim9 requires a capital, so the test cannot meet a project's
+// own type of that name.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+const DICT: &str = "dict";
+
 // Vim's scope letters, which stand before a colon and name where a
 // variable lives rather than naming anything the project declares.
 // `a:` is legacy, for a function's arguments, and is here because the
@@ -791,6 +799,18 @@ impl Collect<'_> {
 
         let recv = types::recv_type(stmt, i, self.owner, self.locals, self.types);
         let word = tok.text.as_str();
+
+        // A dict reads a key, and a key is no symbol of the project's:
+        // `ctx.row`, where `ctx` is a `dict<any>`. Whatever the dict
+        // holds was credited where it was put in, so a funcref stored
+        // under a key keeps the credit of its own name and loses
+        // nothing here. `any` is not this case: there the type is
+        // unknown rather than keyed, and every candidate member must
+        // still take the credit.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+        if recv.as_deref() == Some(DICT) {
+            return;
+        }
 
         // A variable of this body is placed already. It is dropped
         // rather than marked, because a mark is read only after
