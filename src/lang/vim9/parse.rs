@@ -735,7 +735,7 @@ impl Collect<'_> {
             return;
         }
 
-        if in_notation(stmt, i) {
+        if in_notation(stmt, i) || in_autocmd(stmt, i) {
             return;
         }
 
@@ -981,23 +981,56 @@ fn called(stmt: &[Tok], i: usize) -> bool {
 /// `g:`, which a stream of tokens cannot tell from an annotation.
 /// None of those costs a credit: the name is still resolved, and the
 /// answer is read only where nothing resolved.
-/// FUNCTION: Whether a statement carries Vim's key notation, which
-/// the mapping, menu and abbreviation commands do.
+/// FUNCTION: The command a statement runs, past any modifier before
+/// it, which is what tells the rules of one command from another.
+fn head(stmt: &[Tok]) -> Option<&str> {
+    stmt.iter()
+        .find(|t| t.text != "!" && !MODS.contains(&t.text.as_str()))
+        .map(|t| t.text.as_str())
+}
+
+/// FUNCTION: Whether a command's arguments carry Vim's angle-bracket
+/// notation, which the mapping, menu and abbreviation commands do,
+/// and so does an autocommand in its pattern.
 ///
-/// Vim has 84 of them and builds every one from four stems, so the
-/// stem is what this tests, against the generated table so that a
-/// name of the project's cannot match. A command this misses only
-/// leaves its notation counted, which is the safe direction: the
+/// Vim has 84 of the first kind and builds every one from four stems,
+/// so the stem is what this tests, against the generated table so
+/// that a name of the project's cannot match. A command this misses
+/// only leaves its notation counted, which is the safe direction: the
 /// notation is never a name the project declares, so no credit rests
 /// on recognising the command.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-fn maps(word: &str) -> bool {
+fn notation(word: &str) -> bool {
+    if matches!(word, "autocmd" | "doautocmd" | "doautoall") {
+        return true;
+    }
+
     excmds::has(word)
         && (word.ends_with("map")
             || word.ends_with("mapclear")
             || word.ends_with("menu")
             || word.ends_with("abbrev")
             || word.ends_with("abbreviate"))
+}
+
+/// FUNCTION: Whether a name is part of an autocommand's own syntax
+/// rather than a name the project declares.
+///
+/// `:augroup` takes the name of a group and nothing else, and a group
+/// lives in Vim's namespace. The `++once`, `++nested` and
+/// `++nomodeline` flags are Vim's as well, and nothing else in Vim9
+/// writes a word behind two plus signs.
+///
+/// The event names are not here. They are capitalised, so `User` or
+/// `Signal` could be a class of the project's, and telling them apart
+/// needs Vim's list of events rather than a position.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+fn in_autocmd(stmt: &[Tok], i: usize) -> bool {
+    if head(stmt) == Some("augroup") {
+        return true;
+    }
+
+    i >= 2 && stmt[i - 1].text == "+" && stmt[i - 2].text == "+"
 }
 
 /// FUNCTION: Whether a name is one of Vim's key words, standing
@@ -1014,11 +1047,7 @@ fn maps(word: &str) -> bool {
 /// and neither is notation.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 fn in_notation(stmt: &[Tok], i: usize) -> bool {
-    let head = stmt
-        .iter()
-        .find(|t| t.text != "!" && !MODS.contains(&t.text.as_str()));
-
-    if !head.is_some_and(|t| maps(t.text.as_str())) {
+    if !head(stmt).is_some_and(notation) {
         return false;
     }
 

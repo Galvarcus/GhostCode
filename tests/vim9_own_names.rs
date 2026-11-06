@@ -286,3 +286,44 @@ fn a_comparison_in_a_mapping_expression_is_still_a_reference() {
 
     assert_eq!(count(text, "High"), 1);
 }
+
+/// `:augroup` takes the name of an autocommand group and nothing
+/// else, and a group lives in Vim's namespace rather than the
+/// project's.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+#[test]
+fn an_autocommand_group_is_not_a_reference() {
+    let text = "vim9script\naugroup END\n";
+
+    assert_eq!(count(text, "END"), 0);
+}
+
+#[test]
+fn a_group_the_project_names_is_not_a_reference() {
+    let text = "vim9script\naugroup bartleby_save\naugroup END\n";
+
+    assert_eq!(count(text, "bartleby_save"), 0);
+}
+
+#[test]
+fn an_autocommand_flag_is_not_a_reference() {
+    let text = "vim9script\nautocmd BufEnter * ++once Refresh()\n";
+
+    assert_eq!(count(text, "once"), 0);
+}
+
+#[test]
+fn a_pattern_argument_of_an_autocommand_is_not_a_reference() {
+    let text = "vim9script\nautocmd BufEnter <buffer> Refresh()\n";
+
+    assert_eq!(count(text, "buffer"), 0);
+}
+
+/// What an autocommand runs is the reason it exists, and that name
+/// stands outside every part of the syntax around it.
+#[test]
+fn the_command_an_autocommand_runs_is_still_a_reference() {
+    let text = "vim9script\nautocmd BufEnter <buffer> ++once Refresh()\n";
+
+    assert_eq!(count(text, "Refresh"), 1);
+}
