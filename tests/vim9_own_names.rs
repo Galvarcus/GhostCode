@@ -231,3 +231,58 @@ fn a_scoped_option_is_not_a_reference() {
     assert_eq!(count(text, "&l"), 0);
     assert_eq!(count(text, "wrap"), 0);
 }
+
+/// Vim's key notation stands inside angle brackets on a mapping
+/// statement, and none of it is a name the project could declare.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+#[test]
+fn a_mapping_argument_is_not_a_reference() {
+    let text = "vim9script\nnnoremap <buffer> <nowait> q <ScriptCmd>Close()<CR>\n";
+
+    assert_eq!(count(text, "buffer"), 0);
+    assert_eq!(count(text, "nowait"), 0);
+}
+
+#[test]
+fn the_parts_of_a_key_name_are_not_references() {
+    let text = "vim9script\nnnoremap <C-x> <ScriptCmd>Close()<CR>\n";
+
+    assert_eq!(count(text, "C"), 0);
+    assert_eq!(count(text, "ScriptCmd"), 0);
+    assert_eq!(count(text, "CR"), 0);
+}
+
+/// The whole point of a mapping is what it runs, and that name sits
+/// outside the brackets, where nothing may touch it.
+#[test]
+fn the_function_a_mapping_runs_is_still_a_reference() {
+    let text = "vim9script\nnnoremap <buffer> q <ScriptCmd>Close()<CR>\n";
+
+    assert_eq!(count(text, "Close"), 1);
+}
+
+/// The rule is anchored to a mapping statement, so a generic type is
+/// left to the type words, which mark rather than drop.
+#[test]
+fn a_generic_type_is_left_to_the_type_words() {
+    let text = "vim9script\ndef F()\n  var l: list<string>\nenddef\n";
+
+    assert_eq!(owned(text, "string"), vec![true]);
+}
+
+#[test]
+fn a_notation_word_outside_a_mapping_is_still_a_reference() {
+    let text = "vim9script\ndef F()\n  echo buffer\nenddef\n";
+
+    assert_eq!(count(text, "buffer"), 1);
+}
+
+/// An `<expr>` mapping's right side is an expression, and a
+/// comparison in one wears the same bracket the notation does. A span
+/// that never closes is a comparison, not notation.
+#[test]
+fn a_comparison_in_a_mapping_expression_is_still_a_reference() {
+    let text = "vim9script\ncnoremap <expr> q Low < High ? 'a' : 'b'\n";
+
+    assert_eq!(count(text, "High"), 1);
+}
