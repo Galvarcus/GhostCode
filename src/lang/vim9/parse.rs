@@ -509,6 +509,13 @@ const KEYWORDS: &[&str] = &[
     "break",
     "continue",
     "in",
+    // Vim9 compares identity with a word. The `?` forms need no entry,
+    // because their mark is punctuation, while the `#` forms do: the
+    // lexer lets a name hold a `#` so that `plugin#Func` stays whole.
+    "is",
+    "is#",
+    "isnot",
+    "isnot#",
     "echo",
     "echomsg",
     "echoerr",

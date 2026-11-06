@@ -20,6 +20,11 @@ fn refs(text: &str) -> Vec<Reference> {
     found.refs
 }
 
+/// FUNCTION: How many references a snippet emits for one name.
+fn count(text: &str, name: &str) -> usize {
+    refs(text).iter().filter(|r| r.name == name).count()
+}
+
 /// FUNCTION: Whether the references to a name are the language's own,
 /// as a list, so that a snippet naming it twice shows both answers.
 fn owned(text: &str, name: &str) -> Vec<bool> {
@@ -124,4 +129,47 @@ fn a_call_after_a_colon_is_a_reference_like_any_other() {
     let text = "vim9script\ndef F()\n  var d = {days: Width(30)}\nenddef\n";
 
     assert_eq!(owned(text, "Width"), vec![false]);
+}
+
+/// Vim9 compares identity with a word rather than a sign, and the
+/// word is the language's as surely as `in` is. Six forms exist. The
+/// `#` and the bare form each need naming, because the lexer lets a
+/// name hold a `#` so that `plugin#Func` stays whole; the `?` form
+/// does not, because its mark is punctuation.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+#[test]
+fn an_identity_operator_is_not_a_reference() {
+    let text = "vim9script\ndef F(a: any, b: any)\n  if a is b\n    echo 1\n  endif\nenddef\n";
+
+    assert_eq!(count(text, "is"), 0);
+}
+
+#[test]
+fn a_negated_identity_operator_is_not_a_reference() {
+    let text = "vim9script\ndef F(a: any, b: any)\n  if a isnot b\n    echo 1\n  endif\nenddef\n";
+
+    assert_eq!(count(text, "isnot"), 0);
+}
+
+#[test]
+fn a_cased_identity_operator_is_not_a_reference() {
+    let text = "vim9script\ndef F(a: any, b: any)\n  if a is# b\n    echo 1\n  endif\nenddef\n";
+
+    assert_eq!(count(text, "is#"), 0);
+}
+
+#[test]
+fn a_cased_negated_identity_operator_is_not_a_reference() {
+    let text = "vim9script\ndef F(a: any, b: any)\n  if a isnot# b\n    echo 1\n  endif\nenddef\n";
+
+    assert_eq!(count(text, "isnot#"), 0);
+}
+
+/// The match is the whole name. Every script of the project opens by
+/// reading `is_loaded`, which an operator must not take with it.
+#[test]
+fn a_name_that_opens_with_an_operator_is_still_a_reference() {
+    let text = "vim9script\nvar is_loaded = true\necho is_loaded\n";
+
+    assert_eq!(count(text, "is_loaded"), 1);
 }
