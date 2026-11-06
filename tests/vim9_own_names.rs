@@ -195,3 +195,39 @@ fn a_word_vim9_no_longer_has_is_still_a_reference() {
 
     assert_eq!(count(text, "from"), 1);
 }
+
+/// A Vim9 declaration cannot open with a sigil, so a name that does
+/// is Vim's own: `&` an option, `$` an environment variable, `@` a
+/// register. No table is needed to tell them apart from a project's
+/// names, because no project name can look like one.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+#[test]
+fn an_option_is_not_a_reference() {
+    let text = "vim9script\nif &cp\n  finish\nendif\n";
+
+    assert_eq!(count(text, "&cp"), 0);
+}
+
+#[test]
+fn an_environment_variable_is_not_a_reference() {
+    let text = "vim9script\ndef F()\n  echo $HOME\nenddef\n";
+
+    assert_eq!(count(text, "$HOME"), 0);
+}
+
+#[test]
+fn a_register_is_not_a_reference() {
+    let text = "vim9script\ndef F()\n  echo @a\nenddef\n";
+
+    assert_eq!(count(text, "@a"), 0);
+}
+
+/// `&l:wrap` is three tokens, because the lexer ends a name at a
+/// colon, so the option word after the sigil is Vim's as well.
+#[test]
+fn a_scoped_option_is_not_a_reference() {
+    let text = "vim9script\ndef F()\n  echo &l:wrap\nenddef\n";
+
+    assert_eq!(count(text, "&l"), 0);
+    assert_eq!(count(text, "wrap"), 0);
+}

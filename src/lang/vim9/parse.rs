@@ -731,6 +731,10 @@ impl Collect<'_> {
             return;
         }
 
+        if sigil(stmt, i, tok.text.as_str()) {
+            return;
+        }
+
         // A name against a colon is a parameter or a key, not a use:
         // `{callback: OnDone}` uses OnDone, not callback.
         if stmt.get(i + 1).is_some_and(|t| t.text == ":") && !is_type_position(stmt, i) {
@@ -973,6 +977,26 @@ fn called(stmt: &[Tok], i: usize) -> bool {
 /// `g:`, which a stream of tokens cannot tell from an annotation.
 /// None of those costs a credit: the name is still resolved, and the
 /// answer is read only where nothing resolved.
+/// FUNCTION: Whether a name is Vim's own because it opens with one of
+/// Vim's sigils: `&` an option, `$` an environment variable, `@` a
+/// register.
+///
+/// This needs no table of Vim's option names. A Vim9 declaration
+/// cannot open with a sigil, so no symbol the project declares can
+/// carry such a name, and the sigil alone settles it.
+///
+/// The scoped forms `&l:wrap` and `&g:wrap` lex as three tokens,
+/// because the lexer ends a name at a colon so that an annotation can
+/// write `x: Foo`. The option word after such a sigil is Vim's too.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+fn sigil(stmt: &[Tok], i: usize, word: &str) -> bool {
+    if matches!(word.chars().next(), Some('&' | '$' | '@')) {
+        return true;
+    }
+
+    i >= 2 && stmt[i - 1].text == ":" && stmt[i - 2].text.starts_with('&')
+}
+
 /// FUNCTION: Whether a name belongs to Vim's scope notation, as the
 /// `v` and the `version` of `v:version` both do.
 ///
