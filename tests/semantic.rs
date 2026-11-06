@@ -303,16 +303,25 @@ fn a_class_named_in_an_interface_field_is_not_reported() {
 
 /// Vim9 reserves `null_object` and its siblings, and an enum value is
 /// the one declaration that may carry such a name. A word held in the
-/// parser's keywords emits no reference at all, and every enum value
-/// is credited today by the reference its own declaration line
-/// carries, so holding the word there made the value a finding on
-/// legal code.
+/// parser's keywords emits no reference at all, so holding the word
+/// there leaves the value with nothing crediting it and makes a
+/// finding of legal code.
+///
+/// Both values are read, because a value's own line no longer credits
+/// it: the read is the only credit either of them has.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/23
 #[test]
 fn an_enum_value_named_like_a_null_literal_is_not_reported() {
     let files = vec![(
         "plugin/p.vim",
-        "vim9script\nenum Mode\n  null_list\n  Other\nendenum\necho Mode.null_list\n",
+        "vim9script\n\
+         enum Mode\n\
+         \x20 null_list\n\
+         \x20 Other\n\
+         endenum\n\
+         echo Mode.null_list\n\
+         echo Mode.Other\n",
     )];
 
     assert_eq!(
@@ -339,4 +348,20 @@ fn a_variable_named_like_a_kind_word_is_not_reported() {
     ];
 
     assert_eq!(ghosts("kind_word", &files, false), Vec::<String>::new());
+}
+
+/// Every enum value used to credit itself, through the reference its
+/// own declaration line emitted, so no value could ever be reported.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/23
+#[test]
+fn an_unused_enum_value_is_reported() {
+    let files = vec![(
+        "plugin/p.vim",
+        "vim9script\nenum Mode\n  Alpha,\n  Beta\nendenum\necho Mode.Alpha\n",
+    )];
+
+    assert_eq!(
+        ghosts("unused_enum_value", &files, false),
+        vec!["enum_value Beta".to_string()]
+    );
 }

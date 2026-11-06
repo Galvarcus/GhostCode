@@ -270,30 +270,51 @@ fn variable(file: &Path, words: &[&str], line: u32, scope: &Scope, out: &mut dyn
 /// FUNCTION: Record the values an enum lists, which arrive several to
 /// a line, with or without arguments: `Red, Green` and `Blue('b')`.
 fn enum_values(file: &Path, stmt: &[Tok], line: u32, scope: &Scope, out: &mut dyn Sink) {
+    for at in enum_values_at(stmt) {
+        let tok = &stmt[at];
+
+        out.sym(Symbol {
+            id: SymbolId::of(file, scope.owner.as_deref(), &tok.text),
+            kind: Kind::EnumValue,
+            name: tok.text.clone(),
+            file: file.to_path_buf(),
+            line,
+            exported: false,
+            owner: scope.owner.clone(),
+        });
+    }
+}
+
+/// FUNCTION: Where each value of an enum body's line stands, so that
+/// the walk which records them and the walk which reads references
+/// agree on which names the line declares.
+///
+/// The second walk needs it because a declaration is not a use of
+/// itself. Every other declaration states a keyword, and the name
+/// after it is skipped; a value states nothing, so the line looked
+/// like a use of each value it declared, and every value credited
+/// itself.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/23
+fn enum_values_at(stmt: &[Tok]) -> Vec<usize> {
+    let mut out = Vec::new();
     let mut depth = 0i32;
     let mut want = true;
 
-    for tok in stmt {
+    for (at, tok) in stmt.iter().enumerate() {
         match tok.text.as_str() {
             "(" | "[" | "{" => depth += 1,
             ")" | "]" | "}" => depth -= 1,
             "," if depth == 0 => want = true,
             _ => {
                 if want && depth == 0 && tok.kind == TokKind::Ident {
-                    out.sym(Symbol {
-                        id: SymbolId::of(file, scope.owner.as_deref(), &tok.text),
-                        kind: Kind::EnumValue,
-                        name: tok.text.clone(),
-                        file: file.to_path_buf(),
-                        line,
-                        exported: false,
-                        owner: scope.owner.clone(),
-                    });
+                    out.push(at);
                 }
                 want = false;
             }
         }
     }
+
+    out
 }
 
 /// FUNCTION: Whether a declaration is a member of its container, and
@@ -670,7 +691,15 @@ pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
         // A declaration's own name is not a use of itself, so the
         // statement is read from after it: a def's parameter types and
         // defaults, and a var's initialiser, are still references.
-        let skip = declared_name_at(stmt, &words);
+        let mut skip: Vec<usize> = declared_name_at(stmt, &words).into_iter().collect();
+
+        // A value of an enum states no keyword, so nothing above
+        // finds the name its line declares. Several values may share
+        // one line, which is why this is a list.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/23
+        if skip.is_empty() && !in_def && scope.container == Container::Enum {
+            skip = enum_values_at(stmt);
+        }
 
         let mut sink = Collect {
             file,
@@ -679,12 +708,12 @@ pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
             locals: &locals,
             types: &types,
             in_def,
-            own: skip.map(|at| stmt[at].text.as_str()),
+            own: skip.first().map(|&at| stmt[at].text.as_str()),
             bound: bound_names(stmt, &words),
             out,
         };
 
-        sink.statement(stmt, skip);
+        sink.statement(stmt, &skip);
 
         if let Some(id) = opens_body(file, stmt, &words, &mut scope) {
             origin = id;
@@ -710,9 +739,9 @@ struct Collect<'a> {
 
 impl Collect<'_> {
     /// METHOD: Read one statement, from the token after its own name.
-    fn statement(&mut self, stmt: &[Tok], skip: Option<usize>) {
+    fn statement(&mut self, stmt: &[Tok], skip: &[usize]) {
         for (i, tok) in stmt.iter().enumerate() {
-            if Some(i) == skip {
+            if skip.contains(&i) {
                 continue;
             }
 
