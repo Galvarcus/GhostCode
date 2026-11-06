@@ -463,10 +463,16 @@ fn unquote(text: &str) -> String {
     chars.collect()
 }
 
-// The language's own words. None of them can name a symbol, because
-// Vim9 will not let a declaration take one of these names, so emitting
-// them as references would only inflate the count of what resolved to
-// nothing.
+// The language's own words, dropped wherever they stand.
+//
+// Only some of them cannot name a symbol: Vim9 refuses a declaration
+// called `this`, `super`, `true`, `false` or `null`. It accepts
+// `var set = 1` and `var in = 1`, so the command words and the
+// operators are here by choice, and a project that spells a variable
+// that way loses the credits that name carries. What the list must
+// never hold is a word Vim9 does not have at all, because that costs
+// a project a name of its own for nothing.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/28
 const KEYWORDS: &[&str] = &[
     "vim9script",
     "def",
@@ -479,7 +485,6 @@ const KEYWORDS: &[&str] = &[
     "enum",
     "export",
     "import",
-    "from",
     "as",
     "autoload",
     "var",
@@ -537,7 +542,6 @@ const KEYWORDS: &[&str] = &[
     "set",
     "setlocal",
     "normal",
-    "enum_value",
 ];
 
 // Vim's scope letters, which stand before a colon and name where a
@@ -724,6 +728,10 @@ impl Collect<'_> {
     /// one, as in `menu.Open()`, `this.Shut()`, or `Color.Red`.
     fn ident(&mut self, stmt: &[Tok], i: usize, tok: &Tok) {
         if KEYWORDS.contains(&tok.text.as_str()) {
+            return;
+        }
+
+        if sigil(stmt, i, tok.text.as_str()) {
             return;
         }
 
@@ -969,6 +977,26 @@ fn called(stmt: &[Tok], i: usize) -> bool {
 /// `g:`, which a stream of tokens cannot tell from an annotation.
 /// None of those costs a credit: the name is still resolved, and the
 /// answer is read only where nothing resolved.
+/// FUNCTION: Whether a name is Vim's own because it opens with one of
+/// Vim's sigils: `&` an option, `$` an environment variable, `@` a
+/// register.
+///
+/// This needs no table of Vim's option names. A Vim9 declaration
+/// cannot open with a sigil, so no symbol the project declares can
+/// carry such a name, and the sigil alone settles it.
+///
+/// The scoped forms `&l:wrap` and `&g:wrap` lex as three tokens,
+/// because the lexer ends a name at a colon so that an annotation can
+/// write `x: Foo`. The option word after such a sigil is Vim's too.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+fn sigil(stmt: &[Tok], i: usize, word: &str) -> bool {
+    if matches!(word.chars().next(), Some('&' | '$' | '@')) {
+        return true;
+    }
+
+    i >= 2 && stmt[i - 1].text == ":" && stmt[i - 2].text.starts_with('&')
+}
+
 /// FUNCTION: Whether a name belongs to Vim's scope notation, as the
 /// `v` and the `version` of `v:version` both do.
 ///

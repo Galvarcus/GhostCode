@@ -173,3 +173,61 @@ fn a_name_that_opens_with_an_operator_is_still_a_reference() {
 
     assert_eq!(count(text, "is_loaded"), 1);
 }
+
+/// `KEYWORDS` holds the words Vim9 has, not the words the report
+/// prints. `enum_value` is the kind word for a value of an enum, and
+/// a project may spell a variable that way.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/28
+#[test]
+fn a_name_the_report_prints_is_still_a_reference() {
+    let text = "vim9script\nvar enum_value = 1\necho enum_value\n";
+
+    assert_eq!(count(text, "enum_value"), 1);
+}
+
+/// Vim9 once wrote `import {Foo} from 'x.vim'` and no longer does:
+/// Vim 9.2 answers that form with E720. The word is an ordinary name
+/// now, and a plausible one for a range or a sender.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/28
+#[test]
+fn a_word_vim9_no_longer_has_is_still_a_reference() {
+    let text = "vim9script\nvar from = 1\necho from\n";
+
+    assert_eq!(count(text, "from"), 1);
+}
+
+/// A Vim9 declaration cannot open with a sigil, so a name that does
+/// is Vim's own: `&` an option, `$` an environment variable, `@` a
+/// register. No table is needed to tell them apart from a project's
+/// names, because no project name can look like one.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+#[test]
+fn an_option_is_not_a_reference() {
+    let text = "vim9script\nif &cp\n  finish\nendif\n";
+
+    assert_eq!(count(text, "&cp"), 0);
+}
+
+#[test]
+fn an_environment_variable_is_not_a_reference() {
+    let text = "vim9script\ndef F()\n  echo $HOME\nenddef\n";
+
+    assert_eq!(count(text, "$HOME"), 0);
+}
+
+#[test]
+fn a_register_is_not_a_reference() {
+    let text = "vim9script\ndef F()\n  echo @a\nenddef\n";
+
+    assert_eq!(count(text, "@a"), 0);
+}
+
+/// `&l:wrap` is three tokens, because the lexer ends a name at a
+/// colon, so the option word after the sigil is Vim's as well.
+#[test]
+fn a_scoped_option_is_not_a_reference() {
+    let text = "vim9script\ndef F()\n  echo &l:wrap\nenddef\n";
+
+    assert_eq!(count(text, "&l"), 0);
+    assert_eq!(count(text, "wrap"), 0);
+}
