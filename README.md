@@ -98,7 +98,7 @@ directory. The report goes to standard output as JSON:
 {
   "schema": 1,
   "root": "/path/to/project",
-  "summary": { "symbols": 412, "ghost": 1, "unplaced_names": 7 },
+  "summary": { "symbols": 412, "ghost": 1, "local": 0, "unplaced_names": 7 },
   "findings": [
     {
       "class": "ghost",
@@ -137,7 +137,7 @@ It puts the findings in the quickfix list, opens the list when it finds
 any, and shows a summary through Logger:
 
 ```text
-Ghostcode - ghostcode.vim - Fill: 23 symbols, 7 ghost
+Ghostcode - ghostcode.vim - Report: 23 symbols, 7 ghost
 ```
 
 Each entry names the kind of symbol, its name, its file, and its line:
@@ -175,6 +175,10 @@ ignore = ["deps/**", "vendor/**"]
 
 # Files that are entry points, whose top-level code needs no caller.
 entry = ["tools/build.vim"]
+
+# The finding classes to report beyond the ghosts.
+[findings]
+locals = true
 ```
 
 `exports_are_api` is true by default. Ghostcode then treats an exported
@@ -186,6 +190,14 @@ Set it to false for a plugin whose exports serve only its own files, as
 in an application. Ghostcode then reports an export that nothing in the
 project uses, like any other symbol.
 
+`findings.locals` is false by default. Set it to true to report a
+`var` or a `const` of a function body that nothing in that body reads.
+An assignment is not a read, so a local the code only writes is
+reported too. A parameter and a `for` variable are left alone.
+
+The finding reads `[local]` rather than `[ghost]`, so a build that
+counts the ghosts counts none of these.
+
 ### Command line
 
 A flag overrides the file:
@@ -195,6 +207,7 @@ A flag overrides the file:
 | `--format=json`, `--format=text` | The output form. JSON is the default. |
 | `--exports-are-api true`, `--exports-are-api false` | Override `exports_are_api`. |
 | `--no-ignore` | Read every file, including the ones git ignores. |
+| `--locals true`, `--locals false` | Override `findings.locals`. |
 
 ### Vim
 
@@ -202,6 +215,7 @@ A flag overrides the file:
 | --- | --- |
 | `g:ghostcode_bin` | The binary to run, for a copy that is neither on `$PATH` nor in the plugin's `bin/` directory. |
 | `g:ghostcode_exports_are_api` | Override `exports_are_api`. The plugin passes the flag only when you set this, so that a project's `ghostcode.toml` governs where you do not. |
+| `g:ghostcode_locals` | Override `findings.locals`. Passed on the same terms. |
 
 ## What Ghostcode scans
 
@@ -221,6 +235,8 @@ scan one anyway.
 - `interface` and `export interface` declarations
 - class methods, static methods, and fields
 - module-level script variables and class fields
+- a `var` or a `const` of a function body that nothing in that body
+  reads, where you ask for the class, see Settings
 - type annotations (`var x: Foo`, `def F(): Foo`, `list<Foo>`)
 - direct calls (`Foo()`), method calls (`Foo.Bar()`, `this.Method()`),
   and calls through a locally-typed variable or parameter, including a
@@ -248,16 +264,20 @@ scan one anyway.
 
 ## What Ghostcode doesn't detect
 
-- local variables declared inside a function body. Ghostcode analyzes
-  reachability between module-level symbols, not local dead stores
+- a parameter or a `for` variable that nothing reads. Only a `var` or a
+  `const` of a function body is reported, and only where you ask for
+  the class: a parameter is part of a signature that a caller outside
+  the project may hold to
 - dynamic dispatch built from string concatenation, computed
   indices, or anything else that isn't a literal identifier or string
 - method calls on a variable with no declared or inferable type. When
   a variable's type can't be determined, Ghostcode falls back to
   finding a same-name match across the project. When several symbols
   share the name, it counts every one of them as used
-- a variable that the code only writes and never reads. A write counts
-  as a use
+- a script variable or a field that the code only writes and never
+  reads. A write counts as a use there. Inside a function body it does
+  not, so a local the code only assigns to is reported with the other
+  locals
 
 Ghostcode is conservative by design: anything it can't prove is
 unreferenced is left alone rather than reported.

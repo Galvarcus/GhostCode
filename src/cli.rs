@@ -23,13 +23,17 @@ pub enum Format {
 /// ghostcode.toml must survive a run that does not mention it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::Args)]
 pub struct FindingArgs {
-    // Hidden until the detection ships. The settings are read and
-    // carried so that ghostcode.toml keeps its shape, and advertising
-    // a flag that changes nothing would be worse than not having one.
+    // Hidden because nothing emits the class, and a flag that names
+    // a detection the binary cannot give is worse than no flag. The
+    // setting is still read and carried, so that ghostcode.toml keeps
+    // its shape.
+    // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
     #[arg(long = "write-only", hide = true)]
     pub write_only: Option<bool>,
 
-    #[arg(long = "locals", hide = true)]
+    /// Whether to report a variable of a function body that nothing
+    /// reads.
+    #[arg(long = "locals")]
     pub locals: Option<bool>,
 }
 

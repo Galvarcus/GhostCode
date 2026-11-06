@@ -20,6 +20,16 @@ fn load(root: &std::path::Path, extra: &[&str]) -> Config {
     Config::load(root, &args).expect("load the test's configuration")
 }
 
+/// FUNCTION: What `--help` prints, which is where a user at a
+/// terminal learns that a flag exists.
+fn help() -> String {
+    let out = Command::new(env!("CARGO_BIN_EXE_ghostcode"))
+        .arg("--help")
+        .output()
+        .expect("run the built binary");
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
 /// FUNCTION: Run the binary on a root and return its status and stderr.
 fn run(root: &str) -> (bool, String) {
     let out = Command::new(env!("CARGO_BIN_EXE_ghostcode"))
@@ -91,5 +101,25 @@ fn a_file_as_root_exits_nonzero_with_one_message() {
     assert!(
         err.contains("notadir.vim"),
         "the message names the root: {err}"
+    );
+}
+
+#[test]
+fn the_help_names_the_locals_flag() {
+    let text = help();
+
+    assert!(
+        text.contains("--locals"),
+        "a user cannot ask for a class the help does not name: {text}"
+    );
+}
+
+#[test]
+fn the_help_hides_a_flag_that_no_detection_backs() {
+    let text = help();
+
+    assert!(
+        !text.contains("--write-only"),
+        "nothing emits the class, so the flag promises what it cannot give: {text}"
     );
 }
