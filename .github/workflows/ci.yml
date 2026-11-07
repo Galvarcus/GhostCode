@@ -297,8 +297,11 @@ jobs:
           ./tests/stub/ghostcode.exe --version > /dev/null
 
       # The portable build of the newest Vim, from the project's own
-      # installer repository, unpacked so that it is found before the Vim
-      # that Git for Windows ships, which is older and built small.
+      # installer repository. Its path is carried in VIM_EXE rather than
+      # added to $PATH: that variable prepends to the PATH of Windows,
+      # while the shell here is the one Git for Windows ships, which puts
+      # its own /usr/bin first and answers `vim` with the MSYS2 build it
+      # carries.
       - name: Install Vim
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -324,19 +327,40 @@ jobs:
             echo "::error::The zip holds no vim/vim*/vim.exe; it is laid out differently."
             exit 1
           fi
-          cygpath -wa "$(dirname "$exe")" >> "$GITHUB_PATH"
+          echo "VIM_EXE=$(cd "$(dirname "$exe")" && pwd)/vim.exe" >> "$GITHUB_ENV"
 
-      - name: Vim version
+      # A Vim that is not a Windows build would run the suite against the
+      # script beside the program, and report a pass for a platform it never
+      # stood on. The one Git for Windows ships is such a Vim.
+      - name: Vim version, and that it is a Windows build
         run: |
-          command -v vim
-          vim --version | head -1
+          set -euo pipefail
+          echo "$VIM_EXE"
+          "$VIM_EXE" --version | head -1
+
+          rm -f probe.txt
+          "$VIM_EXE" -es -u NONE -N \
+            -c 'call writefile([has("win32"), has("win32unix"), v:version], "probe.txt")' \
+            -c 'quit'
+          if [ ! -f probe.txt ]; then
+            echo "::error::Vim wrote no probe; it did not reach the end of the probe."
+            exit 1
+          fi
+          win32=$(sed -n 1p probe.txt)
+          unix=$(sed -n 2p probe.txt)
+          echo "has('win32')=$win32 has('win32unix')=$unix v:version=$(sed -n 3p probe.txt)"
+
+          if [ "$win32" != 1 ]; then
+            echo "::error::This Vim is not a Windows build, so the suite would prove the POSIX path again."
+            exit 1
+          fi
 
       # The log is written beside the suite rather than in /tmp: Vim here is
       # a Windows program, which reads /tmp as a directory of the current
       # drive, while the shell reads it as its own temporary directory.
       - name: Run tests
         run: |
-          vim -es -u NONE -N -V20vim.log \
+          "$VIM_EXE" -es -u NONE -N -V20vim.log \
             --cmd 'set rtp+=.,deps/Logger' \
             -c 'runtime plugin/ghostcode.vim' \
             -c 'source tests/harness.vim' -c 'quit' || true
