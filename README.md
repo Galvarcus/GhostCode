@@ -1,7 +1,8 @@
 # Ghostcode
 
-![Vim](https://img.shields.io/badge/vim-9.2%2B-019733)
-![License](https://img.shields.io/badge/license-GPL--3.0-blue)
+[![Vim](https://img.shields.io/badge/vim-9.2%2B-019733)](https://www.vim.org/)
+[![License](https://img.shields.io/badge/license-GPL--3.0-blue)](https://www.gnu.org/licenses/gpl-3.0.en.html)
+[![CI](https://github.com/Galvarcus/GhostCode/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Galvarcus/GhostCode/actions/workflows/ci.yml)
 
 Ghostcode is an analyzer for unreferenced code in Vim9 script, with
 Vim plugin functionality. It scans a project for functions, methods,
