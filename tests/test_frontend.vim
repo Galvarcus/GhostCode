@@ -16,7 +16,12 @@ import autoload 'ghostcode.vim' as G
 import 'Logger/messages.vim' as LM
 import './skip.vim' as S
 
-const STUB: string = fnamemodify(resolve(expand('<script>')), ':h') .. '/stub/ghostcode'
+# The stub that stands in for the binary. On Windows it is a program
+# compiled from the source beside it, because the front end starts the
+# binary with the list form of systemlist(), which starts a program
+# directly and cannot start a script.
+const STUB: string = fnamemodify(resolve(expand('<script>')), ':h')
+  .. (has('win32') ? '/stub/ghostcode.exe' : '/stub/ghostcode')
 # The file name of the binary on the platform running the suite. The
 # script under test derives this too, and a test that derived it from
 # the same place would prove nothing.

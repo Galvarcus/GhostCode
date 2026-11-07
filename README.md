@@ -307,6 +307,15 @@ vim -es -u NONE -N --cmd 'set rtp+=.,/path/to/Logger' \
 cat tests/results.txt
 ```
 
+The suite runs a stub in place of the binary. On Windows that stub is a
+program compiled from `tests/stub/ghostcode.rs`, because the front end
+starts the binary directly rather than through a shell, so build it
+first:
+
+```bash
+rustc -O tests/stub/ghostcode.rs -o tests/stub/ghostcode.exe
+```
+
 The file reads `All tests passed` when every test passes. A test the
 running Vim cannot meet the conditions of, such as a patch it lacks, is
 skipped rather than failed, and the file counts and names each skip

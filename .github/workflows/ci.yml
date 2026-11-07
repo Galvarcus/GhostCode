@@ -262,6 +262,92 @@ jobs:
           cat tests/results.txt
           grep -qx 'All tests passed' tests/results.txt
 
+  front-end-windows:
+    name: Front end on Windows
+    runs-on: windows-latest
+    # The steps are POSIX shell, as in the job above, so that one suite is
+    # driven the same way on both platforms. Git for Windows provides it.
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.inputs.tag || github.sha }}
+
+      # The front end speaks through Logger, a shared dependency at
+      # github.com/Galvarcus/Logger that is not in this repository.
+      - name: Checkout Logger dependency
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: Galvarcus/Logger
+          path: deps/Logger
+
+      # The suite runs a stub in place of the binary, and the front end
+      # starts it the way it starts the binary: with the list form of
+      # systemlist(), which starts a program directly rather than through a
+      # shell. A script cannot stand in for a program there, so the stub is
+      # compiled here. The image carries rustc already.
+      - name: Build the stub
+        run: |
+          set -euo pipefail
+          rustc --version
+          rustc -O tests/stub/ghostcode.rs -o tests/stub/ghostcode.exe
+          ./tests/stub/ghostcode.exe --version > /dev/null
+
+      # The portable build of the newest Vim, from the project's own
+      # installer repository, unpacked so that it is found before the Vim
+      # that Git for Windows ships, which is older and built small.
+      - name: Install Vim
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          url=$(curl -fsS --retry 3 -H "Authorization: Bearer $GITHUB_TOKEN" \
+            https://api.github.com/repos/vim/vim-win32-installer/releases/latest \
+            | jq -r '.assets[] | select(.name | test("^gvim_.*_x64\\.zip$")) | .browser_download_url')
+          if [ -z "$url" ]; then
+            echo "::error::The latest vim-win32-installer release has no x64 zip."
+            exit 1
+          fi
+          curl -fsSL --retry 3 -o vim.zip "$url"
+
+          # PowerShell unpacks it, because the shell here is the one Git for
+          # Windows ships and an unzip of its own is not promised. The path
+          # is reached with a glob, which the shell expands itself, rather
+          # than with find, whose name Windows also carries.
+          powershell -NoProfile -Command \
+            "Expand-Archive -Path vim.zip -DestinationPath vim-win32 -Force"
+          exe=$(echo vim-win32/vim/vim*/vim.exe)
+          if [ ! -f "$exe" ]; then
+            echo "::error::The zip holds no vim/vim*/vim.exe; it is laid out differently."
+            exit 1
+          fi
+          cygpath -wa "$(dirname "$exe")" >> "$GITHUB_PATH"
+
+      - name: Vim version
+        run: |
+          command -v vim
+          vim --version | head -1
+
+      # The log is written beside the suite rather than in /tmp: Vim here is
+      # a Windows program, which reads /tmp as a directory of the current
+      # drive, while the shell reads it as its own temporary directory.
+      - name: Run tests
+        run: |
+          vim -es -u NONE -N -V20vim.log \
+            --cmd 'set rtp+=.,deps/Logger' \
+            -c 'runtime plugin/ghostcode.vim' \
+            -c 'source tests/harness.vim' -c 'quit' || true
+          if [ ! -f tests/results.txt ]; then
+            echo "::error::tests/results.txt was never created - Vim likely failed before finishing. Verbose log follows:"
+            cat vim.log
+            exit 1
+          fi
+          cat tests/results.txt
+          grep -qx 'All tests passed' tests/results.txt
+
   # The help file a Vim user reads is generated from the readme, so it
   # is rebuilt on every push to main and committed only when it
   # differs. Deciding first whether a source of it changed cannot be
@@ -324,6 +410,7 @@ jobs:
       - rust
       - windows
       - front-end
+      - front-end-windows
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.tag.outputs.tag }}

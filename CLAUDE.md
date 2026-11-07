@@ -156,6 +156,11 @@ Run from the root of the repository, with Logger reachable.
   confirm that a named test fails. The front-end suite needed this: a
   stale `tests/results.txt` once read as a pass while the suite was in
   fact aborting.
+- The front-end suite runs a stub it must be able to start as a
+  program. On a POSIX platform that is `tests/stub/ghostcode`; on
+  Windows the list form of `systemlist()` cannot start a script, so
+  `tests/stub/ghostcode.rs` is compiled to `tests/stub/ghostcode.exe`
+  first, as `.github/workflows/ci.yml` does.
 - A new Rust test goes in `tests/<subject>.rs`, or in a
   `#[cfg(test)] mod tests` at the end of the file it tests. A new Vim
   test goes in `tests/test_<area>.vim` and is registered in
