@@ -6,6 +6,7 @@ use std::path::Component;
 use std::path::Path;
 use std::path::PathBuf;
 
+use crate::lang::vim9::autocmd;
 use crate::lang::vim9::builtins;
 use crate::lang::vim9::excmds;
 use crate::lang::vim9::lex::Tok;
@@ -858,7 +859,7 @@ impl Collect<'_> {
             return;
         }
 
-        if in_notation(stmt, i) || in_autocmd(stmt, i) {
+        if in_notation(stmt, i) || in_augroup(stmt) || autocmd::owns(stmt, i) {
             return;
         }
 
@@ -1219,24 +1220,17 @@ fn notation(word: &str) -> bool {
         || name.ends_with("abbreviate")
 }
 
-/// FUNCTION: Whether a name is part of an autocommand's own syntax
-/// rather than a name the project declares.
+/// FUNCTION: Whether a statement is `:augroup`, which takes the name
+/// of a group and nothing else.
 ///
-/// `:augroup` takes the name of a group and nothing else, and a group
-/// lives in Vim's namespace. The `++once`, `++nested` and
-/// `++nomodeline` flags are Vim's as well, and nothing else in Vim9
-/// writes a word behind two plus signs.
-///
-/// The event names are not here. They are capitalised, so `User` or
-/// `Signal` could be a class of the project's, and telling them apart
-/// needs Vim's list of events rather than a position.
+/// A group lives in Vim's namespace rather than the project's, so no
+/// word of such a line is a name the project declares. The other
+/// autocommand forms are read part by part, in `autocmd`, which also
+/// carries the `++once` and `++nested` flags this rule used to answer
+/// by their plus signs alone.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-fn in_autocmd(stmt: &[Tok], i: usize) -> bool {
-    if head(stmt) == Some("augroup") {
-        return true;
-    }
-
-    i >= 2 && stmt[i - 1].text == "+" && stmt[i - 2].text == "+"
+fn in_augroup(stmt: &[Tok]) -> bool {
+    matches!(head(stmt).and_then(excmds::canonical), Some("augroup"))
 }
 
 /// FUNCTION: Whether a name is one of Vim's key words, standing

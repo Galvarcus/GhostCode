@@ -98,10 +98,10 @@ fn locals(corpus: &str) -> Vec<String> {
 fn each_corpus_counts_what_it_counted() {
     // corpus, ghost findings, unplaced names
     const COUNTS: &[(&str, u64, u64)] = &[
-        ("bartleby", 0, 2319),
+        ("bartleby", 0, 2235),
         ("ghostcode", 0, 25),
-        ("logger", 0, 72),
-        ("nested", 2, 192),
+        ("logger", 0, 71),
+        ("nested", 2, 191),
     ];
 
     let mut differences: Vec<String> = Vec::new();
