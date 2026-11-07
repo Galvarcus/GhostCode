@@ -5,6 +5,7 @@
 
 mod autocmd;
 mod builtins;
+mod evaluated;
 mod events;
 mod excmds;
 mod exists;

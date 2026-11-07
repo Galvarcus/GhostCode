@@ -9,6 +9,7 @@ use std::path::PathBuf;
 
 use crate::lang::vim9::autocmd;
 use crate::lang::vim9::builtins;
+use crate::lang::vim9::evaluated;
 use crate::lang::vim9::excmds;
 use crate::lang::vim9::exists;
 use crate::lang::vim9::lex::Tok;
@@ -748,6 +749,18 @@ const NULLS: &[&str] = &[
 // a name, read part by part in `exists`.
 const EXISTS: &[&str] = &["exists", "exists_compiled"];
 
+// The one whose argument is a command line Vim runs, read in
+// `evaluated`. `exe` reaches it through the generated table, and
+// `execute()` is the function of the same name.
+//
+// `win_execute` is not here. Its strings in the corpora are
+// interpolated expressions, so harvesting them adds a second copy of
+// names the lexer already reads as code, and 26 occurrences that name
+// nothing. Reading such a string would have to leave its
+// interpolations alone first.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+const EXECUTE: &[&str] = &["execute"];
+
 const BY_NAME: &[&str] = &[
     "call",
     "function",
@@ -1040,12 +1053,14 @@ impl Collect<'_> {
     /// project's own names once they are all known: Vim evaluates text
     /// in places no parser sees, and a name used only there is used.
     fn text(&mut self, stmt: &[Tok], i: usize, tok: &Tok) {
+        // The word before the string names what reads it, either as a
+        // command, `execute 'x'`, or as the call whose arguments the
+        // string sits in, `win_execute(id, 'x')`.
         let gate = stmt[..i]
             .iter()
             .rev()
             .take(2)
-            .find(|t| BY_NAME.contains(&t.text.as_str()))
-            .map(|t| t.text.as_str());
+            .find_map(|t| gate_of(&t.text));
 
         let Some(gate) = gate else {
             self.out.text(Text {
@@ -1066,6 +1081,8 @@ impl Collect<'_> {
         // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
         let names: Vec<(String, bool)> = if EXISTS.contains(&gate) {
             exists::names(&arg)
+        } else if EXECUTE.contains(&gate) {
+            evaluated::names(&arg)
         } else {
             identifiers(&arg).into_iter().map(|n| (n, false)).collect()
         };
@@ -1435,6 +1452,17 @@ fn written(stmt: &[Tok], i: usize) -> bool {
             .is_some_and(|t| WRITES.contains(&t.text.as_str()))
 }
 
+/// FUNCTION: The name a word states for the reader of a string, with
+/// an abbreviation resolved through the generated table, so that `exe`
+/// reads as `execute`.
+fn gate_of(word: &str) -> Option<&str> {
+    if BY_NAME.contains(&word) {
+        return Some(word);
+    }
+
+    excmds::canonical(word).filter(|name| BY_NAME.contains(name))
+}
+
 /// FUNCTION: Whether the token at `i` is an argument of a set-family
 /// command: at or after the nearest head whose command is one, and
 /// before the bar that ends it.
@@ -1446,7 +1474,7 @@ fn written(stmt: &[Tok], i: usize) -> bool {
 /// convention: `set formatexpr=plugin#F()` is the only caller that
 /// function has.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-fn set_args(stmt: &[Tok], i: usize, heads: &[usize]) -> bool {
+pub(super) fn set_args(stmt: &[Tok], i: usize, heads: &[usize]) -> bool {
     let Some(at) = heads.iter().copied().filter(|head| *head < i).max() else {
         return false;
     };
@@ -1466,7 +1494,7 @@ fn set_args(stmt: &[Tok], i: usize, heads: &[usize]) -> bool {
 /// tokens, because a rule that walked the tokens before every name
 /// would cost the square of the statement's length.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-fn heads(stmt: &[Tok]) -> Vec<usize> {
+pub(super) fn heads(stmt: &[Tok]) -> Vec<usize> {
     // A modifier stands where Vim reads a command as much as the
     // command behind it does, so the whole run of them is heads: the
     // `silent` of `silent echo x` is Vim's own word, not the project's.
@@ -1502,7 +1530,7 @@ fn heads(stmt: &[Tok]) -> Vec<usize> {
 /// before this, and a project's own function cannot be here at all,
 /// since Vim requires a capital.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-fn in_command(stmt: &[Tok], i: usize, heads: &[usize]) -> bool {
+pub(super) fn in_command(stmt: &[Tok], i: usize, heads: &[usize]) -> bool {
     heads.contains(&i) && reads_command(stmt, i)
 }
 
