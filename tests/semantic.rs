@@ -394,3 +394,17 @@ fn a_variable_named_after_a_command_is_reported_when_nothing_reads_it() {
         vec!["variable set".to_string()]
     );
 }
+
+/// A command abbreviation is marked rather than dropped, so an
+/// ordinary read of a variable that is spelled like one still credits
+/// it.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/31
+#[test]
+fn an_abbreviation_that_the_project_declares_still_credits_it() {
+    let files = vec![(
+        "autoload/p.vim",
+        "vim9script\nvar buf = 1\nexport def F(): number\n  return buf\nenddef\n",
+    )];
+
+    assert!(ghosts("abbrev-credits", &files, true).is_empty());
+}

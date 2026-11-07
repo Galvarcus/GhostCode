@@ -938,11 +938,21 @@ impl Collect<'_> {
         // value: `echo` is itself a command, so the word after one
         // may well be the project's.
         // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-        if recv.is_none() && in_command(stmt, i) && excmds::has(word) {
+        // Vim accepts any unambiguous prefix of a command, and 43 of
+        // the lowercase names the corpora declare are themselves a
+        // legal abbreviation, so an abbreviation is marked as the
+        // language's rather than dropped: a project symbol of that
+        // spelling still takes the credit, and where none exists the
+        // name is not counted as unplaced.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/31
+        let vims = recv.is_none() && in_command(stmt, i) && excmds::canonical(word).is_some();
+
+        if vims && excmds::has(word) {
             return;
         }
 
-        let owned = NULLS.contains(&word)
+        let owned = vims
+            || NULLS.contains(&word)
             || (TYPES.contains(&word) && in_type(stmt, i) && !called(stmt, i));
 
         self.out.re(Reference {
@@ -1167,11 +1177,20 @@ fn called(stmt: &[Tok], i: usize) -> bool {
 /// `g:`, which a stream of tokens cannot tell from an annotation.
 /// None of those costs a credit: the name is still resolved, and the
 /// answer is read only where nothing resolved.
+/// FUNCTION: Whether a word is one of Vim's command modifiers,
+/// written whole or abbreviated. `MODS` holds the 24 full names, and
+/// the generated table carries the prefix each one accepts, so `sil`
+/// needs no entry of its own.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/31
+fn modifier(word: &str) -> bool {
+    excmds::canonical(word).is_some_and(|name| MODS.contains(&name))
+}
+
 /// FUNCTION: The command a statement runs, past any modifier before
 /// it, which is what tells the rules of one command from another.
 fn head(stmt: &[Tok]) -> Option<&str> {
     stmt.iter()
-        .find(|t| t.text != "!" && !MODS.contains(&t.text.as_str()))
+        .find(|t| t.text != "!" && !modifier(&t.text))
         .map(|t| t.text.as_str())
 }
 
@@ -1188,16 +1207,16 @@ fn head(stmt: &[Tok]) -> Option<&str> {
 /// on recognising the command.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 fn notation(word: &str) -> bool {
-    if matches!(word, "autocmd" | "doautocmd" | "doautoall" | "command") {
-        return true;
-    }
+    let Some(name) = excmds::canonical(word) else {
+        return false;
+    };
 
-    excmds::has(word)
-        && (word.ends_with("map")
-            || word.ends_with("mapclear")
-            || word.ends_with("menu")
-            || word.ends_with("abbrev")
-            || word.ends_with("abbreviate"))
+    matches!(name, "autocmd" | "doautocmd" | "doautoall" | "command")
+        || name.ends_with("map")
+        || name.ends_with("mapclear")
+        || name.ends_with("menu")
+        || name.ends_with("abbrev")
+        || name.ends_with("abbreviate")
 }
 
 /// FUNCTION: Whether a name is part of an autocommand's own syntax
@@ -1306,7 +1325,7 @@ fn scoped(stmt: &[Tok], i: usize, word: &str) -> bool {
 fn command_name_at(stmt: &[Tok]) -> Option<usize> {
     let head_at = stmt
         .iter()
-        .position(|t| t.text != "!" && !MODS.contains(&t.text.as_str()))?;
+        .position(|t| t.text != "!" && !modifier(&t.text))?;
 
     let mut i = head_at + 1;
     while let Some(tok) = stmt.get(i) {
@@ -1343,7 +1362,10 @@ fn command_name_at(stmt: &[Tok]) -> Option<usize> {
 /// often the only caller the function has.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 fn in_command_def(stmt: &[Tok], i: usize) -> bool {
-    if !matches!(head(stmt), Some("command" | "delcommand")) {
+    if !matches!(
+        head(stmt).and_then(excmds::canonical),
+        Some("command" | "delcommand")
+    ) {
         return false;
     }
 
@@ -1384,10 +1406,7 @@ fn written(stmt: &[Tok], i: usize) -> bool {
 /// since Vim requires a capital.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 fn in_command(stmt: &[Tok], i: usize) -> bool {
-    if !stmt[..i]
-        .iter()
-        .all(|t| t.text == "!" || MODS.contains(&t.text.as_str()))
-    {
+    if !stmt[..i].iter().all(|t| t.text == "!" || modifier(&t.text)) {
         return false;
     }
 
