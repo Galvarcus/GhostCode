@@ -1,0 +1,428 @@
+#!/usr/bin/env bash
+#
+# tools/vim-tables: regenerate the three tables of Vim's own names from
+# Vim's help files, and print what changed.
+#
+#   tools/vim-tables /path/to/runtime/doc
+#
+# Run it from the root of the repository.
+#
+# The command names come from the EX commands section of `index.txt`,
+# the function names from the Overview section of `builtin.txt`, and the
+# event names from the Events section of `autocmd.txt`. Every generated
+# file is committed, so the tree carries the tables and a reader needs
+# no Vim to hand.
+#
+# A command carries the number of characters Vim accepts of it, which
+# the help file writes as a bracket: `au[tocmd]` takes two. A function
+# and an event cannot be abbreviated, so neither table holds a number.
+#
+# Two kinds of command name are left out. An uppercase one, of which Vim
+# has three, because a project's own function has to start with a
+# capital and would collide. And a name of one character, of which Vim
+# has three, because `k`, `t` and `z` are worth almost nothing in a
+# plugin's source and are the names a project is most likely to reuse.
+# Leaving them out is also what makes a scope prefix safe, since every
+# one of those is a single letter.
+#
+# CI does not check a table against the Vim of a runner. A runner's
+# version differs from the floor the plugin promises, and a name Vim
+# adds later is simply still counted, which is the safe direction for a
+# rule that suppresses references.
+# REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+#
+# License: GNU GPL 3.0
+
+set -uo pipefail
+
+dir=${1:-}
+out_dir=src/lang/vim9
+min_abbrev=2
+
+if [ -z "$dir" ]; then
+  echo "usage: tools/vim-tables /path/to/runtime/doc" >&2
+  exit 2
+fi
+
+if [ ! -d "$out_dir" ]; then
+  echo "tools/vim-tables: run it from the root of the repository" >&2
+  exit 1
+fi
+
+for name in index.txt builtin.txt autocmd.txt; do
+  if [ ! -r "$dir/$name" ]; then
+    echo "tools/vim-tables: cannot read $dir/$name" >&2
+    exit 1
+  fi
+done
+
+# FUNCTION: The Vim version a help file documents, which it states on
+# its first line as `*index.txt*	For Vim version 9.2.  Last change: ...`.
+version_of() {
+  sed -n '1s/.*For Vim version \([0-9.]*[0-9]\).*/\1/p' "$1"
+}
+
+# FUNCTION: Write the table when it differs from the one on disk, and
+# print the difference either way.
+write_table() {
+  out=$1
+  tmp=$2
+  count=$3
+  version=$4
+
+  if [ -r "$out" ] && diff -q "$out" "$tmp" >/dev/null; then
+    echo "tools/vim-tables: $out already holds $count names for Vim $version"
+    return 0
+  fi
+
+  old=/dev/null
+  if [ -r "$out" ]; then
+    old=$out
+  fi
+
+  diff -u "$old" "$tmp" | head -40
+
+  if ! cp "$tmp" "$out"; then
+    echo "tools/vim-tables: could not write $out" >&2
+    return 1
+  fi
+
+  echo "tools/vim-tables: wrote $count names for Vim $version to $out"
+}
+
+tmp=$(mktemp -t ghostcode-vim-tables)
+trap 'rm -f "$tmp"' EXIT
+
+##############################################################################
+# The commands, with the prefix each one accepts.
+##############################################################################
+
+doc=$dir/index.txt
+version=$(version_of "$doc")
+
+if [ -z "$version" ]; then
+  echo "tools/vim-tables: $doc names no Vim version on its first line" >&2
+  exit 1
+fi
+
+# Each row of the section reads `|:tag|<tab>:c[ommand]<tab>action`, and
+# the second field holds the name with its optional part in brackets.
+# The table is searched by `partition_point`, which orders names by
+# their bytes, so the sort has to as well. A name the file lists twice
+# keeps the shorter prefix, which is the one Vim answers to.
+names=$(
+  sed -n '/\*ex-cmd-index\*/,$p' "$doc" |
+    awk -F'\t+' '/^\|:/ {print $2}' |
+    sed 's/^://' |
+    awk '{
+      whole = $0
+      gsub(/[][]/, "", whole)
+      at = index($0, "[")
+      least = (at == 0) ? length(whole) : at - 1
+      if (whole ~ /^[a-z][a-z0-9_]+$/) {
+        print whole "\t" least
+      }
+    }' |
+    LC_ALL=C sort -t'	' -k1,1 -k2,2n |
+    awk -F'\t' '!seen[$1]++'
+)
+
+count=$(printf '%s\n' "$names" | grep -c .)
+
+if [ "$count" -lt 100 ]; then
+  echo "tools/vim-tables: $doc yielded only $count commands, which is not a list" >&2
+  exit 1
+fi
+
+{
+  cat <<RUST
+//! The names of Vim's own commands, with the prefix each one accepts. A
+//! name here says where a word is Vim's, not that the word is out of a
+//! project's reach: Vim reads a command at the head of a statement, and
+//! the same word elsewhere is a value the project may have declared.
+//! Vim refuses a lowercase \`def\` with E1267 and a lowercase funcref
+//! variable with E704, so a function or a funcref cannot carry one of
+//! these names, but a plain \`var set = 1\` is accepted.
+//!
+//! A name of one character and a name that starts with a capital are
+//! left out, for the reasons \`tools/vim-tables\` gives.
+//! REFERENCE: https://github.com/Galvarcus/GhostCode/issues/31
+//!
+//! Generated by \`tools/vim-tables\` from the EX commands section of the
+//! \`runtime/doc/index.txt\` of Vim $version. Never edited by hand: run
+//! the tool again against a newer help file.
+//!
+//! License: GNU GPL 3.0
+
+/// The fewest characters of a command that this table will answer to. A
+/// scope prefix is one character, and \`g:flag = 1\` must keep the
+/// reference the project is owed, which is also why no name of one
+/// character is in the table.
+const MIN_ABBREV: usize = $min_abbrev;
+
+/// Every command Vim defines, in order, so that a lookup is a binary
+/// search of $count names rather than a walk of them. The number is how
+/// many of a name's first characters Vim accepts, read from the bracket
+/// form of the help file: \`au[tocmd]\` takes two.
+const NAMES: &[(&str, usize)] = &[
+RUST
+  printf '%s\n' "$names" | awk -F'\t' '{print "    (\"" $1 "\", " $2 "),"}'
+  cat <<'RUST'
+];
+
+/// FUNCTION: Whether Vim defines a command of this name, written whole.
+pub fn has(name: &str) -> bool {
+    NAMES
+        .binary_search_by(|(whole, _)| (*whole).cmp(name))
+        .is_ok()
+}
+
+/// FUNCTION: The command a word names, written whole or abbreviated,
+/// and `None` for a word that names none.
+///
+/// The names that share a prefix stand together in a sorted table, so
+/// the search is a binary one and then a walk of that run alone. Where
+/// several commands admit the same prefix, the first of the run answers,
+/// because the help file records no precedence between them and every
+/// caller asks only whether a word is a command.
+pub fn canonical(word: &str) -> Option<&'static str> {
+    if word.len() < MIN_ABBREV {
+        return None;
+    }
+
+    let at = NAMES.partition_point(|(whole, _)| *whole < word);
+
+    NAMES[at..]
+        .iter()
+        .take_while(|(whole, _)| whole.starts_with(word))
+        .find(|(_, least)| word.len() >= *least)
+        .map(|(whole, _)| *whole)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::canonical;
+    use super::NAMES;
+
+    /// The lookup is a binary search, which answers an unordered table
+    /// wrongly rather than slowly, and a name listed twice would mean
+    /// the help file was read with the wrong bounds.
+    #[test]
+    fn the_table_is_ordered_and_each_name_appears_once() {
+        assert!(NAMES.windows(2).all(|pair| pair[0].0 < pair[1].0));
+    }
+
+    /// A scope prefix is a single letter, and a single letter is left
+    /// out of the table, which is what lets `g:flag = 1` keep the
+    /// reference the project is owed.
+    #[test]
+    fn no_name_is_one_character_long() {
+        assert!(NAMES.iter().all(|(whole, _)| whole.len() > 1));
+    }
+
+    /// A command Vim answers to on one letter keeps its name here, with
+    /// that prefix recorded. `MIN_ABBREV` refuses the one-letter word
+    /// at the lookup instead, so `has("edit")` stays true while `e`
+    /// names nothing.
+    #[test]
+    fn every_prefix_fits_the_name_it_shortens() {
+        assert!(NAMES
+            .iter()
+            .all(|(whole, least)| *least >= 1 && *least <= whole.len()));
+    }
+
+    #[test]
+    fn a_full_command_name_is_its_own_canonical_form() {
+        assert_eq!(canonical("autocmd"), Some("autocmd"));
+    }
+
+    #[test]
+    fn an_abbreviation_answers_the_command_it_names() {
+        assert_eq!(canonical("au"), Some("autocmd"));
+        assert_eq!(canonical("bwipe"), Some("bwipeout"));
+        assert_eq!(canonical("echom"), Some("echomsg"));
+    }
+
+    #[test]
+    fn an_abbreviation_shorter_than_the_whole_name_is_a_command() {
+        assert_eq!(canonical("bwip"), Some("bwipeout"));
+    }
+
+    #[test]
+    fn a_word_of_one_character_is_no_command() {
+        assert_eq!(canonical("e"), None);
+    }
+
+    #[test]
+    fn a_word_that_is_no_command_answers_nothing() {
+        assert_eq!(canonical("Recover"), None);
+        assert_eq!(canonical("fountain"), None);
+    }
+}
+RUST
+} > "$tmp"
+
+write_table "$out_dir/excmds.rs" "$tmp" "$count" "$version" || exit 1
+
+##############################################################################
+# The functions.
+##############################################################################
+
+doc=$dir/builtin.txt
+version=$(version_of "$doc")
+
+if [ -z "$version" ]; then
+  echo "tools/vim-tables: $doc names no Vim version on its first line" >&2
+  exit 1
+fi
+
+names=$(
+  sed -n '/\*builtin-function-list\*/,/\*builtin-function-details\*/p' "$doc" |
+    grep -oE '^[a-z][a-z0-9_]*\(' |
+    tr -d '(' |
+    LC_ALL=C sort -u
+)
+
+count=$(printf '%s\n' "$names" | grep -c .)
+
+if [ "$count" -lt 100 ]; then
+  echo "tools/vim-tables: $doc yielded only $count functions, which is not a list" >&2
+  exit 1
+fi
+
+{
+  cat <<RUST
+//! The names of the functions Vim defines. A project cannot declare a
+//! function or a funcref of such a name, because Vim refuses a
+//! lowercase \`def\` with E1267 and a lowercase funcref variable with
+//! E704. It does accept a plain variable of the name, so a word here
+//! is Vim's where it is called and the project's where it is read.
+//! REFERENCE: https://github.com/Galvarcus/GhostCode/issues/31
+//!
+//! Generated by \`tools/vim-tables\` from the Overview section of the
+//! \`runtime/doc/builtin.txt\` of Vim $version. Never edited by hand:
+//! run the tool again against a newer help file.
+//!
+//! License: GNU GPL 3.0
+
+/// Every function Vim defines, in order, so that a lookup is a binary
+/// search of $count names rather than a walk of them.
+const NAMES: &[&str] = &[
+RUST
+  printf '%s\n' "$names" | sed 's/.*/    "&",/'
+  cat <<'RUST'
+];
+
+/// FUNCTION: Whether Vim defines a function of this name.
+pub fn has(name: &str) -> bool {
+    NAMES.binary_search(&name).is_ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::NAMES;
+
+    /// The lookup is a binary search, which answers an unordered table
+    /// wrongly rather than slowly, and a name listed twice would mean
+    /// the help file was read with the wrong bounds.
+    #[test]
+    fn the_table_is_ordered_and_each_name_appears_once() {
+        assert!(NAMES.windows(2).all(|pair| pair[0] < pair[1]));
+    }
+}
+RUST
+} > "$tmp"
+
+write_table "$out_dir/builtins.rs" "$tmp" "$count" "$version" || exit 1
+
+##############################################################################
+# The autocommand events.
+##############################################################################
+
+doc=$dir/autocmd.txt
+version=$(version_of "$doc")
+
+if [ -z "$version" ]; then
+  echo "tools/vim-tables: $doc names no Vim version on its first line" >&2
+  exit 1
+fi
+
+# Each row of the Events section names its event in a tag, as
+# `|BufEnter|<tab>starting to edit a buffer`.
+names=$(
+  sed -n '/^5. Events/,/^6\./p' "$doc" |
+    grep -oE '^\|[A-Za-z]+\|' |
+    tr -d '|' |
+    LC_ALL=C sort -u
+)
+
+count=$(printf '%s\n' "$names" | grep -c .)
+
+if [ "$count" -lt 50 ]; then
+  echo "tools/vim-tables: $doc yielded only $count events, which is not a list" >&2
+  exit 1
+fi
+
+{
+  cat <<RUST
+//! The names of the autocommand events Vim defines. An event name
+//! stands where Vim reads one, after \`:autocmd\` and its kin, and the
+//! same word elsewhere is the project's: every event is capitalised, so
+//! \`User\` or \`Signal\` could as well be a class a project declares,
+//! and only the position tells them apart.
+//! REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+//!
+//! Generated by \`tools/vim-tables\` from the Events section of the
+//! \`runtime/doc/autocmd.txt\` of Vim $version. Never edited by hand:
+//! run the tool again against a newer help file.
+//!
+//! License: GNU GPL 3.0
+
+/// Every event Vim defines, in order, so that a lookup is a binary
+/// search of $count names rather than a walk of them.
+const NAMES: &[&str] = &[
+RUST
+  printf '%s\n' "$names" | sed 's/.*/    "&",/'
+  cat <<'RUST'
+];
+
+/// FUNCTION: Whether Vim defines an autocommand event of this name.
+pub fn has(name: &str) -> bool {
+    NAMES.binary_search(&name).is_ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::has;
+    use super::NAMES;
+
+    /// The lookup is a binary search, which answers an unordered table
+    /// wrongly rather than slowly, and a name listed twice would mean
+    /// the help file was read with the wrong bounds.
+    #[test]
+    fn the_table_is_ordered_and_each_name_appears_once() {
+        assert!(NAMES.windows(2).all(|pair| pair[0] < pair[1]));
+    }
+
+    #[test]
+    fn every_event_name_vim_defines_is_in_the_table() {
+        for name in [
+            "BufEnter",
+            "User",
+            "VimEnter",
+            "CursorMovedI",
+            "WinScrolled",
+        ] {
+            assert!(has(name), "{name} is an event Vim defines");
+        }
+    }
+
+    #[test]
+    fn a_name_the_project_could_declare_is_no_event() {
+        assert!(!has("Open"));
+    }
+}
+RUST
+} > "$tmp"
+
+write_table "$out_dir/events.rs" "$tmp" "$count" "$version" || exit 1

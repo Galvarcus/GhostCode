@@ -3,7 +3,9 @@
 //!
 //! License: GNU GPL 3.0
 
+mod autocmd;
 mod builtins;
+mod events;
 mod excmds;
 pub mod lex;
 pub mod parse;

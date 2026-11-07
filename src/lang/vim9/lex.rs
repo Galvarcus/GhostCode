@@ -26,6 +26,13 @@ pub struct Tok {
     pub kind: TokKind,
     pub text: String,
     pub line: u32,
+    /// Whether no space stood between this token and the one before
+    /// it. A rule needs it to tell `*.fountain`, which is one word of
+    /// a pattern, from `* Fn()`, where a space divides the pattern
+    /// from the command after it. A column would not answer: the text
+    /// of a string token is not the length of its source.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+    pub glued: bool,
 }
 
 // The operators of more than one character, longest first, so that `..`
@@ -94,6 +101,7 @@ pub fn tokens(text: &str) -> Vec<Tok> {
                     kind: TokKind::Heredoc,
                     text: raw.to_string(),
                     line,
+                    glued: false,
                 });
             }
             continue;
@@ -136,6 +144,17 @@ fn opens_block(line: &str) -> bool {
     RESYNC.contains(&word.as_str())
 }
 
+/// FUNCTION: Add one token of the line, recording whether a space
+/// stood before it, and open a fresh gap for the next one.
+fn push_tok(toks: &mut Vec<Tok>, kind: TokKind, text: String, line: u32, gap: &mut bool) {
+    toks.push(Tok {
+        kind,
+        text,
+        line,
+        glued: !std::mem::replace(gap, false),
+    });
+}
+
 /// FUNCTION: Tokenise one logical line's worth of text.
 fn lex_line(
     text: &str,
@@ -147,11 +166,15 @@ fn lex_line(
     let src: Vec<char> = text.chars().collect();
     let mut i = 0;
     let mut heredoc_here = false;
+    // The line's first token stands behind the indent, so nothing is
+    // glued to it.
+    let mut gap = true;
 
     while i < src.len() {
         let c = src[i];
 
         if c.is_whitespace() {
+            gap = true;
             i += 1;
             continue;
         }
@@ -161,11 +184,13 @@ fn lex_line(
         // name belongs to it: `bartleby#Open` is the classic autoload
         // calling convention, not a name and a comment.
         if c == '#' && (i == 0 || src[i - 1].is_whitespace()) {
-            toks.push(Tok {
-                kind: TokKind::Comment,
-                text: src[i..].iter().collect(),
+            push_tok(
+                toks,
+                TokKind::Comment,
+                src[i..].iter().collect(),
                 line,
-            });
+                &mut gap,
+            );
             break;
         }
 
@@ -182,11 +207,7 @@ fn lex_line(
 
         if c == '\'' || c == '"' {
             let (text, next) = lex_str(&src, i, c);
-            toks.push(Tok {
-                kind: TokKind::Str,
-                text,
-                line,
-            });
+            push_tok(toks, TokKind::Str, text, line, &mut gap);
             i = next;
             continue;
         }
@@ -198,11 +219,13 @@ fn lex_line(
             {
                 i += 1;
             }
-            toks.push(Tok {
-                kind: TokKind::Num,
-                text: src[start..i].iter().collect(),
+            push_tok(
+                toks,
+                TokKind::Num,
+                src[start..i].iter().collect(),
                 line,
-            });
+                &mut gap,
+            );
             continue;
         }
 
@@ -217,11 +240,13 @@ fn lex_line(
             while i < src.len() && is_ident(src[i]) {
                 i += 1;
             }
-            toks.push(Tok {
-                kind: TokKind::Ident,
-                text: src[start..i].iter().collect(),
+            push_tok(
+                toks,
+                TokKind::Ident,
+                src[start..i].iter().collect(),
                 line,
-            });
+                &mut gap,
+            );
             continue;
         }
 
@@ -230,11 +255,7 @@ fn lex_line(
                 heredoc_here = true;
             }
             i += op.chars().count();
-            toks.push(Tok {
-                kind: TokKind::Op,
-                text: op.to_string(),
-                line,
-            });
+            push_tok(toks, TokKind::Op, op.to_string(), line, &mut gap);
             continue;
         }
 
@@ -248,11 +269,7 @@ fn lex_line(
             '(' | ')' | '[' | ']' | '{' | '}' | ',' | ';' | ':' => TokKind::Punct,
             _ => TokKind::Op,
         };
-        toks.push(Tok {
-            kind,
-            text: c.to_string(),
-            line,
-        });
+        push_tok(toks, kind, c.to_string(), line, &mut gap);
         i += 1;
     }
 
@@ -283,6 +300,7 @@ fn lex_interpolated(
         kind: TokKind::Str,
         text: text.to_string(),
         line,
+        glued: false,
     });
 
     let chars: Vec<char> = text.chars().collect();
@@ -390,6 +408,7 @@ fn push_newline(toks: &mut Vec<Tok>, line: u32) {
         kind: TokKind::Newline,
         text: String::new(),
         line,
+        glued: false,
     });
 }
 
@@ -609,6 +628,49 @@ mod tests {
         assert_eq!(
             toks.iter().find(|t| t.text == "def").expect("the def").line,
             3
+        );
+    }
+
+    #[test]
+    fn a_token_that_touches_the_one_before_it_is_glued() {
+        let toks = tokens("vim9script\nautocmd BufRead *.fountain setfiletype fountain\n");
+        let at = |text: &str| toks.iter().position(|t| t.text == text).expect(text);
+
+        assert!(toks[at("*") + 1].glued, "the dot touches the star");
+        assert!(toks[at("*") + 2].glued, "fountain touches the dot");
+        assert!(
+            !toks[at("setfiletype")].glued,
+            "a space stands before the body"
+        );
+    }
+
+    #[test]
+    fn the_first_token_of_a_line_is_not_glued() {
+        let toks = tokens("vim9script\n  echo x\n");
+
+        assert!(!toks.iter().find(|t| t.text == "echo").expect("echo").glued);
+    }
+
+    #[test]
+    fn a_heredoc_body_carries_no_glued_token() {
+        let toks = tokens("vim9script\nvar lines =<< END\n  *.c text\nEND\n");
+
+        assert!(toks
+            .iter()
+            .filter(|t| t.kind == TokKind::Heredoc)
+            .all(|t| !t.glued));
+    }
+
+    #[test]
+    fn a_continued_line_starts_a_token_that_is_not_glued() {
+        let toks = tokens("vim9script\ncommand! -bar\n  \\ Recover BA.Recover()\n");
+
+        assert!(
+            !toks
+                .iter()
+                .find(|t| t.text == "Recover")
+                .expect("Recover")
+                .glued
         );
     }
 }

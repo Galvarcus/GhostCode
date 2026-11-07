@@ -2,10 +2,12 @@
 //!
 //! License: GNU GPL 3.0
 
+use std::ops::Range;
 use std::path::Component;
 use std::path::Path;
 use std::path::PathBuf;
 
+use crate::lang::vim9::autocmd;
 use crate::lang::vim9::builtins;
 use crate::lang::vim9::excmds;
 use crate::lang::vim9::lex::Tok;
@@ -655,6 +657,12 @@ const DISCARD: &str = "_";
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 const DICT: &str = "dict";
 
+// What Vim writes between two commands on one line. The lexer keeps a
+// line that opens with one in the statement before it, so a bar stands
+// inside a statement rather than ending it.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+const BAR: &str = "|";
+
 // Vim's scope letters, which stand before a colon and name where a
 // variable lives rather than naming anything the project declares.
 // `a:` is legacy, for a function's arguments, and is here because the
@@ -834,13 +842,16 @@ struct Collect<'a> {
 impl Collect<'_> {
     /// METHOD: Read one statement, from the token after its own name.
     fn statement(&mut self, stmt: &[Tok], skip: &[usize]) {
+        let heads = heads(stmt);
+        let owned = command_at(stmt).and_then(|at| autocmd::owned(stmt, at));
+
         for (i, tok) in stmt.iter().enumerate() {
             if skip.contains(&i) {
                 continue;
             }
 
             match tok.kind {
-                TokKind::Ident => self.ident(stmt, i, tok),
+                TokKind::Ident => self.ident(stmt, i, tok, &heads, owned.as_ref()),
                 TokKind::Str => self.text(stmt, i, tok),
                 _ => {}
             }
@@ -849,7 +860,14 @@ impl Collect<'_> {
 
     /// METHOD: Record a name, with its receiver where a dot gives it
     /// one, as in `menu.Open()`, `this.Shut()`, or `Color.Red`.
-    fn ident(&mut self, stmt: &[Tok], i: usize, tok: &Tok) {
+    fn ident(
+        &mut self,
+        stmt: &[Tok],
+        i: usize,
+        tok: &Tok,
+        heads: &[usize],
+        owned: Option<&Range<usize>>,
+    ) {
         if KEYWORDS.contains(&tok.text.as_str()) {
             return;
         }
@@ -858,7 +876,8 @@ impl Collect<'_> {
             return;
         }
 
-        if in_notation(stmt, i) || in_autocmd(stmt, i) {
+        if in_notation(stmt, i) || in_augroup(stmt, i) || owned.is_some_and(|own| own.contains(&i))
+        {
             return;
         }
 
@@ -938,11 +957,22 @@ impl Collect<'_> {
         // value: `echo` is itself a command, so the word after one
         // may well be the project's.
         // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-        if recv.is_none() && in_command(stmt, i) && excmds::has(word) {
+        // Vim accepts any unambiguous prefix of a command, and 43 of
+        // the lowercase names the corpora declare are themselves a
+        // legal abbreviation, so an abbreviation is marked as the
+        // language's rather than dropped: a project symbol of that
+        // spelling still takes the credit, and where none exists the
+        // name is not counted as unplaced.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/31
+        let vims =
+            recv.is_none() && in_command(stmt, i, heads) && excmds::canonical(word).is_some();
+
+        if vims && excmds::has(word) {
             return;
         }
 
-        let owned = NULLS.contains(&word)
+        let owned = vims
+            || NULLS.contains(&word)
             || (TYPES.contains(&word) && in_type(stmt, i) && !called(stmt, i));
 
         self.out.re(Reference {
@@ -1157,22 +1187,19 @@ fn called(stmt: &[Tok], i: usize) -> bool {
     stmt[i].text != "func" && stmt.get(i + 1).is_some_and(|t| t.text == "(")
 }
 
-/// FUNCTION: Whether the token at a position stands as a type.
-///
-/// A type follows the colon of an annotation or of a return type, and
-/// nests inside the brackets of another type, so the scan walks back
-/// over what a type can hold and reads what comes before it. A value
-/// after the colon of a dictionary entry or of a conditional answers
-/// yes as well, and so does a name behind a scope prefix such as
-/// `g:`, which a stream of tokens cannot tell from an annotation.
-/// None of those costs a credit: the name is still resolved, and the
-/// answer is read only where nothing resolved.
+/// FUNCTION: Whether a word is one of Vim's command modifiers,
+/// written whole or abbreviated. `MODS` holds the 24 full names, and
+/// the generated table carries the prefix each one accepts, so `sil`
+/// needs no entry of its own.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/31
+fn modifier(word: &str) -> bool {
+    excmds::canonical(word).is_some_and(|name| MODS.contains(&name))
+}
+
 /// FUNCTION: The command a statement runs, past any modifier before
 /// it, which is what tells the rules of one command from another.
 fn head(stmt: &[Tok]) -> Option<&str> {
-    stmt.iter()
-        .find(|t| t.text != "!" && !MODS.contains(&t.text.as_str()))
-        .map(|t| t.text.as_str())
+    command_at(stmt).map(|at| stmt[at].text.as_str())
 }
 
 /// FUNCTION: Whether a command's arguments carry Vim's angle-bracket
@@ -1188,36 +1215,40 @@ fn head(stmt: &[Tok]) -> Option<&str> {
 /// on recognising the command.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 fn notation(word: &str) -> bool {
-    if matches!(word, "autocmd" | "doautocmd" | "doautoall" | "command") {
-        return true;
-    }
+    let Some(name) = excmds::canonical(word) else {
+        return false;
+    };
 
-    excmds::has(word)
-        && (word.ends_with("map")
-            || word.ends_with("mapclear")
-            || word.ends_with("menu")
-            || word.ends_with("abbrev")
-            || word.ends_with("abbreviate"))
+    matches!(name, "autocmd" | "doautocmd" | "doautoall" | "command")
+        || name.ends_with("map")
+        || name.ends_with("mapclear")
+        || name.ends_with("menu")
+        || name.ends_with("abbrev")
+        || name.ends_with("abbreviate")
 }
 
-/// FUNCTION: Whether a name is part of an autocommand's own syntax
-/// rather than a name the project declares.
+/// FUNCTION: Whether a statement is `:augroup`, which takes the name
+/// of a group and nothing else.
 ///
-/// `:augroup` takes the name of a group and nothing else, and a group
-/// lives in Vim's namespace. The `++once`, `++nested` and
-/// `++nomodeline` flags are Vim's as well, and nothing else in Vim9
-/// writes a word behind two plus signs.
-///
-/// The event names are not here. They are capitalised, so `User` or
-/// `Signal` could be a class of the project's, and telling them apart
-/// needs Vim's list of events rather than a position.
+/// A group lives in Vim's namespace rather than the project's, so no
+/// word of such a line is a name the project declares. The other
+/// autocommand forms are read part by part, in `autocmd`, which also
+/// carries the `++once` and `++nested` flags this rule used to answer
+/// by their plus signs alone.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-fn in_autocmd(stmt: &[Tok], i: usize) -> bool {
-    if head(stmt) == Some("augroup") {
-        return true;
+fn in_augroup(stmt: &[Tok], i: usize) -> bool {
+    let Some(at) = command_at(stmt) else {
+        return false;
+    };
+
+    if !reads_command(stmt, at) || !matches!(excmds::canonical(&stmt[at].text), Some("augroup")) {
+        return false;
     }
 
-    i >= 2 && stmt[i - 1].text == "+" && stmt[i - 2].text == "+"
+    // A bar ends the command, so the line owns its own words alone:
+    // the `Fn()` of `augroup foo | autocmd BufRead * Fn()` is the
+    // project's.
+    stmt[..i].iter().all(|tok| tok.text != BAR)
 }
 
 /// FUNCTION: Whether a name is one of Vim's key words, standing
@@ -1234,7 +1265,9 @@ fn in_autocmd(stmt: &[Tok], i: usize) -> bool {
 /// and neither is notation.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 fn in_notation(stmt: &[Tok], i: usize) -> bool {
-    if !head(stmt).is_some_and(notation) {
+    let reads = command_at(stmt).is_some_and(|at| reads_command(stmt, at));
+
+    if !reads || !head(stmt).is_some_and(notation) {
         return false;
     }
 
@@ -1306,7 +1339,7 @@ fn scoped(stmt: &[Tok], i: usize, word: &str) -> bool {
 fn command_name_at(stmt: &[Tok]) -> Option<usize> {
     let head_at = stmt
         .iter()
-        .position(|t| t.text != "!" && !MODS.contains(&t.text.as_str()))?;
+        .position(|t| t.text != "!" && !modifier(&t.text))?;
 
     let mut i = head_at + 1;
     while let Some(tok) = stmt.get(i) {
@@ -1343,7 +1376,10 @@ fn command_name_at(stmt: &[Tok]) -> Option<usize> {
 /// often the only caller the function has.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 fn in_command_def(stmt: &[Tok], i: usize) -> bool {
-    if !matches!(head(stmt), Some("command" | "delcommand")) {
+    if !matches!(
+        head(stmt).and_then(excmds::canonical),
+        Some("command" | "delcommand")
+    ) {
         return false;
     }
 
@@ -1373,6 +1409,40 @@ fn written(stmt: &[Tok], i: usize) -> bool {
             .is_some_and(|t| WRITES.contains(&t.text.as_str()))
 }
 
+/// FUNCTION: Every index at which Vim reads a command: the statement's
+/// own head, past any modifier, and the command an autocommand runs
+/// after its pattern.
+///
+/// The list is built once for a statement and read for each of its
+/// tokens, because a rule that walked the tokens before every name
+/// would cost the square of the statement's length.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+fn heads(stmt: &[Tok]) -> Vec<usize> {
+    // A modifier stands where Vim reads a command as much as the
+    // command behind it does, so the whole run of them is heads: the
+    // `silent` of `silent echo x` is Vim's own word, not the project's.
+    let first = command_at(stmt).unwrap_or(0);
+
+    let mut at: Vec<usize> = (0..=first).collect();
+
+    if let Some(body) = autocmd::body(stmt, first) {
+        at.push(body);
+    }
+
+    // A bar ends one command and starts the next, which the lexer
+    // keeps in the statement it opened: `if x | echo 1 | endif` is
+    // three commands on one line.
+    at.extend(
+        stmt.iter()
+            .enumerate()
+            .filter(|(_, tok)| tok.text == BAR)
+            .map(|(i, _)| i + 1)
+            .filter(|next| *next < stmt.len()),
+    );
+
+    at
+}
+
 /// FUNCTION: Whether a name stands where Vim reads a command: at the
 /// head of the statement, after nothing but command modifiers.
 ///
@@ -1383,15 +1453,21 @@ fn written(stmt: &[Tok], i: usize) -> bool {
 /// before this, and a project's own function cannot be here at all,
 /// since Vim requires a capital.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-fn in_command(stmt: &[Tok], i: usize) -> bool {
-    if !stmt[..i]
-        .iter()
-        .all(|t| t.text == "!" || MODS.contains(&t.text.as_str()))
-    {
-        return false;
-    }
+fn in_command(stmt: &[Tok], i: usize, heads: &[usize]) -> bool {
+    heads.contains(&i) && reads_command(stmt, i)
+}
 
-    !stmt.get(i + 1).is_some_and(|t| {
+/// FUNCTION: Whether Vim reads a command at `at` rather than a value.
+///
+/// A name that is assigned to, indexed, reached into, piped from or
+/// called is the project's own, however much it looks like a command:
+/// `auto` abbreviates `autocmd` and `me` abbreviates `menu`, so
+/// `auto = Helper()` would otherwise hand a whole line to Vim and take
+/// the credit of every name on it. Every rule that claims the words
+/// after a head asks this first.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+pub(super) fn reads_command(stmt: &[Tok], at: usize) -> bool {
+    !stmt.get(at + 1).is_some_and(|t| {
         matches!(
             t.text.as_str(),
             "(" | "[" | "." | "->" | "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "..=" | "<<=" | ">>="
@@ -1399,6 +1475,23 @@ fn in_command(stmt: &[Tok], i: usize) -> bool {
     })
 }
 
+/// FUNCTION: Where a statement's own command word stands, past any
+/// modifier before it.
+pub(super) fn command_at(stmt: &[Tok]) -> Option<usize> {
+    stmt.iter()
+        .position(|t| t.text != "!" && !modifier(&t.text))
+}
+
+/// FUNCTION: Whether the token at a position stands as a type.
+///
+/// A type follows the colon of an annotation or of a return type, and
+/// nests inside the brackets of another type, so the scan walks back
+/// over what a type can hold and reads what comes before it. A value
+/// after the colon of a dictionary entry or of a conditional answers
+/// yes as well, and so does a name behind a scope prefix such as
+/// `g:`, which a stream of tokens cannot tell from an annotation.
+/// None of those costs a credit: the name is still resolved, and the
+/// answer is read only where nothing resolved.
 fn in_type(stmt: &[Tok], i: usize) -> bool {
     let mut at = i;
 
