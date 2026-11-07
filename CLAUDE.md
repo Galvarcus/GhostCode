@@ -90,7 +90,8 @@ checks before anything is built, because a crate cannot be published
 twice to correct it.
 
 The pipeline then builds the binaries, writes their checksums, and
-attaches them with notes built from the commit subjects of the tag and
+attaches them with notes that `tools/release-notes` groups by the part
+of the project each commit changed, and
 the oldest glibc each Linux asset can run against, read from the asset
 itself. It then attests the binaries and publishes the crate through
 crates.io trusted publishing, which is configured against `ci.yml` and

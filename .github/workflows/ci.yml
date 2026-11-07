@@ -585,12 +585,6 @@ jobs:
 
       # The notes are the commit subjects of this tag, which state the
       # problem each commit fixed, with every `fixes:` trailer linked.
-      - name: Write the release notes
-        id: notes
-        uses: orhun/git-cliff-action@v4.9.1
-        with:
-          args: --latest
-
       # The asset name is the target triple, so the Linux one carries
       # an `unknown` vendor field that no distribution claims and a
       # `gnu` that names glibc without a version. What decides whether
@@ -599,14 +593,12 @@ jobs:
       # read from the asset here, at the only moment every asset of
       # the release is in one place, so the note can never be stale.
       # REFERENCE: https://github.com/Galvarcus/GhostCode/issues/9
-      - name: Write the notes, with the glibc floor of each Linux asset
-        env:
-          CHANGES: ${{ steps.notes.outputs.content }}
+      - name: Write the release notes, with the glibc floor of each asset
         run: |
           set -euo pipefail
 
           notes="$RUNNER_TEMP/notes.md"
-          printf '%s\n' "$CHANGES" > "$notes"
+          tools/release-notes > "$notes"
           shopt -s nullglob
           paths=(dist/bin/*-linux-gnu)
 
