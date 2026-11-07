@@ -406,7 +406,13 @@ mod tests {
 
     #[test]
     fn every_event_name_vim_defines_is_in_the_table() {
-        for name in ["BufEnter", "User", "VimEnter", "CursorMovedI", "WinScrolled"] {
+        for name in [
+            "BufEnter",
+            "User",
+            "VimEnter",
+            "CursorMovedI",
+            "WinScrolled",
+        ] {
             assert!(has(name), "{name} is an event Vim defines");
         }
     }

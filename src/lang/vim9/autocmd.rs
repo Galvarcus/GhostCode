@@ -5,6 +5,8 @@
 
 use super::events;
 use super::excmds;
+use std::ops::Range;
+
 use super::lex::Tok;
 use super::lex::TokKind;
 
@@ -29,20 +31,37 @@ const NOTATION: &str = "<";
 /// What separates one event from the next inside a list.
 const COMMA: &str = ",";
 
-/// FUNCTION: Whether the token at `i` belongs to the autocommand's own
-/// syntax rather than naming something the project declares: the
-/// group, an event, a word of the pattern, a flag, or the name of a
-/// `User` event, which stands in the pattern's place.
-///
-/// The command word itself is answered by the head rule, which reads
-/// the generated table, so this starts past it.
-/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-pub fn owns(stmt: &[Tok], i: usize) -> bool {
-    let Some(end) = own_syntax_ends(stmt) else {
-        return false;
-    };
+/// What Vim writes between two commands on one line, which the lexer
+/// keeps inside the statement the first of them opened.
+const BAR: &str = "|";
 
-    i > 0 && i < end
+/// FUNCTION: The indices an autocommand line owns: everything past
+/// the command word up to the command it runs, or up to the end of
+/// the statement when it runs none.
+///
+/// Those are the group, the event list, the pattern, the flags and the
+/// name of a `User` event, which stands in the pattern's place. The
+/// command word itself is answered by the head rule, which reads the
+/// generated table, so this starts past it. `None` for a statement
+/// that is no autocommand, which is what keeps `auto = Helper()` from
+/// losing the call it carries.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+pub fn owned(stmt: &[Tok], at: usize) -> Option<Range<usize>> {
+    line(stmt, at)?;
+
+    // A bar ends the command as surely as the statement does, so a
+    // form that runs nothing owns only the words before one: the
+    // `Fn()` of `autocmd! * <buffer> | Fn()` is the project's.
+    let bar = stmt
+        .iter()
+        .enumerate()
+        .skip(at)
+        .find(|(_, tok)| tok.text == BAR)
+        .map(|(i, _)| i);
+
+    let end = body(stmt, at).or(bar).unwrap_or(stmt.len()).min(stmt.len());
+
+    Some(at + 1..end)
 }
 
 /// FUNCTION: Where the command an autocommand runs begins, and `None`
@@ -50,8 +69,8 @@ pub fn owns(stmt: &[Tok], i: usize) -> bool {
 /// `:doautocmd` fires an event and never runs one, and `:autocmd!`
 /// may remove without adding.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-pub fn body(stmt: &[Tok]) -> Option<usize> {
-    let (command, words) = line(stmt)?;
+pub fn body(stmt: &[Tok], at: usize) -> Option<usize> {
+    let (command, words) = line(stmt, at)?;
 
     if command != DEFINES {
         return None;
@@ -65,37 +84,40 @@ pub fn body(stmt: &[Tok]) -> Option<usize> {
     rest.find(|at| !is_flag(stmt, *at))
 }
 
-/// FUNCTION: Where the line's own syntax stops: at the command it
-/// runs, or at the end of the statement when it runs none.
-fn own_syntax_ends(stmt: &[Tok]) -> Option<usize> {
-    line(stmt)?;
-
-    Some(body(stmt).unwrap_or(stmt.len()))
-}
-
 /// FUNCTION: The canonical command of an autocommand statement, with
-/// the index at which each of its words begins, and `None` for a
-/// statement that is no autocommand.
-fn line(stmt: &[Tok]) -> Option<(&'static str, Vec<usize>)> {
-    let words = words(stmt);
-    let first = *words.first()?;
-    let command = excmds::canonical(&stmt[first].text)?;
+/// the index at which each of its words begins past the command, and
+/// `None` for a statement that is no autocommand.
+///
+/// `at` is where the statement's command word stands, past any
+/// modifier, so `silent doautocmd User Save` reads like the bare form.
+/// A head Vim does not read as a command is no autocommand however it
+/// is spelled: `auto` abbreviates `autocmd`, and `auto = Helper()`
+/// assigns.
+fn line(stmt: &[Tok], at: usize) -> Option<(&'static str, Vec<usize>)> {
+    if !super::parse::reads_command(stmt, at) {
+        return None;
+    }
+
+    let command = excmds::canonical(&stmt.get(at)?.text)?;
 
     if !COMMANDS.contains(&command) {
         return None;
     }
 
-    Some((command, words))
+    Some((command, words(stmt, at)))
 }
 
 /// FUNCTION: Where each word of a statement begins. A word is a run of
 /// tokens no space divides, so `*.fountain` is one and `++once` is
 /// one.
-fn words(stmt: &[Tok]) -> Vec<usize> {
+fn words(stmt: &[Tok], from: usize) -> Vec<usize> {
     stmt.iter()
         .enumerate()
+        .skip(from)
         .filter(|(at, tok)| {
-            tok.kind != TokKind::Newline && tok.kind != TokKind::Comment && (*at == 0 || !tok.glued)
+            tok.kind != TokKind::Newline
+                && tok.kind != TokKind::Comment
+                && (*at == from || !tok.glued)
         })
         .map(|(at, _)| at)
         .collect()
@@ -171,8 +193,20 @@ mod tests {
     use super::super::lex::tokens;
     use super::super::lex::Tok;
     use super::super::parse::statements;
-    use super::body;
-    use super::owns;
+    use super::body as body_at;
+    use super::owned;
+
+    /// FUNCTION: Whether the line's own syntax covers the token at `i`,
+    /// for a statement whose command word opens it.
+    fn owns(stmt: &[Tok], i: usize) -> bool {
+        owned(stmt, 0).is_some_and(|own| own.contains(&i))
+    }
+
+    /// FUNCTION: Where the command an autocommand runs begins, for a
+    /// statement whose command word opens it.
+    fn body(stmt: &[Tok]) -> Option<usize> {
+        body_at(stmt, 0)
+    }
 
     /// FUNCTION: The one statement of a snippet, past the `vim9script`
     /// line every Vim9 file opens with.

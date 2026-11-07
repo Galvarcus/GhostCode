@@ -87,3 +87,57 @@ fn a_variable_read_in_a_body_keeps_its_reference() {
 
     assert_eq!(count(text, "flag"), 1);
 }
+
+/// A lowercase name a project may declare can abbreviate a command of
+/// Vim's: `auto` is `autocmd` and `aug` is `augroup`. A rule that owns
+/// the rest of the line must first be sure Vim reads a command there,
+/// or a statement that merely assigns to such a name loses every
+/// credit it carries.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+#[test]
+fn a_name_that_abbreviates_autocmd_keeps_the_line_it_opens() {
+    let text = "vim9script\nvar auto: bool = false\nauto = Helper()\n";
+
+    assert_eq!(count(text, "Helper"), 1);
+    assert_eq!(count(text, "auto"), 1);
+}
+
+#[test]
+fn a_name_that_abbreviates_augroup_keeps_the_line_it_opens() {
+    let text = "vim9script\nvar aug: bool = false\naug = Helper()\n";
+
+    assert_eq!(count(text, "Helper"), 1);
+}
+
+#[test]
+fn a_name_that_abbreviates_a_menu_command_keeps_its_notation() {
+    let text = "vim9script\nvar me: bool = false\nme = 1 < Helper() && 2 > 3\n";
+
+    assert_eq!(count(text, "Helper"), 1);
+}
+
+#[test]
+fn an_autocommand_behind_a_modifier_is_still_read() {
+    let text = "vim9script\nsilent doautocmd User Save\n";
+
+    assert_eq!(count(text, "User"), 0);
+    assert_eq!(count(text, "Save"), 0);
+}
+
+/// A bar ends one command, so an `:augroup` line owns only the words
+/// up to it. The rule is per statement and a bar does not end one, so
+/// without this the call after the bar loses its credit.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+#[test]
+fn a_call_after_a_bar_on_an_augroup_line_keeps_its_credit() {
+    let text = "vim9script\naugroup foo | autocmd BufRead * Fn() | augroup END\n";
+
+    assert_eq!(count(text, "Fn"), 1);
+}
+
+#[test]
+fn a_call_after_a_bar_on_a_removing_autocommand_keeps_its_credit() {
+    let text = "vim9script\nautocmd! * <buffer> | Fn()\n";
+
+    assert_eq!(count(text, "Fn"), 1);
+}
