@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use crate::lang::vim9::autocmd;
 use crate::lang::vim9::builtins;
 use crate::lang::vim9::excmds;
+use crate::lang::vim9::exists;
 use crate::lang::vim9::lex::Tok;
 use crate::lang::vim9::lex::TokKind;
 use crate::lang::vim9::types;
@@ -743,6 +744,10 @@ const NULLS: &[&str] = &[
 
 // The builtins that take a name as text rather than as code, so that
 // the name inside the string is a call site like any other.
+// The two of `BY_NAME` whose argument is Vim's own syntax rather than
+// a name, read part by part in `exists`.
+const EXISTS: &[&str] = &["exists", "exists_compiled"];
+
 const BY_NAME: &[&str] = &[
     "call",
     "function",
@@ -1035,13 +1040,14 @@ impl Collect<'_> {
     /// project's own names once they are all known: Vim evaluates text
     /// in places no parser sees, and a name used only there is used.
     fn text(&mut self, stmt: &[Tok], i: usize, tok: &Tok) {
-        let by_name = stmt[..i]
+        let gate = stmt[..i]
             .iter()
             .rev()
             .take(2)
-            .any(|t| BY_NAME.contains(&t.text.as_str()));
+            .find(|t| BY_NAME.contains(&t.text.as_str()))
+            .map(|t| t.text.as_str());
 
-        if !by_name {
+        let Some(gate) = gate else {
             self.out.text(Text {
                 text: unquote(&tok.text),
                 file: self.file.to_path_buf(),
@@ -1049,9 +1055,22 @@ impl Collect<'_> {
                 origin: Some(self.origin.clone()),
             });
             return;
-        }
+        };
 
-        for name in identifiers(&unquote(&tok.text)) {
+        let arg = unquote(&tok.text);
+
+        // `exists()` takes Vim's own syntax rather than a bare name: a
+        // scope prefix, an option, a feature, an autocommand group.
+        // The reader answers which of its words a project symbol could
+        // carry, and only those are left unmarked.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+        let names: Vec<(String, bool)> = if EXISTS.contains(&gate) {
+            exists::names(&arg)
+        } else {
+            identifiers(&arg).into_iter().map(|n| (n, false)).collect()
+        };
+
+        for (name, owned) in names {
             self.out.re(Reference {
                 name,
                 recv: None,
@@ -1059,7 +1078,7 @@ impl Collect<'_> {
                 line: tok.line,
                 origin: Some(self.origin.clone()),
                 target: None,
-                owned: false,
+                owned,
             });
         }
     }

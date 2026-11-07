@@ -7,6 +7,7 @@ mod autocmd;
 mod builtins;
 mod events;
 mod excmds;
+mod exists;
 pub mod lex;
 pub mod parse;
 pub mod rules;
