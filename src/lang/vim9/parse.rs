@@ -9,7 +9,9 @@ use std::path::PathBuf;
 
 use crate::lang::vim9::autocmd;
 use crate::lang::vim9::builtins;
+use crate::lang::vim9::evaluated;
 use crate::lang::vim9::excmds;
+use crate::lang::vim9::exists;
 use crate::lang::vim9::lex::Tok;
 use crate::lang::vim9::lex::TokKind;
 use crate::lang::vim9::types;
@@ -657,6 +659,12 @@ const DISCARD: &str = "_";
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 const DICT: &str = "dict";
 
+// The commands whose arguments are Vim's options. Their abbreviations
+// need no entry: the generated table carries the prefix each one
+// accepts, so `setl` reaches `setlocal` through `canonical`.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+const SET_FAMILY: &[&str] = &["set", "setlocal", "setglobal"];
+
 // What Vim writes between two commands on one line. The lexer keeps a
 // line that opens with one in the statement before it, so a bar stands
 // inside a statement rather than ending it.
@@ -736,18 +744,29 @@ const NULLS: &[&str] = &[
 ];
 
 // The builtins that take a name as text rather than as code, so that
-// the name inside the string is a call site like any other.
-const BY_NAME: &[&str] = &[
-    "call",
-    "function",
-    "funcref",
-    "execute",
-    "eval",
-    // Every script opens with `exists('s:is_loaded')`, which reads the
-    // variable as surely as any expression does.
-    "exists",
-    "exists_compiled",
-];
+// the name inside the string is a call site like any other. These are
+// harvested word by word; the two lists below have a reader of their
+// own, and no word is named twice.
+const BY_NAME: &[&str] = &["call", "function", "funcref", "eval"];
+
+// Whose argument is Vim's own syntax rather than a name, read part by
+// part in `exists`. Every script opens with `exists('s:is_loaded')`,
+// which reads the variable as surely as any expression does.
+const EXISTS: &[&str] = &["exists", "exists_compiled"];
+
+// Whose argument is a command line Vim runs, read in `evaluated`.
+// `exe` reaches it through the generated table, and `execute()` is the
+// function of the same name.
+//
+// `win_execute` is not here, although it runs a command line as well.
+// It takes that line as its second argument, and the gate reads two
+// tokens back, so not one `win_execute` string in the corpora is
+// reached at all. Reading one would need the gate widened to the
+// enclosing call, and the interpolations left alone after that: the
+// strings there are expressions, so harvesting one adds a second copy
+// of every name the lexer has already read as code.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+const EXECUTE: &[&str] = &["execute"];
 
 /// FUNCTION: Record every reference a file makes: calls, member
 /// accesses, funcrefs read as values, type annotations, and the names
@@ -972,6 +991,7 @@ impl Collect<'_> {
         }
 
         let owned = vims
+            || (recv.is_none() && set_args(stmt, i, heads))
             || NULLS.contains(&word)
             || (TYPES.contains(&word) && in_type(stmt, i) && !called(stmt, i));
 
@@ -1028,13 +1048,17 @@ impl Collect<'_> {
     /// project's own names once they are all known: Vim evaluates text
     /// in places no parser sees, and a name used only there is used.
     fn text(&mut self, stmt: &[Tok], i: usize, tok: &Tok) {
-        let by_name = stmt[..i]
+        // The word before the string names what reads it, as a command
+        // in `execute 'x'` or as a call in `exists('x')`, where a
+        // bracket stands between.
+        let gate = stmt[..i]
             .iter()
             .rev()
             .take(2)
-            .any(|t| BY_NAME.contains(&t.text.as_str()));
+            .enumerate()
+            .find_map(|(back, t)| gate_of(&t.text, back == 0));
 
-        if !by_name {
+        let Some(gate) = gate else {
             self.out.text(Text {
                 text: unquote(&tok.text),
                 file: self.file.to_path_buf(),
@@ -1042,9 +1066,24 @@ impl Collect<'_> {
                 origin: Some(self.origin.clone()),
             });
             return;
-        }
+        };
 
-        for name in identifiers(&unquote(&tok.text)) {
+        let arg = unquote(&tok.text);
+
+        // `exists()` takes Vim's own syntax rather than a bare name: a
+        // scope prefix, an option, a feature, an autocommand group.
+        // The reader answers which of its words a project symbol could
+        // carry, and only those are left unmarked.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+        let names: Vec<(String, bool)> = if EXISTS.contains(&gate) {
+            exists::names(&arg)
+        } else if EXECUTE.contains(&gate) {
+            evaluated::names(&arg)
+        } else {
+            identifiers(&arg).into_iter().map(|n| (n, false)).collect()
+        };
+
+        for (name, owned) in names {
             self.out.re(Reference {
                 name,
                 recv: None,
@@ -1052,7 +1091,7 @@ impl Collect<'_> {
                 line: tok.line,
                 origin: Some(self.origin.clone()),
                 target: None,
-                owned: false,
+                owned,
             });
         }
     }
@@ -1409,6 +1448,57 @@ fn written(stmt: &[Tok], i: usize) -> bool {
             .is_some_and(|t| WRITES.contains(&t.text.as_str()))
 }
 
+/// FUNCTION: The name a word states for the reader of a string, with
+/// an abbreviation resolved through the generated table, so that `exe`
+/// reads as `execute`.
+///
+/// `against` says whether the word stands against the string, with no
+/// token between. Only there is an abbreviation read, because `ev`,
+/// `fu` and `cal` are names a project may give a variable: a message
+/// held in one would otherwise be read as a call site, and a finding
+/// that should never have been touched would disappear.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+fn gate_of(word: &str, against: bool) -> Option<&str> {
+    if BY_NAME.contains(&word) || EXISTS.contains(&word) || EXECUTE.contains(&word) {
+        return Some(word);
+    }
+
+    if !against {
+        return None;
+    }
+
+    excmds::canonical(word).filter(|name| EXECUTE.contains(name))
+}
+
+/// FUNCTION: Whether the token at `i` is an argument of a set-family
+/// command: at or after the nearest head whose command is one, and
+/// before the bar that ends it.
+///
+/// An option name, an option's value, and a name the plugin invents
+/// for Vim all stand there, and nothing the project declares can be
+/// meant by one. The answer is a mark and never a drop, because an
+/// option's value may name a project function in the autoload
+/// convention: `set formatexpr=plugin#F()` is the only caller that
+/// function has.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+pub(super) fn set_args(stmt: &[Tok], i: usize, heads: &[usize]) -> bool {
+    let Some(at) = heads.iter().copied().filter(|head| *head < i).max() else {
+        return false;
+    };
+
+    // `set` is a name Vim9 accepts for a variable, so the claim begins
+    // only where Vim reads a command: `set['a'] = Fn()` assigns.
+    if !reads_command(stmt, at) {
+        return false;
+    }
+
+    if !excmds::canonical(&stmt[at].text).is_some_and(|name| SET_FAMILY.contains(&name)) {
+        return false;
+    }
+
+    stmt[at..i].iter().all(|tok| tok.text != BAR)
+}
+
 /// FUNCTION: Every index at which Vim reads a command: the statement's
 /// own head, past any modifier, and the command an autocommand runs
 /// after its pattern.
@@ -1417,7 +1507,7 @@ fn written(stmt: &[Tok], i: usize) -> bool {
 /// tokens, because a rule that walked the tokens before every name
 /// would cost the square of the statement's length.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-fn heads(stmt: &[Tok]) -> Vec<usize> {
+pub(super) fn heads(stmt: &[Tok]) -> Vec<usize> {
     // A modifier stands where Vim reads a command as much as the
     // command behind it does, so the whole run of them is heads: the
     // `silent` of `silent echo x` is Vim's own word, not the project's.
@@ -1453,7 +1543,7 @@ fn heads(stmt: &[Tok]) -> Vec<usize> {
 /// before this, and a project's own function cannot be here at all,
 /// since Vim requires a capital.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-fn in_command(stmt: &[Tok], i: usize, heads: &[usize]) -> bool {
+pub(super) fn in_command(stmt: &[Tok], i: usize, heads: &[usize]) -> bool {
     heads.contains(&i) && reads_command(stmt, i)
 }
 

@@ -408,3 +408,21 @@ fn an_abbreviation_that_the_project_declares_still_credits_it() {
 
     assert!(ghosts("abbrev-credits", &files, true).is_empty());
 }
+
+/// An option's value may name a project function in the autoload
+/// convention, so the words after a set-family command are marked
+/// rather than dropped: the mark is read after resolution, which
+/// leaves the function its credit.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+#[test]
+fn an_option_value_that_names_a_project_function_still_credits_it() {
+    let files = vec![
+        ("plugin/p.vim", "vim9script\nsetlocal formatexpr=p#F()\n"),
+        (
+            "autoload/p.vim",
+            "vim9script\nexport def F(): number\n  return 1\nenddef\n",
+        ),
+    ];
+
+    assert!(ghosts("option-value-credits", &files, false).is_empty());
+}
