@@ -169,6 +169,60 @@ jobs:
         with:
           ref: ${{ github.event.inputs.tag || github.sha }}
 
+      # The front end speaks through Logger, a shared dependency at
+      # github.com/Galvarcus/Logger that is not in this repository.
+      - name: Checkout Logger dependency
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: Galvarcus/Logger
+          path: deps/Logger
+
+      # The Vim of Ubuntu is the baseline, alongside MacVim on the author's
+      # machine. It is behind the floor the guards state, so what it proves
+      # is the refusal: the plugin defines nothing and throws nothing on a
+      # Vim it does not promise to run on. The floor is read from the guard
+      # rather than written here, so a change to the guard carries. The step
+      # runs before the AppImage, whose directory reaches $PATH only in the
+      # steps after the one that adds it.
+      - name: The Vim of Ubuntu, the baseline
+        run: |
+          set -euo pipefail
+          if ! command -v vim > /dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends vim
+          fi
+          vim --version | head -1
+
+          floor=$(sed -n 's/.*v:version < \([0-9]\{3\}\).*/\1/p' \
+            plugin/ghostcode.vim | head -1)
+          if [ -z "$floor" ]; then
+            echo "::error::plugin/ghostcode.vim states no v:version floor."
+            exit 1
+          fi
+
+          rm -f /tmp/baseline.txt
+          vim -es -u NONE -N --cmd 'set rtp+=.,deps/Logger' \
+            -c 'runtime plugin/ghostcode.vim' \
+            -c 'call writefile([v:version, exists(":GhostCode")], "/tmp/baseline.txt")' \
+            -c 'quit'
+
+          if [ ! -f /tmp/baseline.txt ]; then
+            echo "::error::The baseline Vim exited without writing; it did not reach the end of the probe."
+            exit 1
+          fi
+          ver=$(sed -n 1p /tmp/baseline.txt)
+          cmd=$(sed -n 2p /tmp/baseline.txt)
+          echo "v:version=$ver floor=$floor :GhostCode=$cmd"
+
+          if [ "$ver" -ge "$floor" ]; then
+            echo "::error::Ubuntu now carries Vim $ver, at or above the floor $floor. This step proves the refusal below the floor; run the suite here instead."
+            exit 1
+          fi
+          if [ "$cmd" != 0 ]; then
+            echo "::error::The plugin defined :GhostCode on Vim $ver, below the floor $floor."
+            exit 1
+          fi
+
       # A prebuilt AppImage of the latest Vim, unpacked, so that Vim is on the
       # PATH. The Vim of the runner is older. With the token, the call to the
       # API has the limit of the repository. Without one it shares a low limit
@@ -193,14 +247,6 @@ jobs:
 
       - name: Vim version
         run: vim --version
-
-      # The front end speaks through Logger, a shared dependency at
-      # github.com/Galvarcus/Logger that is not in this repository.
-      - name: Checkout Logger dependency
-        uses: actions/checkout@v7.0.1
-        with:
-          repository: Galvarcus/Logger
-          path: deps/Logger
 
       - name: Run tests
         run: |
