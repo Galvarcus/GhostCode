@@ -307,7 +307,10 @@ vim -es -u NONE -N --cmd 'set rtp+=.,/path/to/Logger' \
 cat tests/results.txt
 ```
 
-The file reads `All tests passed` when every test passes.
+The file reads `All tests passed` when every test passes. A test the
+running Vim cannot meet the conditions of, such as a patch it lacks, is
+skipped rather than failed, and the file counts and names each skip
+above the verdict. Read those names: a skip is a test that did not run.
 
 `doc/ghostcode.txt` is generated from this README by
 `.github/workflows/ci.yml`. Edit the README, not the help file.

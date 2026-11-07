@@ -14,6 +14,7 @@ import autoload 'ghostcode.vim' as G
 # one, and -es hides an echo besides. Its history is the only place a
 # test can read the line the user is shown.
 import 'Logger/messages.vim' as LM
+import './skip.vim' as S
 
 const STUB: string = fnamemodify(resolve(expand('<script>')), ':h') .. '/stub/ghostcode'
 # The file name of the binary on the platform running the suite. The
@@ -136,15 +137,21 @@ enddef
 # which file to go and get. On Windows that file is ghostcode.exe, in
 # the directory beside the plugin as much as on $PATH.
 def Test_a_missing_binary_message_names_the_file_it_wants(): void
+  var bundled = fnamemodify(resolve(expand('<script>')), ':h:h') .. $'/{BIN_DIR}/{EXE}'
+
+  # A developer who keeps a binary beside the plugin cannot run this
+  # test: Bin() finds that one and the message under test never comes.
+  # An assertion here aborted the run and wrote no results at all.
+  if executable(bundled) == 1
+    S.Skip('a_missing_binary_message_names_the_file_it_wants',
+      $'a binary is bundled at {bundled}')
+    return
+  endif
+
   # $PATH is emptied, because a machine that develops Ghostcode has
   # the binary on it, and the message under test is the one for a
   # machine that has none.
   var path = $PATH
-  var bundled = fnamemodify(resolve(expand('<script>')), ':h:h') .. $'/{BIN_DIR}/{EXE}'
-
-  # A developer who keeps a binary beside the plugin would otherwise
-  # see both assertions fail without being told why.
-  assert_true(executable(bundled) != 1, $'{bundled} exists')
 
   LM.Clear()
   g:ghostcode_bin = '/nonexistent/ghostcode'
