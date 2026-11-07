@@ -88,3 +88,14 @@ fn a_string_in_no_execute_position_is_untouched() {
 
     assert_eq!(count(text, "edit"), 0);
 }
+
+/// Only the word that reads a string opens the gate. A variable whose
+/// name abbreviates one does not, or a message held in it is read as a
+/// call site and the finding it should not touch disappears.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+#[test]
+fn a_variable_named_like_an_abbreviation_does_not_open_the_gate() {
+    let text = "vim9script\ndef F()\n  var ev = 'p#table#Hidden is the name'\n  echo ev\nenddef\n";
+
+    assert_eq!(count(text, "p#table#Hidden"), 0);
+}

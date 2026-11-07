@@ -111,3 +111,13 @@ fn an_autocommand_group_tested_for_existence_holds_no_name() {
 
     assert_eq!(count(text, "User"), 0);
 }
+
+/// A set claim begins only where Vim reads a command. `set` is a name
+/// Vim9 accepts for a variable, and an indexed one is no command.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+#[test]
+fn a_variable_named_after_a_set_command_claims_nothing() {
+    let text = "vim9script\ndef F()\n  var set: dict<bool> = {}\n  set['a'] = Fn()\nenddef\n";
+
+    assert!(!one(text, "Fn").owned);
+}
