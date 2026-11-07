@@ -657,6 +657,12 @@ const DISCARD: &str = "_";
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 const DICT: &str = "dict";
 
+// The commands whose arguments are Vim's options. Their abbreviations
+// need no entry: the generated table carries the prefix each one
+// accepts, so `setl` reaches `setlocal` through `canonical`.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+const SET_FAMILY: &[&str] = &["set", "setlocal", "setglobal"];
+
 // What Vim writes between two commands on one line. The lexer keeps a
 // line that opens with one in the statement before it, so a bar stands
 // inside a statement rather than ending it.
@@ -972,6 +978,7 @@ impl Collect<'_> {
         }
 
         let owned = vims
+            || (recv.is_none() && set_args(stmt, i, heads))
             || NULLS.contains(&word)
             || (TYPES.contains(&word) && in_type(stmt, i) && !called(stmt, i));
 
@@ -1407,6 +1414,29 @@ fn written(stmt: &[Tok], i: usize) -> bool {
         && stmt
             .get(1)
             .is_some_and(|t| WRITES.contains(&t.text.as_str()))
+}
+
+/// FUNCTION: Whether the token at `i` is an argument of a set-family
+/// command: at or after the nearest head whose command is one, and
+/// before the bar that ends it.
+///
+/// An option name, an option's value, and a name the plugin invents
+/// for Vim all stand there, and nothing the project declares can be
+/// meant by one. The answer is a mark and never a drop, because an
+/// option's value may name a project function in the autoload
+/// convention: `set formatexpr=plugin#F()` is the only caller that
+/// function has.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+fn set_args(stmt: &[Tok], i: usize, heads: &[usize]) -> bool {
+    let Some(at) = heads.iter().copied().filter(|head| *head < i).max() else {
+        return false;
+    };
+
+    if !excmds::canonical(&stmt[at].text).is_some_and(|name| SET_FAMILY.contains(&name)) {
+        return false;
+    }
+
+    stmt[at..i].iter().all(|tok| tok.text != BAR)
 }
 
 /// FUNCTION: Every index at which Vim reads a command: the statement's
