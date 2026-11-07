@@ -169,6 +169,60 @@ jobs:
         with:
           ref: ${{ github.event.inputs.tag || github.sha }}
 
+      # The front end speaks through Logger, a shared dependency at
+      # github.com/Galvarcus/Logger that is not in this repository.
+      - name: Checkout Logger dependency
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: Galvarcus/Logger
+          path: deps/Logger
+
+      # The Vim of Ubuntu is the baseline, alongside MacVim on the author's
+      # machine. It is behind the floor the guards state, so what it proves
+      # is the refusal: the plugin defines nothing and throws nothing on a
+      # Vim it does not promise to run on. The floor is read from the guard
+      # rather than written here, so a change to the guard carries. The step
+      # runs before the AppImage, whose directory reaches $PATH only in the
+      # steps after the one that adds it.
+      - name: The Vim of Ubuntu, the baseline
+        run: |
+          set -euo pipefail
+          if ! command -v vim > /dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends vim
+          fi
+          vim --version | head -1
+
+          floor=$(sed -n 's/.*v:version < \([0-9]\{3\}\).*/\1/p' \
+            plugin/ghostcode.vim | head -1)
+          if [ -z "$floor" ]; then
+            echo "::error::plugin/ghostcode.vim states no v:version floor."
+            exit 1
+          fi
+
+          rm -f /tmp/baseline.txt
+          vim -es -u NONE -N --cmd 'set rtp+=.,deps/Logger' \
+            -c 'runtime plugin/ghostcode.vim' \
+            -c 'call writefile([v:version, exists(":GhostCode")], "/tmp/baseline.txt")' \
+            -c 'quit'
+
+          if [ ! -f /tmp/baseline.txt ]; then
+            echo "::error::The baseline Vim exited without writing; it did not reach the end of the probe."
+            exit 1
+          fi
+          ver=$(sed -n 1p /tmp/baseline.txt)
+          cmd=$(sed -n 2p /tmp/baseline.txt)
+          echo "v:version=$ver floor=$floor :GhostCode=$cmd"
+
+          if [ "$ver" -ge "$floor" ]; then
+            echo "::error::Ubuntu now carries Vim $ver, at or above the floor $floor. This step proves the refusal below the floor; run the suite here instead."
+            exit 1
+          fi
+          if [ "$cmd" != 0 ]; then
+            echo "::error::The plugin defined :GhostCode on Vim $ver, below the floor $floor."
+            exit 1
+          fi
+
       # A prebuilt AppImage of the latest Vim, unpacked, so that Vim is on the
       # PATH. The Vim of the runner is older. With the token, the call to the
       # API has the limit of the repository. Without one it shares a low limit
@@ -194,14 +248,6 @@ jobs:
       - name: Vim version
         run: vim --version
 
-      # The front end speaks through Logger, a shared dependency at
-      # github.com/Galvarcus/Logger that is not in this repository.
-      - name: Checkout Logger dependency
-        uses: actions/checkout@v7.0.1
-        with:
-          repository: Galvarcus/Logger
-          path: deps/Logger
-
       - name: Run tests
         run: |
           vim -es -u NONE -N -V20/tmp/vim.log \
@@ -211,6 +257,116 @@ jobs:
           if [ ! -f tests/results.txt ]; then
             echo "::error::tests/results.txt was never created - Vim likely failed before finishing. Verbose log follows:"
             cat /tmp/vim.log
+            exit 1
+          fi
+          cat tests/results.txt
+          grep -qx 'All tests passed' tests/results.txt
+
+  front-end-windows:
+    name: Front end on Windows
+    runs-on: windows-latest
+    # The steps are POSIX shell, as in the job above, so that one suite is
+    # driven the same way on both platforms. Git for Windows provides it.
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.inputs.tag || github.sha }}
+
+      # The front end speaks through Logger, a shared dependency at
+      # github.com/Galvarcus/Logger that is not in this repository.
+      - name: Checkout Logger dependency
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: Galvarcus/Logger
+          path: deps/Logger
+
+      # The suite runs a stub in place of the binary, and the front end
+      # starts it the way it starts the binary: with the list form of
+      # systemlist(), which starts a program directly rather than through a
+      # shell. A script cannot stand in for a program there, so the stub is
+      # compiled here. The image carries rustc already.
+      - name: Build the stub
+        run: |
+          set -euo pipefail
+          rustc --version
+          rustc -O tests/stub/ghostcode.rs -o tests/stub/ghostcode.exe
+          ./tests/stub/ghostcode.exe --version > /dev/null
+
+      # The portable build of the newest Vim, from the project's own
+      # installer repository. Its path is carried in VIM_EXE rather than
+      # added to $PATH: that variable prepends to the PATH of Windows,
+      # while the shell here is the one Git for Windows ships, which puts
+      # its own /usr/bin first and answers `vim` with the MSYS2 build it
+      # carries.
+      - name: Install Vim
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          url=$(curl -fsS --retry 3 -H "Authorization: Bearer $GITHUB_TOKEN" \
+            https://api.github.com/repos/vim/vim-win32-installer/releases/latest \
+            | jq -r '.assets[] | select(.name | test("^gvim_.*_x64\\.zip$")) | .browser_download_url')
+          if [ -z "$url" ]; then
+            echo "::error::The latest vim-win32-installer release has no x64 zip."
+            exit 1
+          fi
+          curl -fsSL --retry 3 -o vim.zip "$url"
+
+          # PowerShell unpacks it, because the shell here is the one Git for
+          # Windows ships and an unzip of its own is not promised. The path
+          # is reached with a glob, which the shell expands itself, rather
+          # than with find, whose name Windows also carries.
+          powershell -NoProfile -Command \
+            "Expand-Archive -Path vim.zip -DestinationPath vim-win32 -Force"
+          exe=$(echo vim-win32/vim/vim*/vim.exe)
+          if [ ! -f "$exe" ]; then
+            echo "::error::The zip holds no vim/vim*/vim.exe; it is laid out differently."
+            exit 1
+          fi
+          echo "VIM_EXE=$(cd "$(dirname "$exe")" && pwd)/vim.exe" >> "$GITHUB_ENV"
+
+      # A Vim that is not a Windows build would run the suite against the
+      # script beside the program, and report a pass for a platform it never
+      # stood on. The one Git for Windows ships is such a Vim.
+      - name: Vim version, and that it is a Windows build
+        run: |
+          set -euo pipefail
+          echo "$VIM_EXE"
+          "$VIM_EXE" --version | head -1
+
+          rm -f probe.txt
+          "$VIM_EXE" -es -u NONE -N \
+            -c 'call writefile([has("win32"), has("win32unix"), v:version], "probe.txt")' \
+            -c 'quit'
+          if [ ! -f probe.txt ]; then
+            echo "::error::Vim wrote no probe; it did not reach the end of the probe."
+            exit 1
+          fi
+          win32=$(sed -n 1p probe.txt)
+          unix=$(sed -n 2p probe.txt)
+          echo "has('win32')=$win32 has('win32unix')=$unix v:version=$(sed -n 3p probe.txt)"
+
+          if [ "$win32" != 1 ]; then
+            echo "::error::This Vim is not a Windows build, so the suite would prove the POSIX path again."
+            exit 1
+          fi
+
+      # The log is written beside the suite rather than in /tmp: Vim here is
+      # a Windows program, which reads /tmp as a directory of the current
+      # drive, while the shell reads it as its own temporary directory.
+      - name: Run tests
+        run: |
+          "$VIM_EXE" -es -u NONE -N -V20vim.log \
+            --cmd 'set rtp+=.,deps/Logger' \
+            -c 'runtime plugin/ghostcode.vim' \
+            -c 'source tests/harness.vim' -c 'quit' || true
+          if [ ! -f tests/results.txt ]; then
+            echo "::error::tests/results.txt was never created - Vim likely failed before finishing. Verbose log follows:"
+            cat vim.log
             exit 1
           fi
           cat tests/results.txt
@@ -278,6 +434,7 @@ jobs:
       - rust
       - windows
       - front-end
+      - front-end-windows
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.tag.outputs.tag }}
@@ -428,12 +585,6 @@ jobs:
 
       # The notes are the commit subjects of this tag, which state the
       # problem each commit fixed, with every `fixes:` trailer linked.
-      - name: Write the release notes
-        id: notes
-        uses: orhun/git-cliff-action@v4.9.1
-        with:
-          args: --latest
-
       # The asset name is the target triple, so the Linux one carries
       # an `unknown` vendor field that no distribution claims and a
       # `gnu` that names glibc without a version. What decides whether
@@ -442,14 +593,12 @@ jobs:
       # read from the asset here, at the only moment every asset of
       # the release is in one place, so the note can never be stale.
       # REFERENCE: https://github.com/Galvarcus/GhostCode/issues/9
-      - name: Write the notes, with the glibc floor of each Linux asset
-        env:
-          CHANGES: ${{ steps.notes.outputs.content }}
+      - name: Write the release notes, with the glibc floor of each asset
         run: |
           set -euo pipefail
 
           notes="$RUNNER_TEMP/notes.md"
-          printf '%s\n' "$CHANGES" > "$notes"
+          tools/release-notes > "$notes"
           shopt -s nullglob
           paths=(dist/bin/*-linux-gnu)
 

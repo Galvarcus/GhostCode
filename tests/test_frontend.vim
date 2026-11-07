@@ -14,8 +14,14 @@ import autoload 'ghostcode.vim' as G
 # one, and -es hides an echo besides. Its history is the only place a
 # test can read the line the user is shown.
 import 'Logger/messages.vim' as LM
+import './skip.vim' as S
 
-const STUB: string = fnamemodify(resolve(expand('<script>')), ':h') .. '/stub/ghostcode'
+# The stub that stands in for the binary. On Windows it is a program
+# compiled from the source beside it, because the front end starts the
+# binary with the list form of systemlist(), which starts a program
+# directly and cannot start a script.
+const STUB: string = fnamemodify(resolve(expand('<script>')), ':h')
+  .. (has('win32') ? '/stub/ghostcode.exe' : '/stub/ghostcode')
 # The file name of the binary on the platform running the suite. The
 # script under test derives this too, and a test that derived it from
 # the same place would prove nothing.
@@ -74,6 +80,15 @@ def Args(): list<string>
   return filereadable(ARGS) ? readfile(ARGS) : []
 enddef
 
+# FUNCTION: Every argument that carries the spaced name the two tests
+# of a root with spaces pass, with the separator folded onto one so that
+# the absolute form Windows builds is read the same way.
+def SpacedArgs(): list<string>
+  return Args()
+    ->mapnew((_, a) => substitute(a, '\\', '/', 'g'))
+    ->filter((_, a) => a =~# '/tmp/a folder/with space$')
+enddef
+
 # FUNCTION: Run the :GhostCode command itself against the stub,
 # rather than the function behind it, so that the command's own
 # argument handling is covered. A command that fails to parse raises
@@ -116,7 +131,12 @@ enddef
 def Test_a_path_is_joined_to_the_root_again(): void
   Scan()
 
-  assert_equal('/project/autoload/m.vim', bufname(getqflist()[0].bufnr))
+  # Vim names a buffer with the separator of the platform, so the name is
+  # folded onto one separator before it is read. What the quickfix list
+  # carries is the name, and either separator reaches the same file.
+  var name = bufname(getqflist()[0].bufnr)->substitute('\\', '/', 'g')
+
+  assert_equal('/project/autoload/m.vim', name)
 enddef
 
 def Test_a_missing_binary_reports_and_does_not_throw(): void
@@ -136,15 +156,21 @@ enddef
 # which file to go and get. On Windows that file is ghostcode.exe, in
 # the directory beside the plugin as much as on $PATH.
 def Test_a_missing_binary_message_names_the_file_it_wants(): void
+  var bundled = fnamemodify(resolve(expand('<script>')), ':h:h') .. $'/{BIN_DIR}/{EXE}'
+
+  # A developer who keeps a binary beside the plugin cannot run this
+  # test: Bin() finds that one and the message under test never comes.
+  # An assertion here aborted the run and wrote no results at all.
+  if executable(bundled) == 1
+    S.Skip('a_missing_binary_message_names_the_file_it_wants',
+      $'a binary is bundled at {bundled}')
+    return
+  endif
+
   # $PATH is emptied, because a machine that develops Ghostcode has
   # the binary on it, and the message under test is the one for a
   # machine that has none.
   var path = $PATH
-  var bundled = fnamemodify(resolve(expand('<script>')), ':h:h') .. $'/{BIN_DIR}/{EXE}'
-
-  # A developer who keeps a binary beside the plugin would otherwise
-  # see both assertions fail without being told why.
-  assert_true(executable(bundled) != 1, $'{bundled} exists')
 
   LM.Clear()
   g:ghostcode_bin = '/nonexistent/ghostcode'
@@ -188,7 +214,11 @@ enddef
 def Test_a_root_with_spaces_is_passed_as_one_argument(): void
   Scan(REPORT, 0, '/tmp/a folder/with space')
 
-  assert_true(index(Args(), '/tmp/a folder/with space') >= 0, join(Args(), '|'))
+  # The root is made absolute before it is passed, which on Windows names
+  # the drive as well and turns the separators around. What is asked is
+  # that the name holding spaces reached the binary whole, as one
+  # argument, rather than split into three.
+  assert_equal(1, len(SpacedArgs()), join(Args(), '|'))
 enddef
 
 # FUNCTION: A trailing separator is dropped from the root, so that
@@ -197,13 +227,18 @@ enddef
 def Test_the_root_directory_is_passed_as_itself(): void
   Scan(REPORT, 0, '/')
 
-  assert_equal('/', get(Args(), -1, ''))
+  # A root directory is its own separator, and Windows names the drive
+  # before it. Dropping that separator would pass no path at all, so what
+  # is asked is that a root arrives as a root.
+  var last = get(Args(), -1, '')
+
+  assert_true(last =~# '^\%(\a:\)\=[\\/]$', last)
 enddef
 
 def Test_the_command_passes_an_escaped_space_as_one_argument(): void
   Command('/tmp/a\ folder/with\ space')
 
-  assert_true(index(Args(), '/tmp/a folder/with space') >= 0, join(Args(), '|'))
+  assert_equal(1, len(SpacedArgs()), join(Args(), '|'))
 enddef
 
 def Test_the_command_scans_the_working_directory_with_no_argument(): void

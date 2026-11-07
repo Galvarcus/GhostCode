@@ -19,6 +19,7 @@ vim9script
 # aborts writes nothing, and a stale file would read as a pass.
 delete('tests/results.txt')
 
+import './skip.vim' as S
 import './test_frontend.vim' as TF
 
 var suites: list<func> = [
@@ -29,9 +30,19 @@ for RunSuite in suites
   RunSuite()
 endfor
 
+# A test that did not run is named above the verdict, so that a reader of
+# the file, and the log of a job that prints it, sees the gap. The verdict
+# keeps its own line, which is what every caller greps for.
+var lines: list<string> = []
+var skipped: list<string> = S.Skipped()
+
+if len(skipped) > 0
+  lines = [$'{len(skipped)} skipped:'] + skipped->mapnew((_, s) => $'  {s}')
+endif
+
 if len(v:errors) > 0
-  writefile(v:errors + [$'{len(v:errors)} assertion(s) failed'], 'tests/results.txt')
+  writefile(lines + v:errors + [$'{len(v:errors)} assertion(s) failed'], 'tests/results.txt')
   cquit 1
 else
-  writefile(['All tests passed'], 'tests/results.txt')
+  writefile(lines + ['All tests passed'], 'tests/results.txt')
 endif
