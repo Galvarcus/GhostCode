@@ -163,3 +163,20 @@ fn an_abbreviated_modifier_leaves_the_command_at_the_head() {
     assert!(one(text, "sil").owned);
     assert!(one(text, "bwipe").owned);
 }
+
+/// A bar ends one command and starts the next, so Vim reads a command
+/// after it as surely as at the head of the line.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+#[test]
+fn a_command_after_a_bar_is_not_a_reference() {
+    let text = "vim9script\ndef F()\n  if g:flag | echo 1 | endif\nenddef\n";
+
+    assert_eq!(count(text, "echo"), 0);
+}
+
+#[test]
+fn a_call_after_a_bar_keeps_its_reference() {
+    let text = "vim9script\nautocmd VimEnter * if g:flag | Fn() | endif\n";
+
+    assert_eq!(count(text, "Fn"), 1);
+}

@@ -656,6 +656,12 @@ const DISCARD: &str = "_";
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 const DICT: &str = "dict";
 
+// What Vim writes between two commands on one line. The lexer keeps a
+// line that opens with one in the statement before it, so a bar stands
+// inside a statement rather than ending it.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+const BAR: &str = "|";
+
 // Vim's scope letters, which stand before a colon and name where a
 // variable lives rather than naming anything the project declares.
 // `a:` is legacy, for a function's arguments, and is here because the
@@ -1414,6 +1420,17 @@ fn heads(stmt: &[Tok]) -> Vec<usize> {
     if let Some(body) = autocmd::body(stmt) {
         at.push(body);
     }
+
+    // A bar ends one command and starts the next, which the lexer
+    // keeps in the statement it opened: `if x | echo 1 | endif` is
+    // three commands on one line.
+    at.extend(
+        stmt.iter()
+            .enumerate()
+            .filter(|(_, tok)| tok.text == BAR)
+            .map(|(i, _)| i + 1)
+            .filter(|next| *next < stmt.len()),
+    );
 
     at
 }
