@@ -22,6 +22,10 @@ What Ghostcode doesn't detect ......... |ghostcode-what-ghostcode-doesnt-detect|
 Development ............................................ |ghostcode-development|
 License .................................................... |ghostcode-license|
 
+
+https://www.vim.org/ https://www.gnu.org/licenses/gpl-3.0.en.html
+https://github.com/Galvarcus/GhostCode/actions/workflows/ci.yml
+
 Ghostcode is an analyzer for unreferenced code in Vim9 script, with Vim plugin
 functionality. It scans a project for functions, methods, classes, fields,
 enum values, and script-level variables, then reports every one that nothing
