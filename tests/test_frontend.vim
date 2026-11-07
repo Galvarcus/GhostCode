@@ -80,6 +80,15 @@ def Args(): list<string>
   return filereadable(ARGS) ? readfile(ARGS) : []
 enddef
 
+# FUNCTION: Every argument that carries the spaced name the two tests
+# of a root with spaces pass, with the separator folded onto one so that
+# the absolute form Windows builds is read the same way.
+def SpacedArgs(): list<string>
+  return Args()
+    ->mapnew((_, a) => substitute(a, '\\', '/', 'g'))
+    ->filter((_, a) => a =~# '/tmp/a folder/with space$')
+enddef
+
 # FUNCTION: Run the :GhostCode command itself against the stub,
 # rather than the function behind it, so that the command's own
 # argument handling is covered. A command that fails to parse raises
@@ -122,7 +131,12 @@ enddef
 def Test_a_path_is_joined_to_the_root_again(): void
   Scan()
 
-  assert_equal('/project/autoload/m.vim', bufname(getqflist()[0].bufnr))
+  # Vim names a buffer with the separator of the platform, so the name is
+  # folded onto one separator before it is read. What the quickfix list
+  # carries is the name, and either separator reaches the same file.
+  var name = bufname(getqflist()[0].bufnr)->substitute('\\', '/', 'g')
+
+  assert_equal('/project/autoload/m.vim', name)
 enddef
 
 def Test_a_missing_binary_reports_and_does_not_throw(): void
@@ -200,7 +214,11 @@ enddef
 def Test_a_root_with_spaces_is_passed_as_one_argument(): void
   Scan(REPORT, 0, '/tmp/a folder/with space')
 
-  assert_true(index(Args(), '/tmp/a folder/with space') >= 0, join(Args(), '|'))
+  # The root is made absolute before it is passed, which on Windows names
+  # the drive as well and turns the separators around. What is asked is
+  # that the name holding spaces reached the binary whole, as one
+  # argument, rather than split into three.
+  assert_equal(1, len(SpacedArgs()), join(Args(), '|'))
 enddef
 
 # FUNCTION: A trailing separator is dropped from the root, so that
@@ -209,13 +227,18 @@ enddef
 def Test_the_root_directory_is_passed_as_itself(): void
   Scan(REPORT, 0, '/')
 
-  assert_equal('/', get(Args(), -1, ''))
+  # A root directory is its own separator, and Windows names the drive
+  # before it. Dropping that separator would pass no path at all, so what
+  # is asked is that a root arrives as a root.
+  var last = get(Args(), -1, '')
+
+  assert_true(last =~# '^\%(\a:\)\=[\\/]$', last)
 enddef
 
 def Test_the_command_passes_an_escaped_space_as_one_argument(): void
   Command('/tmp/a\ folder/with\ space')
 
-  assert_true(index(Args(), '/tmp/a folder/with space') >= 0, join(Args(), '|'))
+  assert_equal(1, len(SpacedArgs()), join(Args(), '|'))
 enddef
 
 def Test_the_command_scans_the_working_directory_with_no_argument(): void
