@@ -63,3 +63,27 @@ fn a_pattern_is_not_a_reference() {
 
     assert_eq!(count(text, "fountain"), 0);
 }
+
+/// The text after the pattern is a command line of its own, so its
+/// first word is where Vim reads a command.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+#[test]
+fn a_command_at_the_head_of_a_body_is_vims() {
+    let text = "vim9script\nautocmd InsertLeave <buffer> set formatoptions-=a\n";
+
+    assert_eq!(count(text, "set"), 0);
+}
+
+#[test]
+fn a_call_in_a_body_keeps_its_reference() {
+    let text = "vim9script\nautocmd BufRead * Fn()\n";
+
+    assert_eq!(count(text, "Fn"), 1);
+}
+
+#[test]
+fn a_variable_read_in_a_body_keeps_its_reference() {
+    let text = "vim9script\nvar flag = 1\nautocmd BufRead * echo flag\n";
+
+    assert_eq!(count(text, "flag"), 1);
+}

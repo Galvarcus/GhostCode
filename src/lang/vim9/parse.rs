@@ -835,13 +835,15 @@ struct Collect<'a> {
 impl Collect<'_> {
     /// METHOD: Read one statement, from the token after its own name.
     fn statement(&mut self, stmt: &[Tok], skip: &[usize]) {
+        let heads = heads(stmt);
+
         for (i, tok) in stmt.iter().enumerate() {
             if skip.contains(&i) {
                 continue;
             }
 
             match tok.kind {
-                TokKind::Ident => self.ident(stmt, i, tok),
+                TokKind::Ident => self.ident(stmt, i, tok, &heads),
                 TokKind::Str => self.text(stmt, i, tok),
                 _ => {}
             }
@@ -850,7 +852,7 @@ impl Collect<'_> {
 
     /// METHOD: Record a name, with its receiver where a dot gives it
     /// one, as in `menu.Open()`, `this.Shut()`, or `Color.Red`.
-    fn ident(&mut self, stmt: &[Tok], i: usize, tok: &Tok) {
+    fn ident(&mut self, stmt: &[Tok], i: usize, tok: &Tok, heads: &[usize]) {
         if KEYWORDS.contains(&tok.text.as_str()) {
             return;
         }
@@ -946,7 +948,8 @@ impl Collect<'_> {
         // spelling still takes the credit, and where none exists the
         // name is not counted as unplaced.
         // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/31
-        let vims = recv.is_none() && in_command(stmt, i) && excmds::canonical(word).is_some();
+        let vims =
+            recv.is_none() && in_command(stmt, i, heads) && excmds::canonical(word).is_some();
 
         if vims && excmds::has(word) {
             return;
@@ -1389,6 +1392,32 @@ fn written(stmt: &[Tok], i: usize) -> bool {
             .is_some_and(|t| WRITES.contains(&t.text.as_str()))
 }
 
+/// FUNCTION: Every index at which Vim reads a command: the statement's
+/// own head, past any modifier, and the command an autocommand runs
+/// after its pattern.
+///
+/// The list is built once for a statement and read for each of its
+/// tokens, because a rule that walked the tokens before every name
+/// would cost the square of the statement's length.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+fn heads(stmt: &[Tok]) -> Vec<usize> {
+    // A modifier stands where Vim reads a command as much as the
+    // command behind it does, so the whole run of them is heads: the
+    // `silent` of `silent echo x` is Vim's own word, not the project's.
+    let first = stmt
+        .iter()
+        .position(|t| t.text != "!" && !modifier(&t.text))
+        .unwrap_or(0);
+
+    let mut at: Vec<usize> = (0..=first).collect();
+
+    if let Some(body) = autocmd::body(stmt) {
+        at.push(body);
+    }
+
+    at
+}
+
 /// FUNCTION: Whether a name stands where Vim reads a command: at the
 /// head of the statement, after nothing but command modifiers.
 ///
@@ -1399,8 +1428,8 @@ fn written(stmt: &[Tok], i: usize) -> bool {
 /// before this, and a project's own function cannot be here at all,
 /// since Vim requires a capital.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-fn in_command(stmt: &[Tok], i: usize) -> bool {
-    if !stmt[..i].iter().all(|t| t.text == "!" || modifier(&t.text)) {
+fn in_command(stmt: &[Tok], i: usize, heads: &[usize]) -> bool {
+    if !heads.contains(&i) {
         return false;
     }
 
