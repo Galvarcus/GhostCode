@@ -1,9 +1,13 @@
 # Ghostcode
+
 <!-- vimdoc-ignore-start -->
+
 [![Vim](https://img.shields.io/badge/vim-9.2%2B-019733)](https://www.vim.org/)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue)](https://www.gnu.org/licenses/gpl-3.0.en.html)
 [![CI](https://github.com/Galvarcus/GhostCode/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Galvarcus/GhostCode/actions/workflows/ci.yml)
+
 <!-- vimdoc-ignore-end -->
+
 Ghostcode is an analyzer for unreferenced code in Vim9 script, with
 Vim plugin functionality. It scans a project for functions, methods,
 classes, fields, enum values, and script-level variables, then reports
@@ -11,7 +15,9 @@ every one that nothing in the project ever calls or reads.
 
 The analyzer is a command line program. The Vim plugin runs it and puts
 the findings in the quickfix list.
+
 <!-- vimdoc-ignore-start -->
+
 ## Requirements
 
 - The `ghostcode` binary, for Linux, macOS, or Windows. See
@@ -85,6 +91,7 @@ then in a `bin/` directory of its own. Create that directory and put a
 release asset in it, named `ghostcode`, or `ghostcode.exe` on Windows,
 to keep the binary beside the plugin. When the plugin finds no binary,
 it says so through Logger and names each place it looked.
+
 <!-- vimdoc-ignore-end -->
 
 ## Usage
@@ -283,7 +290,9 @@ scan one anyway.
 
 Ghostcode is conservative by design: anything it can't prove is
 unreferenced is left alone rather than reported.
+
 <!-- vimdoc-ignore-start -->
+
 ## Development
 
 Run every check with Logger reachable:
@@ -325,6 +334,7 @@ above the verdict. Read those names: a skip is a test that did not run.
 
 `doc/ghostcode.txt` is generated from this README by
 `.github/workflows/ci.yml`. Edit the README, not the help file.
+
 <!-- vimdoc-ignore-end -->
 
 ## License
