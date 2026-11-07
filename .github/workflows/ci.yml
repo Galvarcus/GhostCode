@@ -593,7 +593,12 @@ jobs:
       # read from the asset here, at the only moment every asset of
       # the release is in one place, so the note can never be stale.
       # REFERENCE: https://github.com/Galvarcus/GhostCode/issues/9
+      # The notes name an issue by its title, which the script reads with
+      # gh. A runner has no token of its own, and without one every line
+      # would fall back to the newest commit subject of that issue.
       - name: Write the release notes, with the glibc floor of each asset
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
