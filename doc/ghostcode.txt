@@ -5,4 +5,242 @@
 
                                        Type |gO| to see the table of contents.
 
+Usage ........................................................ |ghostcode-usage|
+  In Vim .................................................... |ghostcode-in-vim|
+  In CI ...................................................... |ghostcode-in-ci|
+Settings .................................................. |ghostcode-settings|
+  ghostcode.toml .................................... |ghostcode-ghostcode.toml|
+  Command line ........................................ |ghostcode-command-line|
+  Vim .......................................................... |ghostcode-vim|
+What Ghostcode scans .......................... |ghostcode-what-ghostcode-scans|
+What Ghostcode detects ...................... |ghostcode-what-ghostcode-detects|
+What Ghostcode doesn't detect ......... |ghostcode-what-ghostcode-doesnt-detect|
+License .................................................... |ghostcode-license|
+
+
+Ghostcode is an analyzer for unreferenced code in Vim9 script, with Vim plugin
+functionality. It scans a project for functions, methods, classes, fields,
+enum values, and script-level variables, then reports every one that nothing
+in the project ever calls or reads.
+
+The analyzer is a command line program. The Vim plugin runs it and puts the
+findings in the quickfix list.
+
+==============================================================================
+Usage                                                          *ghostcode-usage*
+
+>bash
+    ghostcode [path]
+<
+`path` is the root of the project to scan. It defaults to the working
+directory. The report goes to standard output as JSON:
+
+>json
+    {
+      "schema": 1,
+      "root": "/path/to/project",
+      "summary": { "symbols": 412, "ghost": 1, "local": 0, "unplaced_names": 7 },
+      "findings": [
+        {
+          "class": "ghost",
+          "kind": "function",
+          "name": "AddSeparator",
+          "file": "autoload/util.vim",
+          "line": 15,
+          "col": 1,
+          "lang": "vim9"
+        }
+      ]
+    }
+<
+`--format=text` prints one line per finding instead:
+
+>text
+    autoload/util.vim:15:1:[ghost] function AddSeparator
+<
+`schema` states the shape of the JSON. It rises when a change would break a
+reader, so a front end that meets a number it does not know can say so rather
+than guess. The counts in `summary` are diagnostics rather than contract:
+nothing is derived from them, and one may be renamed without the schema
+rising.
+
+------------------------------------------------------------------------------
+In Vim                                                        *ghostcode-in-vim*
+
+Ghostcode adds one command:
+
+>vim
+    :GhostCode [path]
+<
+It puts the findings in the quickfix list, opens the list when it finds any,
+and shows a summary through Logger:
+
+>text
+    Ghostcode - ghostcode.vim - Report: 23 symbols, 7 ghost
+<
+Each entry names the kind of symbol, its name, its file, and its line:
+
+>text
+    autoload/util.vim|16 col 1| [ghost] function TrulyDeadFunction
+    autoload/util.vim|37 col 1| [ghost] method DeadMethod
+    autoload/util.vim|58 col 1| [ghost] variable g_never_read
+<
+Logger reads its options for Ghostcode from variables named
+`g:logger_ghostcode_<option>`. See the Logger README for each option.
+
+------------------------------------------------------------------------------
+In CI                                                          *ghostcode-in-ci*
+
+Run the binary and fail the build on any finding:
+
+>bash
+    ghostcode --format=text . | tee findings.txt
+    test ! -s findings.txt
+<
+
+==============================================================================
+Settings                                                    *ghostcode-settings*
+
+------------------------------------------------------------------------------
+`ghostcode.toml`                                      *ghostcode-ghostcode.toml*
+
+A project states its own settings in `ghostcode.toml`, in its root:
+
+>toml
+    # Whether an exported symbol is public API, so that nothing reports it.
+    exports_are_api = false
+
+    # Paths to leave out, beyond the ones git ignores.
+    ignore = ["deps/**", "vendor/**"]
+
+    # Files that are entry points, whose top-level code needs no caller.
+    entry = ["tools/build.vim"]
+
+    # The finding classes to report beyond the ghosts.
+    [findings]
+    locals = true
+<
+`exports_are_api` is true by default. Ghostcode then treats an exported symbol
+as public API and never reports it. Vim9 cannot export a method or a field by
+itself, so every method and field of an exported class counts as exported too,
+unless its name starts with an underscore.
+
+Set it to false for a plugin whose exports serve only its own files, as in an
+application. Ghostcode then reports an export that nothing in the project
+uses, like any other symbol.
+
+`findings.locals` is false by default. Set it to true to report a `var` or a
+`const` of a function body that nothing in that body reads. An assignment is
+not a read, so a local the code only writes is reported too. A parameter and a
+`for` variable are left alone.
+
+The finding reads `[local]` rather than `[ghost]`, so a build that counts the
+ghosts counts none of these.
+
+------------------------------------------------------------------------------
+Command line                                            *ghostcode-command-line*
+
+A flag overrides the file:
+
+    Flag                               Effect ~
+
+    `--format=json`, `--format=text`   The output form. JSON is the
+                                       default.
+
+    `--exports-are-api true`,          Override `exports_are_api`.
+    `--exports-are-api false`          
+
+    `--no-ignore`                      Read every file, including the
+                                       ones git ignores.
+
+    `--locals true`, `--locals false`  Override `findings.locals`.
+
+------------------------------------------------------------------------------
+Vim                                                              *ghostcode-vim*
+
+    Variable                           Effect ~
+
+    `g:ghostcode_bin`                  The binary to run, for a copy that
+                                       is neither on `$PATH` nor in the
+                                       plugin's `bin/` directory.
+
+    `g:ghostcode_exports_are_api`      Override `exports_are_api`. The
+                                       plugin passes the flag only when
+                                       you set this, so that a project's
+                                       `ghostcode.toml` governs where you
+                                       do not.
+
+    `g:ghostcode_locals`               Override `findings.locals`. Passed
+                                       on the same terms.
+
+==============================================================================
+What Ghostcode scans                            *ghostcode-what-ghostcode-scans*
+
+Ghostcode reads the files git does not ignore, whether git tracks them or not,
+and `--no-ignore` turns the exclusions off. Outside a repository nothing is
+ignored and every file is read. It stops at the project root and follows no
+symlink out of it, because a finding outside the root is one you cannot act
+on. It skips hidden directories, as Vim's own `globpath` does; name a file in
+`entry` to scan one anyway.
+
+==============================================================================
+What Ghostcode detects                        *ghostcode-what-ghostcode-detects*
+
+- `def` and `export def`
+- `class` and `export class`, including `extends` and `implements`
+- `enum` and `export enum`, and enum values (`Color.Red`)
+- `interface` and `export interface` declarations
+- class methods, static methods, and fields
+- module-level script variables and class fields
+- a `var` or a `const` of a function body that nothing in that body reads,
+  where you ask for the class, see Settings
+- type annotations (`var x: Foo`, `def F(): Foo`, `list<Foo>`)
+- direct calls (`Foo()`), method calls (`Foo.Bar()`, `this.Method()`), and
+  calls through a locally-typed variable or parameter, including a two-level
+  field-then-method chain on `this` (`this.field.Method()`)
+- a method called directly on a constructor result (`Foo.new(args).Bar()`)
+- bare funcref and value usage of a known symbol (`var Ref = Foo`,
+  `timer_start(1000, Foo)`, `{callback: Foo}`)
+- names inside string interpolation (`$'see {LABEL} here'`)
+- `call()`, `function()`, `execute()`, and `exists()`, where the target is a
+  string literal or bare identifier
+- a name that any other string holds, where the project declares a symbol of
+  that name, because Vim evaluates text in places a parser cannot see: the
+  right-hand side of a mapping, a `feedkeys` sequence, a substitution opening
+  with `\=`
+- every `import` form: relative paths, `import autoload`, and named imports
+  (`import {Foo} from '...'`)
+- exported symbols, treated as public API and never reported as dead unless
+  you turn that off, see Settings
+- the classic `plugin#Function()` autoload calling convention
+- top-level code in scripts that Vim sources directly (`plugin/`, `ftplugin/`,
+  `ftdetect/`, `syntax/`, `indent/`, `compiler/`, `colors/`, `keymap/`,
+  `lang/`, and their `after/` copies) and in `tests/`, all treated as entry
+  points that need no call site
+
+==============================================================================
+What Ghostcode doesn't detect           *ghostcode-what-ghostcode-doesnt-detect*
+
+- a parameter or a `for` variable that nothing reads. Only a `var` or a
+  `const` of a function body is reported, and only where you ask for the
+  class: a parameter is part of a signature that a caller outside the project
+  may hold to
+- dynamic dispatch built from string concatenation, computed indices, or
+  anything else that isn't a literal identifier or string
+- method calls on a variable with no declared or inferable type. When a
+  variable's type can't be determined, Ghostcode falls back to finding a
+  same-name match across the project. When several symbols share the name, it
+  counts every one of them as used
+- a script variable or a field that the code only writes and never reads. A
+  write counts as a use there. Inside a function body it does not, so a local
+  the code only assigns to is reported with the other locals
+
+Ghostcode is conservative by design: anything it can't prove is unreferenced
+is left alone rather than reported.
+
+==============================================================================
+License                                                      *ghostcode-license*
+
+GNU GPL 3.0
+
  vim:tw=78:sw=4:ts=4:ft=help:norl:et:
