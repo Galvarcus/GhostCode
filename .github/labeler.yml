@@ -1,0 +1,53 @@
+# The label of a pull request names the part of the project that the
+# pull request changes, in the words that the release page uses. The
+# sections of tools/release-notes and the labels here are one
+# vocabulary, so a merged pull request reads the same in both places,
+# and a change to one table needs the same change in the other.
+#
+# A pull request that reaches two parts takes two labels. The release
+# page counts such a commit once, under the first section that matches
+# it, because a line there states one issue. A label states a fact
+# about the files, and two facts can hold at once. Four paths hold two
+# facts now: tools/vim-tables and tools/fixture-json.py are tools of
+# the analyzer as well as tooling, and the Markdown inside a part,
+# such as tests/fixtures/README.md, is documentation as well.
+#
+# A path that starts with a dot needs no rule of its own, because the
+# action sets `dot` to true.
+
+analyzer:
+- changed-files:
+  - any-glob-to-any-file:
+    - src/**
+    - tests/*.rs
+    - tests/common/**
+    - tests/fixtures/**
+    - tools/fixture-*
+    - tools/vim-tables
+    - ghostcode.toml
+
+front end:
+- changed-files:
+  - any-glob-to-any-file:
+    - plugin/**
+    - autoload/**
+    - import/**
+    - tests/*.vim
+    - tests/stub/**
+
+ci and release:
+- changed-files:
+  - any-glob-to-any-file:
+    - .github/**
+    - tools/**
+    - Cargo.toml
+    - Cargo.lock
+    - .gitignore
+
+documentation:
+- changed-files:
+  - any-glob-to-any-file:
+    - doc/**
+    - docs/**
+    - '*.md'
+    - '**/*.md'

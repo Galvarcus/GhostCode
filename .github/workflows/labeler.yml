@@ -1,0 +1,33 @@
+name: Labeler
+
+# Every pull request takes the labels of the parts of the project that
+# it changes, named in .github/labeler.yml, so that a list of pull
+# requests reads as the release page does.
+#
+# The event is pull_request_target, because a pull request from a fork
+# carries a read-only token under pull_request and could not label
+# itself. That token is safe here: the action reads the configuration
+# of the base branch through the API, and never checks out, builds, or
+# runs the code of the pull request.
+on:
+  pull_request_target:
+permissions:
+  contents: read
+concurrency:
+  group: labeler-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  label:
+    name: Label
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      # A pull request that stops changing a part loses the label of
+      # that part, so a label states what the files hold now rather
+      # than what the branch held at any time.
+      - name: Apply the labels of the changed paths
+        uses: actions/labeler@v7.0.0
+        with:
+          sync-labels: true
