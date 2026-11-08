@@ -1,8 +1,9 @@
 # The label of a pull request names the part of the project that the
 # pull request changes, in the words that the release page uses. The
-# sections of tools/release-notes and the labels here are one
-# vocabulary, so a merged pull request reads the same in both places,
-# and a change to one table needs the same change in the other.
+# labels here, the categories of .github/release.yml, and the AREAS
+# table of tools/release-notes are one vocabulary, so a merged pull
+# request reads the same in every place, and a change to one table
+# needs the same change in the other two.
 #
 # A pull request that reaches two parts takes two labels. The release
 # page counts such a commit once, under the first section that matches
