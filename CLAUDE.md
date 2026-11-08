@@ -60,6 +60,15 @@ build.
 `fixes:` names the issue a commit closes and `related:` names one that
 bears on it. Align the values and end them without a period.
 
+## Branches
+
+Work on `Development`. The author merges it into `main` through a pull
+request, so `main` takes no commit of its own. Branch protection
+refuses a force-push and a deletion on both, so every correction goes
+forward as a new commit. A merge can leave the local checkout on
+`main`, so read the branch with `git branch --show-current` before the
+first commit of a session.
+
 ## Commits
 
 A commit message states the problem the commit fixes, in the format
