@@ -27,7 +27,16 @@ build.
   `autoload/ghostcode/log.vim`; in Rust it comes from `NAME` in
   `src/lib.rs`.
 - Do not edit `doc/ghostcode.txt`. It is generated from `README.md` by
-  `.github/workflows/ci.yml` on a push to `main`.
+  `.github/workflows/ci.yml` on a push to `main`. The job runs
+  `doc/vimdoc-filter.lua`, which drops every image and everything
+  between a `<!-- vimdoc-ignore-start -->` marker and the matching
+  `<!-- vimdoc-ignore-end -->`. Content that suits the project page
+  but not a help file, such as the badges, the Requirements section
+  and the Development section, therefore stays in the README and
+  reaches no help file. A marker stands alone on its line, with a
+  blank line on each side, because the filter reads it as an HTML
+  block of its own. A start marker with no end marker drops the rest
+  of the README.
 - Do not edit `src/lang/vim9/builtins.rs`, `src/lang/vim9/excmds.rs`
   or `src/lang/vim9/events.rs`. They hold the names of Vim's own
   functions, of its own commands with the prefix each one accepts, and
