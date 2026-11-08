@@ -1,0 +1,63 @@
+# The categories of the notes that GitHub writes for a release cut by
+# hand, through the "Generate release notes" button. The pipeline
+# never reads this file: a tag takes the body of its release from
+# tools/release-notes, which names an issue once rather than naming
+# every pull request against it. This file exists so that a release
+# cut by hand is grouped as the release page is.
+#
+# Each category names a label that .github/labeler.yml applies. A
+# label added there needs a category here, and a label removed there
+# needs the category removed, or a pull request carrying it falls to
+# Other changes. The three tables, here, in labeler.yml, and in the
+# AREAS table of tools/release-notes, are one vocabulary.
+#
+# GitHub does not state whether a pull request that matches two
+# categories appears twice, and labeler.yml gives four paths two
+# labels. Each category therefore excludes the labels of the
+# categories above it, which settles the order of precedence here
+# rather than leaving it to the generator. The order is the order of
+# the release page, and the catchall stands last, because a category
+# of `*` would otherwise take a pull request that a named category
+# claims.
+#
+# The release page opens with Fixes, which has no category here: a
+# label cannot say which issue a pull request closed.
+
+changelog:
+  exclude:
+    labels:
+      - duplicate
+      - invalid
+      - wontfix
+  categories:
+    - title: Analyzer
+      labels:
+        - analyzer
+    - title: Front end
+      labels:
+        - front end
+      exclude:
+        labels:
+          - analyzer
+    - title: CI and release
+      labels:
+        - ci and release
+      exclude:
+        labels:
+          - analyzer
+          - front end
+          - dependencies
+    - title: Documentation
+      labels:
+        - documentation
+      exclude:
+        labels:
+          - analyzer
+          - front end
+          - ci and release
+    - title: Dependencies
+      labels:
+        - dependencies
+    - title: Other changes
+      labels:
+        - '*'
