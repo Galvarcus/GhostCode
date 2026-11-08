@@ -3,12 +3,12 @@ name: CI
 # One pipeline for every event, with each job running only for the
 # events that concern it:
 #
-#   pull request      the three checks
-#   push to main      the three checks, then Vimdoc
-#   version tag      the three checks, then the release jobs
+#   pull request     the four checks
+#   push to main     the four checks, then Vimdoc
+#   version tag      the four checks, then the release jobs
 #
-# The three checks are the Analyzer, the Analyzer on Windows, and the
-# Front end.
+# The four checks are the Analyzer, the Analyzer on Windows, the Front
+# end, and the Front end on Windows.
 #
 # A tag therefore cannot ship a binary whose suite never ran: the
 # builds wait for the checks of the same run. The workflow this
