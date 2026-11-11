@@ -640,7 +640,7 @@ jobs:
           cat "$notes"
 
       - name: Attach the assets and the notes
-        uses: softprops/action-gh-release@v3.0.3
+        uses: softprops/action-gh-release@v3.0.4
         with:
           tag_name: ${{ needs.gate.outputs.tag }}
           body_path: ${{ runner.temp }}/notes.md
