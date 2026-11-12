@@ -31,12 +31,20 @@ const BIN_DIR: string = 'bin'
 const SETTING_BIN: string = 'ghostcode_bin'
 const SETTING_API: string = 'ghostcode_exports_are_api'
 const SETTING_LOCALS: string = 'ghostcode_locals'
+const SETTING_GLOBALS: string = 'ghostcode_globals'
+const SETTING_BUFFER_VARS: string = 'ghostcode_buffer_vars'
+const SETTING_WINDOW_VARS: string = 'ghostcode_window_vars'
+const SETTING_TAB_VARS: string = 'ghostcode_tab_vars'
 const FLAG_FORMAT: string = '--format=json'
 # The patch where system() and systemlist() began to take the command
 # as a list. This plugin supports Vim 9.1, which has no such form.
 const PATCH_ARGV: string = 'patch-9.2.0250'
 const FLAG_API: string = '--exports-are-api'
 const FLAG_LOCALS: string = '--locals'
+const FLAG_GLOBALS: string = '--globals'
+const FLAG_BUFFER_VARS: string = '--buffer-vars'
+const FLAG_WINDOW_VARS: string = '--window-vars'
+const FLAG_TAB_VARS: string = '--tab-vars'
 
 const MSG_NO_BIN: string = 'no %s found. Looked at g:%s, then $PATH, then %s. Install it from the project''s releases, or build it with `cargo install %s`.'
 const MSG_FAILED: string = '%s failed (status %d): %s'
@@ -44,6 +52,7 @@ const MSG_NOT_JSON: string = '%s did not report JSON: %s'
 const MSG_SCHEMA: string = '%s reports schema %d, and this plugin reads %d. Update the plugin.'
 const MSG_SUMMARY: string = '%d symbols, %d ghost'
 const MSG_SKIPPED: string = '%s skipped, %s'
+const MSG_NOTE: string = '%s:%d reads every %s variable, so none is reported'
 
 # FUNCTION: Scan path, or the working directory, and put every finding
 # in the quickfix list.
@@ -129,6 +138,10 @@ def Cmd(bin: string, root: string): list<string>
 
   AddSetting(cmd, SETTING_API, FLAG_API)
   AddSetting(cmd, SETTING_LOCALS, FLAG_LOCALS)
+  AddSetting(cmd, SETTING_GLOBALS, FLAG_GLOBALS)
+  AddSetting(cmd, SETTING_BUFFER_VARS, FLAG_BUFFER_VARS)
+  AddSetting(cmd, SETTING_WINDOW_VARS, FLAG_WINDOW_VARS)
+  AddSetting(cmd, SETTING_TAB_VARS, FLAG_TAB_VARS)
   add(cmd, root)
 
   return cmd
@@ -206,6 +219,13 @@ def Report(root: string, report: dict<any>): void
   # only that file uses then looks unreferenced.
   for skip in get(report, 'skipped', [])
     log.Warn(printf(MSG_SKIPPED, skip.file, skip.why))
+  endfor
+
+  # A line that reads a whole scope turns the finding off for that
+  # scope. The user asked for it, so an empty list must say why.
+  # REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
+  for note in get(report, 'notes', [])
+    log.Warn(printf(MSG_NOTE, note.file, note.line, note.scope))
   endfor
 
   var sum = get(report, 'summary', {})

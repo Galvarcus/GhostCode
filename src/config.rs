@@ -18,6 +18,15 @@ const FILE: &str = "ghostcode.toml";
 pub struct FindingFlags {
     pub write_only: bool,
     pub locals: bool,
+
+    /// One for each scope whose variables every file shares. A scope
+    /// is asked for by itself, because a project may want its settings
+    /// checked and not the state it keeps on a buffer.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
+    pub globals: bool,
+    pub buffer_vars: bool,
+    pub window_vars: bool,
+    pub tab_vars: bool,
 }
 
 /// What ghostcode.toml holds. Its defaults are the program's defaults,
@@ -28,6 +37,7 @@ struct FileCfg {
     exports_are_api: bool,
     ignore: Vec<String>,
     entry: Vec<PathBuf>,
+    external: Vec<String>,
     findings: FindingFlags,
 }
 
@@ -37,6 +47,7 @@ impl Default for FileCfg {
             exports_are_api: true,
             ignore: Vec::new(),
             entry: Vec::new(),
+            external: Vec::new(),
             findings: FindingFlags::default(),
         }
     }
@@ -47,6 +58,12 @@ pub struct Config {
     pub exports_are_api: bool,
     pub ignore: Vec<String>,
     pub entry: Vec<PathBuf>,
+
+    /// The variables the project writes for a reader outside it, each
+    /// by its full spelling, where `*` stands for any run of
+    /// characters: `g:tlinks_*`. One listed here is never reported.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
+    pub external: Vec<String>,
     pub no_ignore: bool,
     pub findings: FindingFlags,
 }
@@ -76,10 +93,21 @@ impl Config {
             exports_are_api: args.exports_are_api.unwrap_or(file.exports_are_api),
             ignore: file.ignore,
             entry: file.entry,
+            external: file.external,
             no_ignore: args.no_ignore,
             findings: FindingFlags {
                 write_only: args.findings.write_only.unwrap_or(file.findings.write_only),
                 locals: args.findings.locals.unwrap_or(file.findings.locals),
+                globals: args.findings.globals.unwrap_or(file.findings.globals),
+                buffer_vars: args
+                    .findings
+                    .buffer_vars
+                    .unwrap_or(file.findings.buffer_vars),
+                window_vars: args
+                    .findings
+                    .window_vars
+                    .unwrap_or(file.findings.window_vars),
+                tab_vars: args.findings.tab_vars.unwrap_or(file.findings.tab_vars),
             },
         })
     }

@@ -71,6 +71,19 @@ pub struct Dropped {
     pub why: &'static str,
 }
 
+/// A line that reads every variable of one scope, so that none of
+/// them is reported. It is said and not passed over: the user asked
+/// for the findings of that scope, and a report with none would read
+/// as a clean project.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Note {
+    pub file: PathBuf,
+    pub line: u32,
+    /// The scope, as the source spells it: `g:`.
+    pub scope: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Report {
     pub schema: u32,
@@ -78,6 +91,7 @@ pub struct Report {
     pub summary: Summary,
     pub findings: Vec<Finding>,
     pub skipped: Vec<Dropped>,
+    pub notes: Vec<Note>,
 }
 
 /// FUNCTION: One run, from a root to a report: discover the files,
@@ -133,6 +147,7 @@ pub fn analyze(root: &Path, cfg: &Config) -> anyhow::Result<Report> {
 
     let blind = unplaced_names_by_file(&a, &resolved);
     let mut report = build(root, &a, &reached, &blind, resolved.unplaced, cfg);
+    report.notes = notes(&a, &reached, cfg);
 
     report.skipped = found
         .skipped
@@ -331,7 +346,42 @@ pub fn build(
         },
         findings,
         skipped: Vec::new(),
+        notes: Vec::new(),
     }
+}
+
+/// FUNCTION: The first line that reads each scope whole, where the
+/// run asked for the findings of that scope.
+///
+/// Only a line the walk reached. A read in code nothing reaches
+/// credits nothing, so the variables of its scope are still reported,
+/// and a note there would say otherwise.
+fn notes(a: &Analysis, reached: &HashSet<SymbolId>, cfg: &Config) -> Vec<Note> {
+    let runs = |f: &crate::model::Fit| match &f.origin {
+        Some(origin) => reached.contains(origin),
+        None => reached.contains(&SymbolId::script(&f.file)),
+    };
+
+    let mut whole: Vec<&crate::model::Fit> = a
+        .fits
+        .iter()
+        .filter(|f| f.whole && runs(f))
+        .filter(|f| lang::for_path(&f.file).is_some_and(|l| l.shared_on(&f.head, cfg)))
+        .collect();
+
+    whole.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
+
+    let mut seen: HashSet<&str> = HashSet::new();
+
+    whole
+        .into_iter()
+        .filter(|f| seen.insert(f.head.as_str()))
+        .map(|f| Note {
+            file: f.file.clone(),
+            line: f.line,
+            scope: f.head.clone(),
+        })
+        .collect()
 }
 
 /// FUNCTION: Which class a symbol is reported as, or none when it is
@@ -350,10 +400,15 @@ fn classify(
     blind: &HashSet<(&Path, &str)>,
     cfg: &Config,
 ) -> Option<Class> {
-    // A symbol that belongs to no file is reported by no rule yet.
+    // A symbol that belongs to no file is a variable every file
+    // shares. It is reported where the run asked for its scope and
+    // nothing reached it. No file exports one, so the API rule has
+    // nothing to say about it.
     // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
     if sym.id.is_shared() {
-        return None;
+        let asked = lang::for_path(&sym.file).is_some_and(|l| l.shared_on(&sym.name, cfg));
+
+        return (asked && !reached.contains(&sym.id)).then_some(Class::Ghost);
     }
 
     if let Some(body) = &sym.scope {

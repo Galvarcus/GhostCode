@@ -52,4 +52,8 @@ impl Lang for Vim9 {
     fn is_api(&self, sym: &Symbol, cfg: &Config) -> bool {
         rules::is_api(sym, cfg)
     }
+
+    fn shared_on(&self, name: &str, cfg: &Config) -> bool {
+        rules::shared_on(name, cfg)
+    }
 }

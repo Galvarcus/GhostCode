@@ -51,3 +51,76 @@ pub fn is_entry(file: &Path) -> bool {
 pub fn is_api(sym: &Symbol, cfg: &Config) -> bool {
     cfg.exports_are_api && sym.exported
 }
+
+// What stands for any run of characters in a pattern of names.
+const ANY: char = '*';
+
+/// FUNCTION: Whether the run asked for findings on the scoped
+/// variable a spelling names, as `g:width`, or on the scope it opens
+/// with, as `g:`.
+///
+/// Each scope has a flag of its own. A name the project lists as
+/// written for a reader outside it is never reported, whatever the
+/// flag says.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
+pub fn shared_on(name: &str, cfg: &Config) -> bool {
+    let on = match name.chars().next() {
+        Some('g') => cfg.findings.globals,
+        Some('b') => cfg.findings.buffer_vars,
+        Some('w') => cfg.findings.window_vars,
+        Some('t') => cfg.findings.tab_vars,
+        _ => false,
+    };
+
+    on && !cfg.external.iter().any(|pat| fits(pat, name))
+}
+
+/// FUNCTION: Whether a name fits a pattern in which `*` stands for
+/// any run of characters, and every other character for itself.
+pub fn fits(pat: &str, name: &str) -> bool {
+    let mut parts = pat.split(ANY);
+    let first = parts.next().unwrap_or_default();
+
+    let Some(mut rest) = name.strip_prefix(first) else {
+        return false;
+    };
+
+    let mut last = None;
+
+    for part in parts {
+        if let Some(prev) = last.replace(part) {
+            let Some(at) = rest.find(prev) else {
+                return false;
+            };
+            rest = &rest[at + prev.len()..];
+        }
+    }
+
+    match last {
+        Some(end) => rest.ends_with(end),
+        None => rest.is_empty(),
+    }
+}
+
+#[cfg(test)]
+mod shared_tests {
+    use super::fits;
+
+    #[test]
+    fn a_star_fits_any_run_of_characters() {
+        assert!(fits("g:tlinks_*", "g:tlinks_items"));
+        assert!(fits("g:tlinks_*", "g:tlinks_"));
+        assert!(fits("g:*_items", "g:tlinks_items"));
+        assert!(fits("g:*link*items", "g:tlinks_items"));
+        assert!(!fits("g:tlinks_*", "g:other_items"));
+        assert!(!fits("g:*_items", "g:tlinks_item"));
+        assert!(!fits("g:*aa*a", "g:aa"));
+    }
+
+    #[test]
+    fn a_pattern_with_no_star_fits_only_itself() {
+        assert!(fits("g:colors", "g:colors"));
+        assert!(!fits("g:colors", "g:colors_name"));
+        assert!(!fits("g:colors_name", "g:colors"));
+    }
+}

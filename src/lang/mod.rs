@@ -35,6 +35,15 @@ pub trait Lang: Sync {
     /// METHOD: True when this symbol counts as public API, so that it
     /// is never reported.
     fn is_api(&self, sym: &Symbol, cfg: &Config) -> bool;
+
+    /// METHOD: True when the run asked for findings on the symbols
+    /// that belong to no file and that this spelling names. The
+    /// spelling is a symbol's name, or the start that a group of them
+    /// shares. A language with no such symbol answers false.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
+    fn shared_on(&self, _name: &str, _cfg: &Config) -> bool {
+        false
+    }
 }
 
 /// FUNCTION: The language that claims a file, by its extension.

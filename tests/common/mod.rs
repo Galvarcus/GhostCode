@@ -103,10 +103,19 @@ pub fn source(rel: &str, text: &str) -> ghostcode::project::Source {
 pub fn cfg_with_locals(exports_are_api: bool) -> ghostcode::config::Config {
     ghostcode::config::Config {
         findings: ghostcode::config::FindingFlags {
-            write_only: false,
             locals: true,
+            ..ghostcode::config::FindingFlags::default()
         },
         ..cfg(exports_are_api)
+    }
+}
+
+/// FUNCTION: The settings a test needs, strict, with the given
+/// finding classes turned on.
+pub fn cfg_with(findings: ghostcode::config::FindingFlags) -> ghostcode::config::Config {
+    ghostcode::config::Config {
+        findings,
+        ..cfg(false)
     }
 }
 
@@ -117,6 +126,7 @@ pub fn cfg(exports_are_api: bool) -> ghostcode::config::Config {
         exports_are_api,
         ignore: Vec::new(),
         entry: Vec::new(),
+        external: Vec::new(),
         no_ignore: false,
         findings: ghostcode::config::FindingFlags::default(),
     }
