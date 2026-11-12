@@ -205,6 +205,35 @@ def Test_output_that_is_not_json_does_not_throw(): void
   assert_equal([], getqflist())
 enddef
 
+# FUNCTION: A binary that prints nothing hands the front end an empty
+# String where it expects a list, and the failure still has to reach
+# Logger and not the user as a thrown error.
+# REFERENCE: https://github.com/Galvarcus/GhostCode/issues/46
+def Test_a_binary_that_prints_nothing_does_not_throw(): void
+  LM.Clear()
+  Scan('')
+
+  var said = LM.History()->mapnew((_, m) => join(m.lines, ' '))->join(' ')
+
+  assert_equal([], getqflist())
+  assert_true(said =~# 'did not report JSON', said)
+  LM.Clear()
+enddef
+
+# FUNCTION: The branch that reports a failed binary joins the output
+# as well, so it meets the same empty String.
+# REFERENCE: https://github.com/Galvarcus/GhostCode/issues/46
+def Test_a_binary_that_fails_and_prints_nothing_does_not_throw(): void
+  LM.Clear()
+  Scan('', 2)
+
+  var said = LM.History()->mapnew((_, m) => join(m.lines, ' '))->join(' ')
+
+  assert_equal([], getqflist())
+  assert_true(said =~# 'failed (status 2)', said)
+  LM.Clear()
+enddef
+
 def Test_an_unknown_schema_stops_rather_than_guessing(): void
   Scan('{"schema": 99, "findings": []}')
 
@@ -354,6 +383,8 @@ export def RunAll(): void
   Test_a_missing_binary_message_names_the_file_it_wants()
   Test_a_non_zero_exit_leaves_the_list_alone()
   Test_output_that_is_not_json_does_not_throw()
+  Test_a_binary_that_prints_nothing_does_not_throw()
+  Test_a_binary_that_fails_and_prints_nothing_does_not_throw()
   Test_an_unknown_schema_stops_rather_than_guessing()
   Test_a_root_with_spaces_is_passed_as_one_argument()
   Test_the_root_directory_is_passed_as_itself()
