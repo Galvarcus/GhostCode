@@ -179,3 +179,84 @@ fn a_variable_of_another_body_is_still_a_reference() {
 
     assert_eq!(count(text, "row"), 2);
 }
+
+/// A lambda written as a block ends where its brace closes, which is
+/// several statements on: a declaring word inside the block starts a
+/// statement of its own. Its parameters are bound until that brace.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+#[test]
+fn a_parameter_of_a_block_lambda_is_not_a_reference_in_its_body() {
+    let text = "vim9script\ndef F(xs: list<string>)\n  echo xs->mapnew((_, row) => {\n    var s = row\n    return s .. row\n  })\nenddef\n";
+
+    assert_eq!(count(text, "row"), 0);
+}
+
+#[test]
+fn a_parameter_of_a_block_lambda_hides_nothing_after_the_block() {
+    let text = "vim9script\ndef F(xs: list<string>)\n  echo xs->mapnew((_, Fmt) => {\n    return Fmt\n  })\n  Fmt()\nenddef\n";
+
+    assert_eq!(count(text, "Fmt"), 1);
+}
+
+#[test]
+fn a_parameter_of_an_outer_block_lambda_outlives_an_inner_block() {
+    let text = "vim9script\ndef F()\n  Pick((choice) => {\n    Pick((action) => {\n      return action\n    })\n    return choice\n  })\nenddef\n";
+
+    assert_eq!(count(text, "choice"), 0);
+    assert_eq!(count(text, "action"), 0);
+}
+
+/// A brace a broken line never closes must not bind the name for the
+/// rest of the file, where it would cost a project symbol its credit.
+#[test]
+fn a_block_lambda_left_open_ends_with_the_body_around_it() {
+    let text = "vim9script\ndef F()\n  Pick((Fmt) => {\n    return Fmt\nenddef\ndef G()\n  Fmt()\nenddef\n";
+
+    assert_eq!(count(text, "Fmt"), 1);
+}
+
+/// A return type stands between the parameter list and the arrow, so
+/// the bracket before the arrow is not the one that closes the list.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+#[test]
+fn a_parameter_of_a_lambda_that_states_a_return_type_is_not_a_reference() {
+    let text = "vim9script\ndef F(s: string)\n  echo s->substitute('a', (m: list<string>): string => m[1], 'g')\nenddef\n";
+
+    assert_eq!(count(text, "m"), 0);
+}
+
+#[test]
+fn a_parameter_of_a_lambda_that_returns_a_container_is_not_a_reference() {
+    let text = "vim9script\ndef F(xs: list<string>)\n  echo xs->mapnew((_, text: string): list<any> => [text])\nenddef\n";
+
+    assert_eq!(count(text, "text"), 0);
+}
+
+/// Text the `execute` family runs is read for names a second time,
+/// after the tokens of its interpolation, and that reading must know
+/// the variables of the body as the first one does.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+#[test]
+fn a_loop_variable_in_executed_text_is_not_a_reference() {
+    let text = "vim9script\ndef F(xs: list<string>)\n  for grp in xs\n    execute $'highlight {grp} gui=NONE'\n  endfor\nenddef\n";
+
+    assert_eq!(count(text, "grp"), 0);
+}
+
+#[test]
+fn a_parameter_in_executed_text_is_not_a_reference() {
+    let text = "vim9script\ndef F(amt: number)\n  execute $'resize {amt}'\nenddef\n";
+
+    assert_eq!(count(text, "amt"), 0);
+}
+
+/// A loop at script level binds its variable as one in a body does,
+/// and declares no symbol for a read of it to reach.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+#[test]
+fn a_loop_variable_at_script_level_is_not_a_reference() {
+    let text = "vim9script\nfor item in ITEMS\n  Register(item)\nendfor\n";
+
+    assert_eq!(count(text, "item"), 0);
+    assert_eq!(count(text, "ITEMS"), 1);
+}

@@ -284,18 +284,118 @@ pub fn lambda_params(stmt: &[Tok]) -> Vec<&str> {
     let mut names = Vec::new();
 
     for at in 1..stmt.len() {
-        if stmt[at].text != "=>" || stmt[at - 1].text != ")" {
-            continue;
+        if stmt[at].text == "=>" {
+            names.extend(params_before(stmt, at));
         }
-
-        let Some(open) = opening(stmt, at - 1) else {
-            continue;
-        };
-
-        names.extend(list_names(&stmt[open + 1..at - 1]));
     }
 
     names
+}
+
+/// FUNCTION: The parameters of the one lambda whose arrow stands at a
+/// position, or none where no parameter list stands before it.
+fn params_before(stmt: &[Tok], arrow: usize) -> Vec<&str> {
+    let Some(close) = list_end(stmt, arrow) else {
+        return Vec::new();
+    };
+    let Some(open) = opening(stmt, close) else {
+        return Vec::new();
+    };
+
+    list_names(&stmt[open + 1..close])
+}
+
+/// FUNCTION: The index of the bracket that closes the parameter list
+/// of a lambda, given its arrow.
+///
+/// The bracket stands against the arrow, or a return type stands
+/// between them: `(m: list<string>): string => m[1]`. The walk back
+/// crosses only what a type is written with, so that anything else
+/// before the arrow finds no list rather than a wrong one, and a wrong
+/// one would drop a name the project is owed a credit for.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+fn list_end(stmt: &[Tok], arrow: usize) -> Option<usize> {
+    let mut depth = 0i32;
+
+    for i in (0..arrow).rev() {
+        let tok = &stmt[i];
+
+        match tok.text.as_str() {
+            ")" if i + 1 == arrow => return Some(i),
+            ">" => depth += 1,
+            ">>" => depth += 2,
+            "<" => depth -= 1,
+            "," if depth > 0 => {}
+            ":" if depth == 0 => {
+                return (i > 0 && stmt[i - 1].text == ")").then_some(i - 1);
+            }
+            _ if tok.kind == TokKind::Ident => {}
+            _ => return None,
+        }
+    }
+
+    None
+}
+
+/// The lambdas written as a block that a statement stands inside, each
+/// with the parameters it binds.
+///
+/// `lambda_params` ends a lambda with its statement, which holds for
+/// one written as an expression. A block does not end there: a
+/// declaring word inside it starts a statement of its own, so the
+/// brace that opened the block closes several statements on, and the
+/// parameters are bound until it does.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+#[derive(Debug, Default)]
+pub struct Blocks<'a> {
+    open: Vec<(i32, Vec<&'a str>)>,
+    depth: i32,
+}
+
+impl<'a> Blocks<'a> {
+    /// METHOD: Every parameter of the blocks still open.
+    pub fn names(&self) -> impl Iterator<Item = &'a str> + '_ {
+        self.open
+            .iter()
+            .flat_map(|(_, names)| names.iter().copied())
+    }
+
+    /// METHOD: Follow the braces of one statement, opening a block at
+    /// a brace that stands against an arrow and closing it at the
+    /// brace that matches.
+    ///
+    /// A brace with no partner cannot take the count below zero,
+    /// because a count below zero would close a block at the wrong
+    /// brace from then on.
+    pub fn read(&mut self, stmt: &'a [Tok]) {
+        for (i, tok) in stmt.iter().enumerate() {
+            match tok.text.as_str() {
+                "{" => {
+                    self.depth += 1;
+
+                    if i > 0 && stmt[i - 1].text == "=>" {
+                        self.open.push((self.depth, params_before(stmt, i - 1)));
+                    }
+                }
+                "}" => {
+                    if self.open.last().is_some_and(|(at, _)| *at == self.depth) {
+                        self.open.pop();
+                    }
+
+                    self.depth = (self.depth - 1).max(0);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// METHOD: Forget every block. A body holds its lambdas whole, so
+    /// where a body starts or ends none is open, and one a broken line
+    /// never closed stops binding its names there.
+    pub fn clear(&mut self) {
+        self.open.clear();
+        self.depth = 0;
+    }
 }
 
 /// FUNCTION: The name a statement declares and the type it gives it,

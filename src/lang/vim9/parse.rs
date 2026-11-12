@@ -15,6 +15,7 @@ use crate::lang::vim9::exists;
 use crate::lang::vim9::lex::Tok;
 use crate::lang::vim9::lex::TokKind;
 use crate::lang::vim9::types;
+use crate::lang::vim9::types::Blocks;
 use crate::lang::vim9::types::Locals;
 use crate::lang::vim9::types::Types;
 use crate::model::Import;
@@ -782,6 +783,7 @@ pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
     let types = Types::of_file(stmts);
     let mut scope = Scope::default();
     let mut locals = Locals::default();
+    let mut blocks = Blocks::default();
 
     for stmt in stmts {
         let words: Vec<&str> = stmt
@@ -792,6 +794,7 @@ pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
 
         if close_container(&words, &mut scope) {
             locals = Locals::default();
+            blocks.clear();
             continue;
         }
 
@@ -823,6 +826,13 @@ pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
             skip = enum_values_at(stmt);
         }
 
+        // A lambda written as a block binds its parameters for every
+        // statement of the block, and this is one of them where a
+        // block is still open.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+        let mut bound = bound_names(stmt, &words);
+        bound.extend(blocks.names());
+
         let mut sink = Collect {
             file,
             origin: &origin,
@@ -831,15 +841,17 @@ pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
             types: &types,
             in_def,
             own: skip.first().map(|&at| stmt[at].text.as_str()),
-            bound: bound_names(stmt, &words),
+            bound,
             out,
         };
 
         sink.statement(stmt, &skip);
+        blocks.read(stmt);
 
         if let Some(id) = opens_body(file, stmt, &words, &mut scope) {
             scope.bodies.push(id);
             locals = Locals::of_signature(stmt);
+            blocks.clear();
         }
     }
 }
@@ -1025,8 +1037,17 @@ impl Collect<'_> {
             return true;
         }
 
-        if !self.in_def || Some(word) == self.own {
+        if Some(word) == self.own {
             return false;
+        }
+
+        // A loop at script level binds its variable as one in a body
+        // does, and declares no symbol either. A declaration there is
+        // a script variable, which is a symbol, so the loop variable
+        // is the only binding answered outside a body.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+        if !self.in_def {
+            return self.locals.bound_by(word) == Some(types::Bound::Loop);
         }
 
         // A `var` or `const` of this body is a symbol now, so its
@@ -1084,6 +1105,17 @@ impl Collect<'_> {
         };
 
         for (name, owned) in names {
+            // An interpolation is lexed as code as well, so its names
+            // have been through `ident` already, and a variable of
+            // the code around the string is dropped there. This is
+            // the second reading of the same name, and it has to
+            // agree. It goes by spelling, so a word of the text that
+            // matches such a variable is dropped with it.
+            // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+            if EXECUTE.contains(&gate) && self.local(&name) {
+                continue;
+            }
+
             self.out.re(Reference {
                 name,
                 recv: None,
