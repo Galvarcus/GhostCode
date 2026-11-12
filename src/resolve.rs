@@ -372,9 +372,10 @@ mod tests {
     /// A body sees its own variables and no other body's, which is
     /// what Vim9 compiles. A def nested inside a body does read that
     /// body's variables, and the inner body's id does not name the
-    /// outer one, so such a read is left unplaced rather than
-    /// credited to a guess: `unplaced_names_by_file` then keeps the
-    /// variable off the report.
+    /// outer one, so the scan states the variable as the target of
+    /// such a read. A read with no target is left unplaced rather
+    /// than credited to a guess: `unplaced_names_by_file` then keeps
+    /// the variable off the report.
     /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
     #[test]
     fn a_scoped_symbol_is_invisible_from_another_scope() {

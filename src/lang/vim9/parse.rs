@@ -964,6 +964,12 @@ pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
     let types = Types::of_file(stmts);
     let mut scope = Scope::default();
     let mut locals = Locals::default();
+
+    // The variables of each body around the one being read, innermost
+    // last, so that the `enddef` of a def inside a def returns to what
+    // the body around it had declared.
+    // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+    let mut outer: Vec<Locals> = Vec::new();
     let mut blocks = Blocks::default();
     let consts = shared::consts(stmts);
 
@@ -975,7 +981,11 @@ pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
             .collect();
 
         if close_container(&words, &mut scope) {
-            locals = Locals::default();
+            if scope.depth() == 0 {
+                outer.clear();
+            }
+
+            locals = outer.pop().unwrap_or_default();
             blocks.clear();
             continue;
         }
@@ -1076,9 +1086,26 @@ pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
         sink.statement(stmt, &passed);
         blocks.read(stmt);
 
+        let around = scope.body().cloned();
+
         if let Some(id) = opens_body(file, stmt, &words, &mut scope) {
+            let signature = Locals::of_signature(stmt);
+
+            // A def inside a def reads the variables of the body
+            // around it, so those stay in view under its parameters.
+            // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+            let inner = match around.filter(|_| scope.depth() > 0) {
+                Some(body) => locals.inside(&body, signature),
+                None => signature,
+            };
+
+            if scope.depth() > 0 {
+                outer.push(std::mem::replace(&mut locals, inner));
+            } else {
+                locals = inner;
+            }
+
             scope.bodies.push(id);
-            locals = Locals::of_signature(stmt);
             blocks.clear();
         }
     }
@@ -1246,7 +1273,14 @@ impl Collect<'_> {
             file: self.file.to_path_buf(),
             line: tok.line,
             origin: Some(self.origin.clone()),
-            target: None,
+            // A variable of a body around this one is named outright,
+            // because the id of this body does not lead to it.
+            // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+            target: self
+                .locals
+                .around(word)
+                .filter(|_| !member)
+                .map(|body| SymbolId::in_scope(body, word)),
             owned,
             member,
         });

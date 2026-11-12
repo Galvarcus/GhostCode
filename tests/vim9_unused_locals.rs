@@ -234,12 +234,43 @@ fn a_name_marked_as_vims_does_not_hide_an_unread_local_of_its_spelling() {
 
 /// A read the analyzer could not place may be a read of any variable
 /// of that spelling in the file, so it still hides every one of them.
+/// `In` reads a name that no body around it declares, and two other
+/// bodies declare it.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/48
 #[test]
 fn a_read_nothing_placed_still_hides_a_local_of_its_spelling() {
     assert!(found(
         "blind",
-        "  var row = 1\n  def In()\n    echo row\n  enddef\n  def Two()\n    var row = 2\n    echo row\n  enddef\n  In()\n  Two()\n"
+        "  def In()\n    echo row\n  enddef\n  def Two()\n    var row = 2\n  enddef\n  def Three()\n    var row = 3\n  enddef\n  In()\n  Two()\n  Three()\n"
     )
     .is_empty());
+}
+
+/// A def inside a def reads the variables of the body around it, and
+/// the scan names that variable as the one read. The read therefore
+/// hides no other variable of the spelling: the one in `Other` is
+/// unread and is reported.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+#[test]
+fn a_read_from_a_nested_def_credits_the_variable_of_the_body_around_it() {
+    assert_eq!(
+        found(
+            "nested",
+            "  var total = 0\n  def Walk()\n    echo total\n  enddef\n  Walk()\n  Other()\nenddef\ndef Other()\n  var total = 1\n"
+        ),
+        vec!["local variable total"]
+    );
+}
+
+/// A def that only writes the variable of the body around it reads
+/// nothing, so the variable is still reported.
+#[test]
+fn a_write_from_a_nested_def_does_not_credit_the_variable_around_it() {
+    assert_eq!(
+        found(
+            "nestedwrite",
+            "  var total = 0\n  def Walk()\n    total = 1\n  enddef\n  Walk()\n"
+        ),
+        vec!["local variable total"]
+    );
 }
