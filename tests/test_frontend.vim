@@ -375,6 +375,61 @@ def Test_the_plugin_script_defines_no_default_for_the_locals_setting(): void
   assert_false(exists('g:ghostcode_locals'))
 enddef
 
+# Each setting of a scoped variable class, with the flag it passes.
+const SCOPE_FLAGS: list<list<string>> = [
+  ['ghostcode_globals', '--globals'],
+  ['ghostcode_buffer_vars', '--buffer-vars'],
+  ['ghostcode_window_vars', '--window-vars'],
+  ['ghostcode_tab_vars', '--tab-vars'],
+]
+
+def Test_a_scope_setting_is_not_passed_when_the_user_did_not_set_it(): void
+  Scan()
+
+  for [_, flag] in SCOPE_FLAGS
+    assert_equal(-1, index(Args(), flag), flag)
+  endfor
+enddef
+
+def Test_each_scope_setting_is_passed_when_the_user_set_it(): void
+  for [setting, flag] in SCOPE_FLAGS
+    g:[setting] = true
+
+    try
+      Scan()
+    finally
+      remove(g:, setting)
+    endtry
+
+    var args = Args()
+    var at = index(args, flag)
+    assert_true(at >= 0, $'{flag}: {join(args, "|")}')
+    assert_equal('true', args[at + 1], flag)
+
+    # One setting passes one flag, and no other scope with it.
+    var others = SCOPE_FLAGS->mapnew((_, pair) => pair[1])
+      ->filter((_, f) => f != flag && index(args, f) >= 0)
+    assert_equal([], others, flag)
+  endfor
+enddef
+
+def Test_the_plugin_script_defines_no_default_for_a_scope_setting(): void
+  for [setting, _] in SCOPE_FLAGS
+    assert_false(exists($'g:{setting}'), setting)
+  endfor
+enddef
+
+def Test_a_note_does_not_reach_the_quickfix_list(): void
+  Scan(join([
+    '{"schema": 1, "root": "/project",',
+    '"summary": {"symbols": 1, "ghost": 0, "unplaced_names": 0},',
+    '"findings": [], "skipped": [],',
+    '"notes": [{"file": "plugin/p.vim", "line": 3, "scope": "g:"}]}',
+  ], "\n"))
+
+  assert_equal([], getqflist())
+enddef
+
 export def RunAll(): void
   Test_the_quickfix_text_matches_the_old_format()
   Test_the_column_is_one_and_the_line_is_the_reported_one()
@@ -402,4 +457,8 @@ export def RunAll(): void
   Test_the_locals_setting_is_not_passed_when_the_user_did_not_set_it()
   Test_the_locals_setting_is_passed_when_the_user_set_it()
   Test_the_plugin_script_defines_no_default_for_the_locals_setting()
+  Test_a_scope_setting_is_not_passed_when_the_user_did_not_set_it()
+  Test_each_scope_setting_is_passed_when_the_user_set_it()
+  Test_the_plugin_script_defines_no_default_for_a_scope_setting()
+  Test_a_note_does_not_reach_the_quickfix_list()
 enddef

@@ -14,10 +14,12 @@ use crate::lang::vim9::excmds;
 use crate::lang::vim9::exists;
 use crate::lang::vim9::lex::Tok;
 use crate::lang::vim9::lex::TokKind;
+use crate::lang::vim9::shared;
 use crate::lang::vim9::types;
 use crate::lang::vim9::types::Blocks;
 use crate::lang::vim9::types::Locals;
 use crate::lang::vim9::types::Types;
+use crate::model::Fit;
 use crate::model::Import;
 use crate::model::Kind;
 use crate::model::Reference;
@@ -112,6 +114,7 @@ pub fn statements(toks: &[Tok]) -> Vec<Vec<Tok>> {
 /// than the rest of the file.
 pub fn declarations(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
     let mut scope = Scope::default();
+    let consts = shared::consts(stmts);
 
     for stmt in stmts {
         let words: Vec<&str> = stmt
@@ -123,6 +126,8 @@ pub fn declarations(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
         let Some(line) = stmt.first().map(|t| t.line) else {
             continue;
         };
+
+        shared_writes(file, stmt, &consts, out);
 
         if close_container(&words, &mut scope) {
             continue;
@@ -154,6 +159,74 @@ pub fn declarations(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
         }
 
         variable(file, stmt, &words, line, &scope, out);
+    }
+}
+
+/// FUNCTION: Record each scoped variable the body of a heredoc
+/// spells in full.
+///
+/// A statement holds no heredoc body, because the body is text and no
+/// code. The text is often a script for another Vim, and a variable
+/// it names is in use. The read is given to the top-level code of the
+/// file: the lexer does not say which body a heredoc stands in, and
+/// that code runs wherever any part of the file does.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
+pub fn heredocs(file: &Path, toks: &[Tok], out: &mut dyn Sink) {
+    let origin = SymbolId::script(file);
+
+    for tok in toks.iter().filter(|t| t.kind == TokKind::Heredoc) {
+        for spelling in shared::spellings(&tok.text) {
+            match spelling {
+                shared::Spelling::Exact(name) => out.re(Reference {
+                    name,
+                    recv: None,
+                    file: file.to_path_buf(),
+                    line: tok.line,
+                    origin: Some(origin.clone()),
+                    target: None,
+                    owned: true,
+                    member: false,
+                }),
+                shared::Spelling::Fit { head, tail, whole } => out.fit(Fit {
+                    head,
+                    tail,
+                    whole,
+                    file: file.to_path_buf(),
+                    line: tok.line,
+                    origin: Some(origin.clone()),
+                }),
+            }
+        }
+    }
+}
+
+/// FUNCTION: Record each write of a variable every file shares, as a
+/// declaration of it.
+///
+/// The variable is one for the project, so its id names no file, and
+/// each write of it gives the same id. The report keeps one of them.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
+fn shared_writes(file: &Path, stmt: &[Tok], consts: &shared::Consts, out: &mut dyn Sink) {
+    for used in shared::uses(stmt, consts).found {
+        let shared::Spelling::Exact(name) = used.spelling else {
+            continue;
+        };
+
+        if !used.write {
+            continue;
+        }
+
+        out.sym(Symbol {
+            id: SymbolId::shared(&name),
+            kind: Kind::Variable,
+            name,
+            file: file.to_path_buf(),
+            line: stmt[used.at].line,
+            exported: false,
+            owner: None,
+            scope: None,
+            lead: used.lead,
+        });
     }
 }
 
@@ -194,6 +267,7 @@ fn open_container(
         exported,
         owner: None,
         scope: None,
+        lead: false,
     });
 
     true
@@ -259,6 +333,7 @@ fn function(
         exported,
         owner: scope.owner.clone(),
         scope: None,
+        lead: false,
     });
 
     true
@@ -297,6 +372,7 @@ fn variable(
             exported,
             owner: scope.owner.clone(),
             scope: None,
+            lead: false,
         });
     }
 }
@@ -354,6 +430,7 @@ fn local(file: &Path, stmt: &[Tok], words: &[&str], line: u32, scope: &Scope, ou
             exported: false,
             owner: scope.owner.clone(),
             scope: Some(body.clone()),
+            lead: false,
         });
     }
 }
@@ -373,6 +450,7 @@ fn enum_values(file: &Path, stmt: &[Tok], line: u32, scope: &Scope, out: &mut dy
             exported: false,
             owner: scope.owner.clone(),
             scope: None,
+            lead: false,
         });
     }
 }
@@ -872,6 +950,7 @@ pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
     let mut scope = Scope::default();
     let mut locals = Locals::default();
     let mut blocks = Blocks::default();
+    let consts = shared::consts(stmts);
 
     for stmt in stmts {
         let words: Vec<&str> = stmt
@@ -929,6 +1008,44 @@ pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
         let mut bound = bound_names(stmt, &words);
         bound.extend(blocks.names());
 
+        // A variable every file shares is read by its full spelling,
+        // and the name behind its scope is no bare name of the
+        // project. The read is marked as the language's, because a
+        // variable the project never writes is another plugin's or
+        // the user's, and no gap.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
+        //
+        // A name with a gap in it is kept until every variable is
+        // known, and then read as each one its fixed parts fit.
+        let used = shared::uses(stmt, &consts);
+        let mut passed = skip.clone();
+        passed.extend(&used.taken);
+
+        for read in used.found.into_iter().filter(|u| !u.write) {
+            let line = stmt[read.at].line;
+
+            match read.spelling {
+                shared::Spelling::Exact(name) => out.re(Reference {
+                    name,
+                    recv: None,
+                    file: file.to_path_buf(),
+                    line,
+                    origin: Some(origin.clone()),
+                    target: None,
+                    owned: true,
+                    member: false,
+                }),
+                shared::Spelling::Fit { head, tail, whole } => out.fit(Fit {
+                    head,
+                    tail,
+                    whole,
+                    file: file.to_path_buf(),
+                    line,
+                    origin: Some(origin.clone()),
+                }),
+            }
+        }
+
         let mut sink = Collect {
             file,
             origin: &origin,
@@ -941,7 +1058,7 @@ pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
             out,
         };
 
-        sink.statement(stmt, &skip);
+        sink.statement(stmt, &passed);
         blocks.read(stmt);
 
         if let Some(id) = opens_body(file, stmt, &words, &mut scope) {

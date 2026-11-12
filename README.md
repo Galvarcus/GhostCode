@@ -185,9 +185,16 @@ ignore = ["deps/**", "vendor/**"]
 # Files that are entry points, whose top-level code needs no caller.
 entry = ["tools/build.vim"]
 
-# The finding classes to report beyond the ghosts.
+# Scoped variables written for a reader outside the project.
+external = ["g:tlinks_*"]
+
+# The finding classes to report beyond the default.
 [findings]
 locals = true
+globals = true
+buffer_vars = true
+window_vars = true
+tab_vars = true
 ```
 
 `exports_are_api` is true by default. Ghostcode then treats an exported
@@ -207,6 +214,55 @@ reported too. A parameter and a `for` variable are left alone.
 The finding reads `[local]` rather than `[ghost]`, so a build that
 counts the ghosts counts none of these.
 
+`findings.globals`, `findings.buffer_vars`, `findings.window_vars`,
+and `findings.tab_vars` are false by default. Each one reports the
+variables of one scope, `g:`, `b:`, `w:`, or `t:`, that the project
+writes and nothing reads:
+
+```text
+plugin/example.vim:12:1:[ghost] variable g:example_width
+```
+
+These rules decide what counts as a read:
+
+- `g:name` in code, and `g:name` inside any string.
+- `get()` and `has_key()` on a scope, `exists()`, and the
+  `getbufvar()` family. `setbufvar()` and its kin are writes.
+- A name held in a `const` of the same file whose value is one string.
+- A name built at run time, as `get(g:, $'example_{kind}_width')`,
+  which reads every variable that its fixed parts fit.
+
+These do not count as a read:
+
+- A second write.
+- A read in the command that writes the variable. The `get()` of
+  `g:name = get(g:, 'name', default)` reads what the user set, so a
+  setting that no other line reads is reported.
+- A read in code that nothing reaches.
+
+The finding names the write that takes the user's value where one
+exists, and otherwise the first write by path and line. Ghostcode
+reports no variable that the Vim help documents, such as
+`b:current_syntax`.
+
+The finding reads `[ghost]`, so a build that counts the ghosts
+enforces it once the flag is on.
+
+A line that uses a scope with no fixed name, such as `keys(g:)` or
+`get(g:, name)`, reads every variable of that scope. Ghostcode then
+reports none for the scope and says so on stderr, with the file and
+the line:
+
+```text
+ghostcode: autoload/example.vim:35: every g: variable counts as read from this line, so none is reported
+```
+
+In Vim the same message goes to the log and not to the quickfix list.
+
+`external` lists the scoped variables that the project writes for
+another plugin to read. Give the full spelling. A `*` stands for any
+run of characters. Ghostcode never reports a variable listed there.
+
 ### Command line
 
 A flag overrides the file:
@@ -217,6 +273,10 @@ A flag overrides the file:
 | `--exports-are-api true`, `--exports-are-api false` | Override `exports_are_api`. |
 | `--no-ignore` | Read every file, including the ones git ignores. |
 | `--locals true`, `--locals false` | Override `findings.locals`. |
+| `--globals true`, `--globals false` | Override `findings.globals`. |
+| `--buffer-vars true`, `--buffer-vars false` | Override `findings.buffer_vars`. |
+| `--window-vars true`, `--window-vars false` | Override `findings.window_vars`. |
+| `--tab-vars true`, `--tab-vars false` | Override `findings.tab_vars`. |
 
 ### Vim
 
@@ -225,6 +285,10 @@ A flag overrides the file:
 | `g:ghostcode_bin` | The binary to run, for a copy that is neither on `$PATH` nor in the plugin's `bin/` directory. |
 | `g:ghostcode_exports_are_api` | Override `exports_are_api`. The plugin passes the flag only when you set this, so that a project's `ghostcode.toml` governs where you do not. |
 | `g:ghostcode_locals` | Override `findings.locals`. Passed on the same terms. |
+| `g:ghostcode_globals` | Override `findings.globals`. Passed on the same terms. |
+| `g:ghostcode_buffer_vars` | Override `findings.buffer_vars`. Passed on the same terms. |
+| `g:ghostcode_window_vars` | Override `findings.window_vars`. Passed on the same terms. |
+| `g:ghostcode_tab_vars` | Override `findings.tab_vars`. Passed on the same terms. |
 
 ## What Ghostcode scans
 

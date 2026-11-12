@@ -5,6 +5,7 @@
 mod json;
 mod text;
 
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::Path;
 use std::path::PathBuf;
@@ -70,6 +71,19 @@ pub struct Dropped {
     pub why: &'static str,
 }
 
+/// A line that reads every variable of one scope, so that none of
+/// them is reported. It is said and not passed over: the user asked
+/// for the findings of that scope, and a report with none would read
+/// as a clean project.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Note {
+    pub file: PathBuf,
+    pub line: u32,
+    /// The scope, as the source spells it: `g:`.
+    pub scope: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Report {
     pub schema: u32,
@@ -77,6 +91,7 @@ pub struct Report {
     pub summary: Summary,
     pub findings: Vec<Finding>,
     pub skipped: Vec<Dropped>,
+    pub notes: Vec<Note>,
 }
 
 /// FUNCTION: One run, from a root to a report: discover the files,
@@ -123,13 +138,16 @@ pub fn analyze(root: &Path, cfg: &Config) -> anyhow::Result<Report> {
         }
     }
 
+    fold(&mut a);
     text_references(&mut a);
+    fit_references(&mut a);
 
     let resolved = resolve::all(&a);
     let reached = reach::walk(&a, &resolved);
 
     let blind = unplaced_names_by_file(&a, &resolved);
     let mut report = build(root, &a, &reached, &blind, resolved.unplaced, cfg);
+    report.notes = notes(&a, &reached, cfg);
 
     report.skipped = found
         .skipped
@@ -145,6 +163,43 @@ pub fn analyze(root: &Path, cfg: &Config) -> anyhow::Result<Report> {
         .collect();
 
     Ok(report)
+}
+
+/// FUNCTION: Keep one symbol for each id that belongs to no file.
+///
+/// A variable every file shares is declared by each write of it, in
+/// any file, and all of them are one variable. The one kept is the
+/// write a finding names: a lead one where the scan marked one, and
+/// otherwise the first by path and line.
+///
+/// Only such an id is folded. Two declarations of one name in one
+/// file are two symbols, as the two arms of an `if` may each hold a
+/// `def`, and each is reported for itself.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
+fn fold(a: &mut Analysis) {
+    let mut kept: HashMap<SymbolId, usize> = HashMap::new();
+
+    for (at, sym) in a.syms.iter().enumerate() {
+        if !sym.id.is_shared() {
+            continue;
+        }
+
+        let first = |s: &crate::model::Symbol| (!s.lead, s.file.clone(), s.line);
+
+        match kept.get(&sym.id) {
+            Some(&best) if first(&a.syms[best]) <= first(sym) => {}
+            _ => {
+                kept.insert(sym.id.clone(), at);
+            }
+        }
+    }
+
+    let mut at = 0;
+    a.syms.retain(|sym| {
+        let keep = !sym.id.is_shared() || kept.get(&sym.id) == Some(&at);
+        at += 1;
+        keep
+    });
 }
 
 /// FUNCTION: Turn the text a project holds into references, for the
@@ -208,6 +263,50 @@ fn text_references(a: &mut Analysis) {
     a.refs.extend(found);
 }
 
+/// FUNCTION: Turn each name with a gap into a reference to every
+/// symbol its fixed parts fit.
+///
+/// Only a symbol that belongs to no file can be named this way. Their
+/// names are sorted once, so a fit reads the run that shares its
+/// start and never the whole list: the cost stays that of the names
+/// it credits.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
+fn fit_references(a: &mut Analysis) {
+    let mut names: Vec<(&str, &SymbolId)> = a
+        .syms
+        .iter()
+        .filter(|s| s.id.is_shared())
+        .map(|s| (s.name.as_str(), &s.id))
+        .collect();
+    names.sort_unstable();
+
+    let mut found: Vec<crate::model::Reference> = Vec::new();
+
+    for fit in &a.fits {
+        let from = names.partition_point(|(name, _)| *name < fit.head.as_str());
+        let least = fit.head.len() + fit.tail.len();
+
+        for (name, id) in names[from..]
+            .iter()
+            .take_while(|(name, _)| name.starts_with(&fit.head))
+            .filter(|(name, _)| name.len() >= least && name.ends_with(&fit.tail))
+        {
+            found.push(crate::model::Reference {
+                name: (*name).to_string(),
+                recv: None,
+                file: fit.file.clone(),
+                line: fit.line,
+                origin: fit.origin.clone(),
+                target: Some((*id).clone()),
+                owned: true,
+                member: false,
+            });
+        }
+    }
+
+    a.refs.extend(found);
+}
+
 /// FUNCTION: Turn what a walk reached into the report of what it did
 /// not.
 pub fn build(
@@ -247,7 +346,42 @@ pub fn build(
         },
         findings,
         skipped: Vec::new(),
+        notes: Vec::new(),
     }
+}
+
+/// FUNCTION: The first line that reads each scope whole, where the
+/// run asked for the findings of that scope.
+///
+/// Only a line the walk reached. A read in code nothing reaches
+/// credits nothing, so the variables of its scope are still reported,
+/// and a note there would say otherwise.
+fn notes(a: &Analysis, reached: &HashSet<SymbolId>, cfg: &Config) -> Vec<Note> {
+    let runs = |f: &crate::model::Fit| match &f.origin {
+        Some(origin) => reached.contains(origin),
+        None => reached.contains(&SymbolId::script(&f.file)),
+    };
+
+    let mut whole: Vec<&crate::model::Fit> = a
+        .fits
+        .iter()
+        .filter(|f| f.whole && runs(f))
+        .filter(|f| lang::for_path(&f.file).is_some_and(|l| l.shared_on(&f.head, cfg)))
+        .collect();
+
+    whole.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
+
+    let mut seen: HashSet<&str> = HashSet::new();
+
+    whole
+        .into_iter()
+        .filter(|f| seen.insert(f.head.as_str()))
+        .map(|f| Note {
+            file: f.file.clone(),
+            line: f.line,
+            scope: f.head.clone(),
+        })
+        .collect()
 }
 
 /// FUNCTION: Which class a symbol is reported as, or none when it is
@@ -266,6 +400,17 @@ fn classify(
     blind: &HashSet<(&Path, &str)>,
     cfg: &Config,
 ) -> Option<Class> {
+    // A symbol that belongs to no file is a variable every file
+    // shares. It is reported where the run asked for its scope and
+    // nothing reached it. No file exports one, so the API rule has
+    // nothing to say about it.
+    // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
+    if sym.id.is_shared() {
+        let asked = lang::for_path(&sym.file).is_some_and(|l| l.shared_on(&sym.name, cfg));
+
+        return (asked && !reached.contains(&sym.id)).then_some(Class::Ghost);
+    }
+
     if let Some(body) = &sym.scope {
         let unread = cfg.findings.locals
             && reached.contains(body)
@@ -316,4 +461,126 @@ fn count(findings: &[Finding], class: Class) -> usize {
 /// that declared it.
 fn is_api(sym: &crate::model::Symbol, cfg: &Config) -> bool {
     lang::for_path(&sym.file).is_some_and(|l| l.is_api(sym, cfg))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::Symbol;
+
+    /// FUNCTION: One write of a variable every file shares.
+    fn write(name: &str, file: &str, line: u32, lead: bool) -> Symbol {
+        Symbol {
+            id: SymbolId::shared(name),
+            kind: Kind::Variable,
+            name: name.to_string(),
+            file: PathBuf::from(file),
+            line,
+            exported: false,
+            owner: None,
+            scope: None,
+            lead,
+        }
+    }
+
+    /// FUNCTION: Where each symbol of an analysis stands after a fold.
+    fn folded(syms: Vec<Symbol>) -> Vec<(String, u32)> {
+        let mut a = Analysis {
+            syms,
+            ..Analysis::default()
+        };
+        fold(&mut a);
+
+        a.syms
+            .iter()
+            .map(|s| (s.file.display().to_string(), s.line))
+            .collect()
+    }
+
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
+    #[test]
+    fn several_writes_of_one_shared_name_fold_to_the_lead_one() {
+        let syms = vec![
+            write("g:x", "autoload/a.vim", 9, false),
+            write("g:x", "plugin/p.vim", 4, true),
+            write("g:x", "plugin/p.vim", 2, false),
+        ];
+
+        assert_eq!(folded(syms), vec![("plugin/p.vim".to_string(), 4)]);
+    }
+
+    #[test]
+    fn with_no_lead_write_the_first_by_path_and_line_is_kept() {
+        let syms = vec![
+            write("g:x", "plugin/p.vim", 4, false),
+            write("g:x", "autoload/a.vim", 9, false),
+            write("g:x", "plugin/p.vim", 2, false),
+        ];
+
+        assert_eq!(folded(syms), vec![("autoload/a.vim".to_string(), 9)]);
+    }
+
+    #[test]
+    fn two_symbols_of_one_file_id_are_both_kept() {
+        let mut one = write("F", "a.vim", 1, false);
+        one.id = SymbolId::of(Path::new("a.vim"), None, "F");
+        let mut two = one.clone();
+        two.line = 5;
+
+        assert_eq!(folded(vec![one, two]).len(), 2);
+    }
+
+    /// FUNCTION: A name with a gap, read at one line of one file.
+    fn gap(head: &str, tail: &str) -> crate::model::Fit {
+        crate::model::Fit {
+            head: head.to_string(),
+            tail: tail.to_string(),
+            whole: tail.is_empty() && head.len() == 2,
+            file: PathBuf::from("autoload/a.vim"),
+            line: 3,
+            origin: None,
+        }
+    }
+
+    /// FUNCTION: The names the fits of an analysis credit, in order.
+    fn credited(names: &[&str], fits: Vec<crate::model::Fit>) -> Vec<String> {
+        let mut a = Analysis {
+            syms: names
+                .iter()
+                .map(|n| write(n, "plugin/p.vim", 1, false))
+                .collect(),
+            fits,
+            ..Analysis::default()
+        };
+        fit_references(&mut a);
+
+        assert!(a.refs.iter().all(|r| r.owned && r.target.is_some()));
+
+        let mut out: Vec<String> = a.refs.into_iter().map(|r| r.name).collect();
+        out.sort();
+        out
+    }
+
+    #[test]
+    fn a_fit_credits_each_name_its_fixed_parts_fit() {
+        let names = ["g:p_a_fg", "g:p_b_fg", "g:p_a_bg", "b:p_a_fg"];
+
+        assert_eq!(
+            credited(&names, vec![gap("g:p_", "fg")]),
+            vec!["g:p_a_fg", "g:p_b_fg"]
+        );
+    }
+
+    #[test]
+    fn a_whole_fit_credits_every_name_of_its_scope_and_no_other() {
+        let names = ["g:a", "g:b", "b:a", "t:a"];
+
+        assert_eq!(credited(&names, vec![gap("g:", "")]), vec!["g:a", "g:b"]);
+    }
+
+    /// The start and the end may not share a character of the name.
+    #[test]
+    fn a_fit_longer_than_a_name_does_not_fit_it() {
+        assert!(credited(&["g:ab"], vec![gap("g:ab", "b")]).is_empty());
+    }
 }

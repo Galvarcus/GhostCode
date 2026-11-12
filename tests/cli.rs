@@ -123,3 +123,59 @@ fn the_help_hides_a_flag_that_no_detection_backs() {
         "nothing emits the class, so the flag promises what it cannot give: {text}"
     );
 }
+
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
+#[test]
+fn the_help_names_the_four_scope_flags() {
+    let text = help();
+
+    for flag in ["--globals", "--buffer-vars", "--window-vars", "--tab-vars"] {
+        assert!(text.contains(flag), "the help does not name {flag}: {text}");
+    }
+}
+
+#[test]
+fn toml_sets_a_scope_flag_and_a_flag_overrides_it() {
+    let dir = TempDir::new("toml-scope");
+    dir.write(
+        "ghostcode.toml",
+        "[findings]\nglobals = true\ntab_vars = true\n",
+    );
+
+    let file = load(dir.path(), &[]);
+    assert!(file.findings.globals && file.findings.tab_vars);
+    assert!(!file.findings.buffer_vars && !file.findings.window_vars);
+
+    let flag = load(dir.path(), &["--globals", "false", "--window-vars", "true"]);
+    assert!(!flag.findings.globals && flag.findings.window_vars);
+    assert!(flag.findings.tab_vars);
+}
+
+#[test]
+fn toml_external_reaches_the_configuration() {
+    let dir = TempDir::new("toml-external");
+    dir.write("ghostcode.toml", "external = [\"g:tlinks_*\"]\n");
+
+    assert_eq!(load(dir.path(), &[]).external, vec!["g:tlinks_*"]);
+}
+
+/// What stdout carries is the report, and CI counts its lines, so a
+/// note about the run goes to stderr alone.
+#[test]
+fn a_note_is_printed_to_stderr_and_not_to_stdout() {
+    let dir = TempDir::new("note");
+    dir.write("plugin/p.vim", "vim9script\ng:p_x = 1\necho keys(g:)\n");
+
+    let out = Command::new(env!("CARGO_BIN_EXE_ghostcode"))
+        .args(["--format=text", "--globals", "true"])
+        .arg(dir.path())
+        .output()
+        .expect("run the built binary");
+    let said = String::from_utf8_lossy(&out.stderr);
+
+    assert!(
+        said.contains("plugin/p.vim:3: every g: variable counts as read from this line"),
+        "{said}"
+    );
+    assert!(out.stdout.is_empty(), "{:?}", out.stdout);
+}

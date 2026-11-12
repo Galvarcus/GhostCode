@@ -78,14 +78,16 @@ fn a_variable_reached_through_an_arrow_is_still_a_reference() {
 }
 
 /// A scope prefix is one letter, and a name of one letter is left out
-/// of the table, so nothing here reads `g:flag = 1` as a command. The
-/// prefix itself is dropped as Vim's scope notation, which is a rule
-/// of its own, and the name the project chose keeps its reference.
+/// of the table, so nothing here reads `g:flags->add(1)` as a command.
+/// The variable is read by its full spelling, and the name behind the
+/// scope is no bare name of the project.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
 #[test]
-fn a_scoped_name_written_in_statement_position_is_still_a_reference() {
-    let text = "vim9script\ng:flag = 1\n";
+fn a_scoped_name_read_in_statement_position_is_still_a_reference() {
+    let text = "vim9script\ng:flags->add(1)\n";
 
-    assert_eq!(count(text, "flag"), 1);
+    assert_eq!(count(text, "g:flags"), 1);
+    assert_eq!(count(text, "flags"), 0);
 }
 
 #[test]

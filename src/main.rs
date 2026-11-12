@@ -37,6 +37,19 @@ fn run() -> anyhow::Result<()> {
         );
     }
 
+    // A scope that one line reads whole yields no finding, and that
+    // is said here for the same reason.
+    // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
+    for n in &found.notes {
+        eprintln!(
+            "{}: {}:{}: every {} variable counts as read from this line, so none is reported",
+            ghostcode::NAME,
+            n.file.display(),
+            n.line,
+            n.scope
+        );
+    }
+
     print!(
         "{}",
         match args.format {

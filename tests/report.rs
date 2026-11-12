@@ -213,6 +213,7 @@ fn text_prints_file_line_col_then_the_tagged_kind_and_name() {
             lang: "vim9",
         }],
         skipped: Vec::new(),
+        notes: Vec::new(),
     };
 
     assert_eq!(
@@ -237,6 +238,7 @@ fn a_write_only_finding_prints_its_own_tag_not_ghost() {
             lang: "vim9",
         }],
         skipped: Vec::new(),
+        notes: Vec::new(),
     };
 
     assert_eq!(
@@ -256,7 +258,7 @@ fn json_carries_every_field_a_consumer_reads() {
 
     assert_eq!(
         keys(&v),
-        ["findings", "root", "schema", "skipped", "summary"]
+        ["findings", "notes", "root", "schema", "skipped", "summary"]
     );
     // `local` joined the summary with the local finding class. A
     // reader that does not know the key is not broken by it, which is

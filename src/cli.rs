@@ -35,6 +35,26 @@ pub struct FindingArgs {
     /// reads.
     #[arg(long = "locals")]
     pub locals: Option<bool>,
+
+    /// Whether to report a variable in g: that the project writes
+    /// and nothing reads.
+    #[arg(long = "globals")]
+    pub globals: Option<bool>,
+
+    /// Whether to report a variable in b: that the project writes
+    /// and nothing reads.
+    #[arg(long = "buffer-vars")]
+    pub buffer_vars: Option<bool>,
+
+    /// Whether to report a variable in w: that the project writes
+    /// and nothing reads.
+    #[arg(long = "window-vars")]
+    pub window_vars: Option<bool>,
+
+    /// Whether to report a variable in t: that the project writes
+    /// and nothing reads.
+    #[arg(long = "tab-vars")]
+    pub tab_vars: Option<bool>,
 }
 
 #[derive(Debug, Clone, Parser)]

@@ -12,6 +12,8 @@ mod exists;
 pub mod lex;
 pub mod parse;
 pub mod rules;
+mod scopevars;
+mod shared;
 pub mod types;
 
 use std::path::Path;
@@ -44,10 +46,15 @@ impl Lang for Vim9 {
         parse::declarations(&src.rel, &stmts, out);
         parse::imports(&src.rel, &stmts, out);
         parse::references(&src.rel, &stmts, out);
+        parse::heredocs(&src.rel, &toks, out);
         Ok(())
     }
 
     fn is_api(&self, sym: &Symbol, cfg: &Config) -> bool {
         rules::is_api(sym, cfg)
+    }
+
+    fn shared_on(&self, name: &str, cfg: &Config) -> bool {
+        rules::shared_on(name, cfg)
     }
 }
