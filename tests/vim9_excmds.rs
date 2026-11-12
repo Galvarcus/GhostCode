@@ -182,3 +182,50 @@ fn a_call_after_a_bar_keeps_its_reference() {
 
     assert_eq!(count(text, "Fn"), 1);
 }
+
+/// A range stands between the colon and the command, so the command
+/// behind it is where Vim reads one, as it is with no range. `bwipe`
+/// abbreviates `bwipeout`, so it is marked rather than dropped.
+#[test]
+fn an_abbreviated_command_behind_a_range_is_marked_as_vims() {
+    let text = "vim9script\ndef F()\n  silent! :%bwipe!\nenddef\n";
+
+    assert!(one(text, "bwipe").owned);
+}
+
+#[test]
+fn a_command_written_whole_behind_a_range_is_dropped() {
+    let text = "vim9script\ndef F()\n  :%bwipeout!\nenddef\n";
+
+    assert_eq!(count(text, "bwipeout"), 0);
+}
+
+#[test]
+fn a_command_behind_a_colon_alone_is_dropped() {
+    let text = "vim9script\ndef F()\n  :bwipeout!\nenddef\n";
+
+    assert_eq!(count(text, "bwipeout"), 0);
+}
+
+#[test]
+fn a_command_behind_a_range_of_lines_is_marked_as_vims() {
+    let text = "vim9script\ndef F()\n  :1,$ bwipe\nenddef\n";
+
+    assert!(one(text, "bwipe").owned);
+}
+
+#[test]
+fn a_command_behind_an_offset_from_the_current_line_is_marked_as_vims() {
+    let text = "vim9script\ndef F()\n  :.;.+2 bwipe\nenddef\n";
+
+    assert!(one(text, "bwipe").owned);
+}
+
+/// A colon inside an expression opens no command: the word behind
+/// the colon of a conditional is a value.
+#[test]
+fn a_value_behind_the_colon_of_a_conditional_is_not_marked() {
+    let text = "vim9script\ndef F()\n  echo ok ? 1 : bwipe\nenddef\n";
+
+    assert!(!one(text, "bwipe").owned);
+}

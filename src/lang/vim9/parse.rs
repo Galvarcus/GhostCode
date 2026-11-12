@@ -838,6 +838,15 @@ const ESCAPE: &str = "\\";
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 const BAR: &str = "|";
 
+// The colon that opens a command line, which Vim9 script requires
+// before a range.
+const COLON: &str = ":";
+
+// What a range holds besides a line number: the whole buffer, the
+// current line, the last line, an offset in either direction, and the
+// two separators of a pair of addresses.
+const RANGE: &[&str] = &["%", ".", "$", "+", "-", ",", ";"];
+
 // Vim's scope letters, which stand before a colon and name where a
 // variable lives rather than naming anything the project declares.
 // `a:` is legacy, for a function's arguments, and is here because the
@@ -1950,10 +1959,31 @@ pub(super) fn reads_command(stmt: &[Tok], at: usize) -> bool {
 }
 
 /// FUNCTION: Where a statement's own command word stands, past any
-/// modifier before it.
+/// modifier before it and past a colon with the range behind it.
+///
+/// Vim9 script reads a range only behind a colon, so `:%bwipe!` and
+/// `:1,$delete` name a command where `%bwipe` alone would not.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 pub(super) fn command_at(stmt: &[Tok]) -> Option<usize> {
-    stmt.iter()
-        .position(|t| t.text != "!" && !modifier(&t.text))
+    let at = stmt
+        .iter()
+        .position(|t| t.text != "!" && !modifier(&t.text))?;
+
+    if stmt[at].text != COLON {
+        return Some(at);
+    }
+
+    stmt[at + 1..]
+        .iter()
+        .position(|t| !in_range(&t.text))
+        .map(|past| at + 1 + past)
+}
+
+/// FUNCTION: Whether a token is part of a range: the whole buffer, a
+/// line number, the current or the last line, an offset, or the
+/// separator between two addresses.
+fn in_range(text: &str) -> bool {
+    RANGE.contains(&text) || text.bytes().all(|b| b.is_ascii_digit())
 }
 
 /// FUNCTION: Whether the token at a position stands as a type.
