@@ -607,6 +607,8 @@ const KEYWORDS: &[&str] = &[
     "enddef",
     "class",
     "endclass",
+    "extends",
+    "implements",
     "endenum",
     "interface",
     "endinterface",

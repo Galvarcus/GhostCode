@@ -327,3 +327,22 @@ fn the_command_an_autocommand_runs_is_still_a_reference() {
 
     assert_eq!(count(text, "Refresh"), 1);
 }
+
+/// The two words a class line states its parents with are Vim9's own,
+/// and the name after each is the reference.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+#[test]
+fn the_word_before_an_interface_a_class_implements_is_not_a_reference() {
+    let text = "vim9script\ninterface Shape\nendinterface\nclass Box implements Shape\nendclass\n";
+
+    assert_eq!(count(text, "implements"), 0);
+    assert_eq!(count(text, "Shape"), 1);
+}
+
+#[test]
+fn the_word_before_a_class_another_extends_is_not_a_reference() {
+    let text = "vim9script\nclass Base\nendclass\nclass Box extends Base\nendclass\n";
+
+    assert_eq!(count(text, "extends"), 0);
+    assert_eq!(count(text, "Base"), 1);
+}
