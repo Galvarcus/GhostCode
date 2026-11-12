@@ -98,7 +98,7 @@ fn locals(corpus: &str) -> Vec<String> {
 fn each_corpus_counts_what_it_counted() {
     // corpus, ghost findings, unplaced names
     const COUNTS: &[(&str, u64, u64)] = &[
-        ("bartleby", 0, 7),
+        ("bartleby", 0, 0),
         ("ghostcode", 0, 0),
         ("logger", 0, 0),
         ("nested", 2, 0),

@@ -389,3 +389,58 @@ fn the_file_a_source_command_names_is_marked_as_vims() {
 
     assert!(one(text, "logger").owned);
 }
+
+/// A legacy `:function` line states parameters and flags, and none
+/// of them is a name the project could declare.
+#[test]
+fn a_flag_behind_a_legacy_function_signature_is_marked_as_vims() {
+    let text = "function! plug#ext#init(ext) abort\nendfunction\n";
+
+    assert!(one(text, "abort").owned);
+}
+
+#[test]
+fn a_parameter_of_a_legacy_function_is_marked_as_vims() {
+    let text = "function! plug#ext#init(ext) abort\nendfunction\n";
+
+    assert!(one(text, "ext").owned);
+}
+
+/// `a:` holds the arguments of a legacy function and `l:` its
+/// variables, so the name behind either is no symbol of the project.
+#[test]
+fn a_name_behind_the_argument_scope_is_marked_as_vims() {
+    let text = "function! F(ext)\n  call a:ext.add('x')\nendfunction\n";
+
+    assert!(refs(text)
+        .iter()
+        .filter(|r| r.name == "ext")
+        .all(|r| r.owned));
+}
+
+#[test]
+fn a_name_behind_the_local_scope_is_marked_as_vims() {
+    let text = "function! F()\n  let l:space = g:sep . l:space\nendfunction\n";
+
+    assert!(refs(text)
+        .iter()
+        .filter(|r| r.name == "space")
+        .all(|r| r.owned));
+}
+
+/// The colon of a conditional stands apart from the names around it,
+/// so the name behind it is a value.
+#[test]
+fn a_value_behind_the_colon_of_a_conditional_named_like_a_scope_is_not_marked() {
+    let text = "vim9script\ndef F(a: bool, l: number)\n  echo a ? l : Width\nenddef\n";
+
+    assert!(!one(text, "Width").owned);
+}
+
+/// `function()` is a builtin, and what it is called with is a value.
+#[test]
+fn an_argument_of_the_function_builtin_is_not_marked() {
+    let text = "vim9script\ndef F()\n  var R = function(Width)\nenddef\n";
+
+    assert!(!one(text, "Width").owned);
+}

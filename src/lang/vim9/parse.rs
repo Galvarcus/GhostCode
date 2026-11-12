@@ -867,6 +867,12 @@ const ARROW: &str = "=>";
 // What closes a bracket, which opens no command at the head of a line.
 const CLOSERS: &[&str] = &[")", "]", "}"];
 
+// The scopes of a legacy function: its arguments and its variables.
+const LEGACY_LOCALS: &[&str] = &["a", "l"];
+
+// The command that defines a legacy function.
+const FUNCTION: &str = "function";
+
 // The scope letter of a global function, as in `def g:Name()`.
 const GLOBAL: &str = "g";
 
@@ -1302,7 +1308,9 @@ impl Collect<'_> {
             || text_args(stmt, i, heads)
             || (recv.is_none() && map_args(stmt, i))
             || NULLS.contains(&word)
-            || (TYPES.contains(&word) && in_type(stmt, i) && !called(stmt, i));
+            || (TYPES.contains(&word) && in_type(stmt, i) && !called(stmt, i))
+            || legacy_local(stmt, i)
+            || legacy_signature(stmt, i);
 
         self.out.re(Reference {
             name: tok.text.clone(),
@@ -1743,6 +1751,40 @@ fn scoped(stmt: &[Tok], i: usize, word: &str) -> bool {
     }
 
     i >= 2 && stmt[i - 1].text == ":" && stmt[i - 2].text == "v" && is_type_position(stmt, i)
+}
+
+/// FUNCTION: Whether a name stands behind `a:` or `l:`, which hold
+/// the arguments and the variables of a legacy function.
+///
+/// Neither can be a symbol of the project. The colon and the name
+/// are glued, which is what tells the scope from a conditional whose
+/// colon stands apart.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+fn legacy_local(stmt: &[Tok], i: usize) -> bool {
+    i >= 2
+        && stmt[i].glued
+        && stmt[i - 1].glued
+        && stmt[i - 1].text == COLON
+        && LEGACY_LOCALS.contains(&stmt[i - 2].text.as_str())
+}
+
+/// FUNCTION: Whether a name is a parameter or a flag of a legacy
+/// `:function` line: behind the bracket that opens its parameters.
+///
+/// The parameters are read through `a:`, and `abort`, `range`, `dict`
+/// and `closure` are words of Vim. A call of the `function()` builtin
+/// is no such line, which `reads_command` answers.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+fn legacy_signature(stmt: &[Tok], i: usize) -> bool {
+    let Some(at) = command_at(stmt) else {
+        return false;
+    };
+
+    if !reads_command(stmt, at) || excmds::canonical(&stmt[at].text) != Some(FUNCTION) {
+        return false;
+    }
+
+    stmt[at..i].iter().any(|tok| tok.text == "(")
 }
 
 /// FUNCTION: Where a `:command` statement names the command, after
