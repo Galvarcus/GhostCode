@@ -778,11 +778,20 @@ const SET_FAMILY: &[&str] = &["set", "setlocal", "setglobal"];
 
 // The commands whose arguments are text Vim keeps for itself from the
 // command to its end: a highlight group, an attribute and its value,
-// a keyword of the command, the words of a pattern, and the path of a
-// menu. `canonical` reaches each from an abbreviation, as it does a
-// set command.
+// a keyword of the command, the words of a pattern, the path of a
+// menu, a color scheme, a locale with its category, and a filetype.
+// `canonical` reaches each from an abbreviation, as it does a set
+// command.
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-const TEXT_FAMILY: &[&str] = &["highlight", "syntax", "emenu"];
+const TEXT_FAMILY: &[&str] = &[
+    "highlight",
+    "syntax",
+    "emenu",
+    "echohl",
+    "colorscheme",
+    "language",
+    "setfiletype",
+];
 
 // The command that runs its argument as keys. It is apart from the
 // family above because it takes a bar as one of those keys, so
@@ -1250,8 +1259,14 @@ impl Collect<'_> {
         // spelling still takes the credit, and where none exists the
         // name is not counted as unplaced.
         // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/31
-        let vims =
-            recv.is_none() && in_command(stmt, i, heads) && excmds::canonical(word).is_some();
+        //
+        // A word with a capital there is a user command, which Vim
+        // owns once a plugin defines it. Vim9 script reads nothing
+        // else at the head of a statement unless the word is called,
+        // reached into or assigned to, and `in_command` refuses those.
+        let vims = recv.is_none()
+            && in_command(stmt, i, heads)
+            && (excmds::canonical(word).is_some() || user_command(word));
 
         if vims && excmds::has(word) {
             return;
@@ -1525,6 +1540,12 @@ fn opens_def_body(words: &[&str], scope: &Scope) -> bool {
 /// its own, as `func(number): bool` does.
 fn called(stmt: &[Tok], i: usize) -> bool {
     stmt[i].text != "func" && stmt.get(i + 1).is_some_and(|t| t.text == "(")
+}
+
+/// FUNCTION: Whether a word can name a user command, which Vim
+/// requires to start with a capital.
+fn user_command(word: &str) -> bool {
+    word.starts_with(|c: char| c.is_ascii_uppercase())
 }
 
 /// FUNCTION: Whether a word is one of Vim's command modifiers,

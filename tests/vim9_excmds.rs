@@ -286,3 +286,91 @@ fn a_value_after_a_command_in_a_lambda_block_keeps_its_reference() {
 
     assert_eq!(count(text, "redraw"), 1);
 }
+
+/// The argument of a command that names something Vim keeps: a
+/// highlight group, a color scheme, a locale, a filetype. The
+/// project declares nothing one of them could mean.
+#[test]
+fn the_group_an_echohl_command_names_is_marked_as_vims() {
+    let text = "vim9script\ndef F()\n  echohl ErrorMsg\nenddef\n";
+
+    assert!(one(text, "ErrorMsg").owned);
+}
+
+#[test]
+fn the_scheme_a_colorscheme_command_names_is_marked_as_vims() {
+    let text = "vim9script\ndef F()\n  colorscheme default\nenddef\n";
+
+    assert!(one(text, "default").owned);
+}
+
+#[test]
+fn the_category_a_language_command_names_is_marked_as_vims() {
+    let text = "vim9script\ndef F()\n  language messages de_DE.UTF-8\nenddef\n";
+
+    assert!(one(text, "messages").owned);
+}
+
+#[test]
+fn the_locale_a_language_command_names_is_marked_as_vims() {
+    let text = "vim9script\ndef F()\n  language messages de_DE.UTF-8\nenddef\n";
+
+    assert!(one(text, "de_DE").owned);
+}
+
+#[test]
+fn the_filetype_a_setfiletype_command_names_is_marked_as_vims() {
+    let text = "vim9script\nautocmd BufRead,BufNewFile *.fountain setfiletype fountain\n";
+
+    assert!(refs(text)
+        .iter()
+        .filter(|r| r.name == "fountain")
+        .all(|r| r.owned));
+}
+
+/// A command ends at a bar, and the word behind the bar is no
+/// argument of it.
+#[test]
+fn a_value_behind_the_bar_of_an_echohl_command_is_not_marked() {
+    let text = "vim9script\ndef F()\n  echohl None | echo Later\nenddef\n";
+
+    assert!(!one(text, "Later").owned);
+}
+
+/// A word with a capital at the head of a statement is a user
+/// command: Vim9 script reads nothing else there unless the word is
+/// called, reached into or assigned to.
+#[test]
+fn a_user_command_with_a_bang_is_marked_as_vims() {
+    let text = "vim9script\ndef F()\n  PluginOpen!\nenddef\n";
+
+    assert!(one(text, "PluginOpen").owned);
+}
+
+#[test]
+fn a_user_command_with_an_argument_is_marked_as_vims() {
+    let text = "vim9script\ndef F()\n  PluginOpen draft\nenddef\n";
+
+    assert!(one(text, "PluginOpen").owned);
+}
+
+#[test]
+fn a_function_called_at_the_head_of_a_statement_is_not_marked() {
+    let text = "vim9script\ndef F()\n  PluginOpen()\nenddef\n";
+
+    assert!(!one(text, "PluginOpen").owned);
+}
+
+#[test]
+fn a_class_reached_into_at_the_head_of_a_statement_is_not_marked() {
+    let text = "vim9script\ndef F()\n  Menu.Open()\nenddef\n";
+
+    assert!(!one(text, "Menu").owned);
+}
+
+#[test]
+fn a_word_with_a_capital_behind_a_command_is_not_marked() {
+    let text = "vim9script\ndef F()\n  echo PluginOpen\nenddef\n";
+
+    assert!(!one(text, "PluginOpen").owned);
+}
