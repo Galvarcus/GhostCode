@@ -46,6 +46,7 @@ impl Lang for Vim9 {
         parse::declarations(&src.rel, &stmts, out);
         parse::imports(&src.rel, &stmts, out);
         parse::references(&src.rel, &stmts, out);
+        parse::heredocs(&src.rel, &toks, out);
         Ok(())
     }
 

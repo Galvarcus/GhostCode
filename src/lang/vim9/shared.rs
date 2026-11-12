@@ -56,9 +56,32 @@ const CONST: &str = "const";
 // What gives a declaration its value.
 const ASSIGN: &str = "=";
 
-// What may stand against a scope that has no name behind it: the end
-// of an argument, an index, and an arrow.
-const AFTER_SCOPE: &[&str] = &[",", ")", "[", "->"];
+// What joins two strings, in Vim9 and in legacy script. A name that
+// ends its string before one goes on in what follows.
+const JOINS: &[&str] = &["..", "."];
+
+// The key notation of a bar, which ends a command in a mapping as the
+// bar itself does elsewhere.
+const BAR_KEY: [&str; 3] = ["<", "bar", ">"];
+
+// What opens a function body, and what closes one. A constant inside
+// a body is a local of it.
+const BODY: &[&str] = &["def", "function"];
+const BODY_END: &[&str] = &["enddef", "endfunction"];
+
+// The key under which `getbufinfo()`, `getwininfo()` and
+// `gettabinfo()` give every variable of a buffer, a window or a tab,
+// and the scopes it can therefore hold. The key does not say which
+// function it came from, and the functions are called far more often
+// for something else, so the key is what credits, and it credits all
+// three.
+const VARIABLES: &str = "variables";
+const HELD: &[char] = &['b', 'w', 't'];
+
+// What stands before a key: the dot of a member and the bracket of an
+// index.
+const DOT: &str = ".";
+const INDEX: &str = "[";
 
 // What opens an option name where a function takes one in place of a
 // variable name: `getbufvar(nr, '&modified')`.
@@ -189,23 +212,53 @@ pub(super) fn uses(stmt: &[Tok], consts: &Consts) -> Uses {
     out
 }
 
-/// FUNCTION: The string constants of one file: each `const` whose
-/// value is one plain string.
+/// FUNCTION: The string constants of one file: each `const` at the
+/// level of the script whose value is one plain string.
 ///
 /// A project names a buffer variable once, as
 /// `const PENDING = 'plugin_pending'`, and passes the constant where
 /// Vim takes the name. A name two statements give two values is left
-/// out, because the scan cannot tell which one a use means.
+/// out, because the scan cannot tell which one a use means. A constant
+/// of a function body is left out too: it is a local of that body, and
+/// a parameter of another function may carry its name.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
 pub(super) fn consts(stmts: &[Vec<Tok>]) -> Consts {
     let mut out = Consts::new();
     let mut twice: Vec<String> = Vec::new();
+
+    let mut depth = 0usize;
 
     for stmt in stmts {
         let code: Vec<&Tok> = stmt
             .iter()
             .filter(|t| !matches!(t.kind, TokKind::Comment | TokKind::Newline))
             .collect();
+
+        // The word that opens a body may stand behind `export` or
+        // `static`, and a legacy one may be abbreviated.
+        let opens = code.iter().take(2).any(|t| {
+            t.kind == TokKind::Ident
+                && (BODY.contains(&t.text.as_str())
+                    || excmds::canonical(&t.text).is_some_and(|c| BODY.contains(&c)))
+        });
+        let closes = code.first().is_some_and(|t| {
+            BODY_END.contains(&t.text.as_str())
+                || excmds::canonical(&t.text).is_some_and(|c| BODY_END.contains(&c))
+        });
+
+        if closes {
+            depth = depth.saturating_sub(1);
+            continue;
+        }
+
+        if opens {
+            depth += 1;
+            continue;
+        }
+
+        if depth > 0 {
+            continue;
+        }
 
         let Some(at) = code.iter().take(2).position(|t| t.text == CONST) else {
             continue;
@@ -378,9 +431,33 @@ fn called(stmt: &[Tok], run: Range<usize>, consts: &Consts, found: &mut Vec<Use>
         });
     }
 
+    // The key `variables` of what an info function returns holds a
+    // whole scope, as a member or as an index.
+    for i in run.clone().skip(1) {
+        let tok = &stmt[i];
+        let before = stmt[i - 1].text.as_str();
+
+        let key = match tok.kind {
+            TokKind::Ident => tok.text == VARIABLES && before == DOT,
+            TokKind::Str => unquote(&tok.text) == VARIABLES && before == INDEX,
+            _ => false,
+        };
+
+        if key {
+            found.extend(HELD.iter().map(|scope| Use {
+                spelling: Spelling::whole(*scope),
+                at: i,
+                write: false,
+                lead: false,
+            }));
+        }
+    }
+
     // A scope with no name behind it stands for every variable it
-    // holds: `keys(g:)`, `g:[name]`, `extend(g:, defaults)`. The scope
-    // of a `get()` whose key was read above is the one exception.
+    // holds: `keys(g:)`, `g:[name]`, `var all = g:`, and the legacy
+    // `g:{name}`. Either the command ends at the colon or something
+    // that is no name stands against it. The scope of a `get()` whose
+    // key was read above is the one exception.
     for i in run.clone() {
         let Some(scope) = (i + 1 < run.end)
             .then(|| bare_scope(stmt, i..i + 2))
@@ -390,7 +467,7 @@ fn called(stmt: &[Tok], run: Range<usize>, consts: &Consts, found: &mut Vec<Use>
         };
 
         let next = stmt.get(i + 2).filter(|_| i + 2 < run.end);
-        let alone = next.is_some_and(|t| t.glued && AFTER_SCOPE.contains(&t.text.as_str()));
+        let alone = next.is_none_or(|t| t.glued && t.kind != TokKind::Ident);
         let option = i > 0 && stmt[i - 1].text == OPTION && stmt[i].glued;
 
         if alone && !option && !answered.contains(&i) {
@@ -410,12 +487,40 @@ fn called(stmt: &[Tok], run: Range<usize>, consts: &Consts, found: &mut Vec<Use>
 /// inside a string, which is how a test hands a setting to another
 /// Vim and how `exists()` asks for one.
 fn quoted(stmt: &[Tok], run: Range<usize>, found: &mut Vec<Use>) {
-    for i in run {
+    for i in run.clone() {
         if stmt[i].kind != TokKind::Str {
             continue;
         }
 
-        for spelling in spellings(&unquote(&stmt[i].text)) {
+        let text = unquote(&stmt[i].text);
+
+        let mut held = spellings(&text);
+
+        // A name that ends its string before a join goes on in what
+        // is joined to it: `'g:plugin_' .. kind`. Its end is not
+        // known, and a scope alone there names any variable.
+        let joined = stmt
+            .get(i + 1)
+            .filter(|_| i + 1 < run.end)
+            .is_some_and(|t| JOINS.contains(&t.text.as_str()));
+
+        if joined {
+            if let Some(scope) = ends_in_scope(&text) {
+                held.push(Spelling::whole(scope));
+            } else if let Some(Spelling::Exact(name)) = held.last() {
+                if text.ends_with(name.as_str()) {
+                    let head = name.clone();
+                    held.pop();
+                    held.push(Spelling::Fit {
+                        head,
+                        tail: String::new(),
+                        whole: false,
+                    });
+                }
+            }
+        }
+
+        for spelling in held {
             found.push(Use {
                 spelling,
                 at: i,
@@ -424,6 +529,22 @@ fn quoted(stmt: &[Tok], run: Range<usize>, found: &mut Vec<Use>) {
             });
         }
     }
+}
+
+/// FUNCTION: The scope a piece of text ends in, where no name stands
+/// behind it, as the `g:` of `'let v = g:'`.
+fn ends_in_scope(text: &str) -> Option<char> {
+    let mut back = text.chars().rev();
+
+    if back.next() != Some(':') {
+        return None;
+    }
+
+    let scope = back.next().filter(|c| SCOPES.contains(c))?;
+    let before = back.next();
+
+    (!before.is_some_and(|c| c.is_ascii_alphanumeric() || ['_', ':', '&', '#', '.'].contains(&c)))
+        .then_some(scope)
 }
 
 /// FUNCTION: The arguments of a call, each as the range of its tokens,
@@ -503,7 +624,15 @@ fn name_of(stmt: &[Tok], arg: Range<usize>, scope: char, consts: &Consts) -> Opt
     let word = |s: &str| s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
 
     if let Some((head, rest)) = text.split_once(GAP) {
-        let tail = rest.rsplit_once(GAP_END).map_or("", |(_, tail)| tail);
+        // What stands behind the last gap ends the name, unless more
+        // is joined to the string.
+        let joined = stmt[arg.start + 1..arg.end]
+            .iter()
+            .any(|t| JOINS.contains(&t.text.as_str()));
+        let tail = match rest.rsplit_once(GAP_END) {
+            Some((_, tail)) if !joined => tail,
+            _ => "",
+        };
 
         if !word(head) || !word(tail) {
             return Some(Spelling::whole(scope));
@@ -543,6 +672,17 @@ fn runs(stmt: &[Tok]) -> Vec<Range<usize>> {
             out.push(from..i);
             from = i + 1;
         }
+
+        let key = stmt.get(i..i + BAR_KEY.len()).is_some_and(|toks| {
+            toks.iter()
+                .zip(BAR_KEY)
+                .all(|(t, want)| t.text.eq_ignore_ascii_case(want))
+        });
+
+        if key {
+            out.push(from..i);
+            from = i + BAR_KEY.len();
+        }
     }
 
     out.push(from..stmt.len());
@@ -574,6 +714,23 @@ fn named(stmt: &[Tok], run: Range<usize>, taken: &mut Vec<usize>) -> Vec<Use> {
         }
 
         if removes {
+            continue;
+        }
+
+        // A legacy name may go on in braces, as `g:plugin_{kind}`,
+        // and what the braces give is known only to a run.
+        if next.is_some_and(|t| t.glued && t.text.starts_with(GAP)) {
+            out.push(Use {
+                spelling: Spelling::Fit {
+                    head: name,
+                    tail: String::new(),
+                    whole: false,
+                },
+                at,
+                write: false,
+                lead: false,
+            });
+
             continue;
         }
 

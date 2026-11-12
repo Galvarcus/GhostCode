@@ -430,3 +430,118 @@ fn a_letter_that_is_no_scope_reads_nothing() {
     assert!(a.fits.is_empty());
     assert!(a.refs.iter().all(|r| !r.name.contains(':')));
 }
+
+/// The review of the branch found each form below read as an exact
+/// name, or not read at all, which reported a variable in use.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
+#[test]
+fn a_spelling_joined_to_more_is_a_fit() {
+    let text = "vim9script\ndef F(kind: string): any\n  return eval('g:p_' .. kind)\nenddef\n";
+
+    assert_eq!(fits(text), vec![fit("g:p_", "", false)]);
+    assert_eq!(reads(text, "g:p_"), 0);
+}
+
+#[test]
+fn a_scope_joined_to_a_name_credits_the_whole_scope() {
+    let text = "vim9script\ndef F(kind: string): any\n  return eval('g:' .. kind)\nenddef\n";
+
+    assert_eq!(fits(text), vec![fit("g:", "", true)]);
+}
+
+#[test]
+fn a_legacy_join_after_a_spelling_is_a_fit() {
+    let text = "function! F(kind)\n  execute 'let l:v = g:p_' . a:kind\nendfunction\n";
+
+    assert!(fits(text).contains(&fit("g:p_", "", false)));
+}
+
+#[test]
+fn a_spelling_that_ends_its_string_with_nothing_joined_is_exact() {
+    let text = "vim9script\nif exists('g:p_x') && Ok()\nendif\n";
+
+    assert_eq!(reads(text, "g:p_x"), 1);
+    assert!(fits(text).is_empty());
+}
+
+#[test]
+fn a_legacy_name_with_braces_is_a_fit() {
+    let text = "function! F(kind)\n  return g:p_{a:kind}\nendfunction\n";
+
+    assert_eq!(fits(text), vec![fit("g:p_", "", false)]);
+    assert_eq!(reads(text, "g:p_"), 0);
+}
+
+#[test]
+fn a_scope_that_ends_an_expression_credits_the_whole_scope() {
+    let text = "vim9script\nvar d = g:\nvar l = [w:, b:]\nvar k = {all: t:}\n";
+
+    assert_eq!(
+        fits(text),
+        vec![
+            fit("g:", "", true),
+            fit("w:", "", true),
+            fit("b:", "", true),
+            fit("t:", "", true),
+        ]
+    );
+}
+
+/// A constant of one function says nothing of a parameter of another
+/// that has its name.
+#[test]
+fn a_constant_of_a_function_body_names_no_variable() {
+    let text = "vim9script\ndef A()\n  const key = 'p_a'\n  echo key\nenddef\ndef B(key: string): number\n  return get(g:, key, 0)\nenddef\n";
+
+    assert_eq!(fits(text), vec![fit("g:", "", true)]);
+    assert_eq!(reads(text, "g:p_a"), 0);
+}
+
+#[test]
+fn a_spelling_in_a_heredoc_reads_the_name() {
+    let text = "vim9script\nvar lines =<< trim END\n  echo g:p_x\nEND\nexecute lines\n";
+
+    assert_eq!(reads(text, "g:p_x"), 1);
+}
+
+/// `getbufinfo()`, `getwininfo()` and `gettabinfo()` give every
+/// variable of a buffer, a window or a tab under the key `variables`.
+/// The key does not say which of the three it came from.
+#[test]
+fn the_variables_key_credits_the_three_scopes_it_can_hold() {
+    let whole = vec![
+        fit("b:", "", true),
+        fit("w:", "", true),
+        fit("t:", "", true),
+    ];
+
+    for text in [
+        "vim9script\necho getbufinfo(1)[0].variables\n",
+        "vim9script\ndef F(info: dict<any>)\n  echo info['variables']\nenddef\n",
+    ] {
+        assert_eq!(fits(text), whole, "{text}");
+    }
+}
+
+/// The same functions are called for a buffer's name or a window's
+/// size far more often, and such a call reads no variable.
+#[test]
+fn an_info_function_alone_credits_no_scope() {
+    let text = "vim9script\ndef F(): list<any>\n  return getbufinfo()\nenddef\n";
+
+    assert!(fits(text).is_empty());
+}
+
+#[test]
+fn a_bar_in_key_notation_ends_a_command() {
+    let text = "nnoremap <F2> :let g:p_x = 1 <bar> echo g:p_x<CR>\n";
+
+    assert_eq!(reads(text, "g:p_x"), 1);
+}
+
+#[test]
+fn an_interpolated_name_with_more_joined_fixes_no_end() {
+    let text = "vim9script\ndef F(a: string)\n  echo get(g:, $'p_{a}_x' .. 'more')\nenddef\n";
+
+    assert_eq!(fits(text), vec![fit("g:p_", "", false)]);
+}

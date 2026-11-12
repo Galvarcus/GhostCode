@@ -162,6 +162,44 @@ pub fn declarations(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
     }
 }
 
+/// FUNCTION: Record each scoped variable the body of a heredoc
+/// spells in full.
+///
+/// A statement holds no heredoc body, because the body is text and no
+/// code. The text is often a script for another Vim, and a variable
+/// it names is in use. The read is given to the top-level code of the
+/// file: the lexer does not say which body a heredoc stands in, and
+/// that code runs wherever any part of the file does.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
+pub fn heredocs(file: &Path, toks: &[Tok], out: &mut dyn Sink) {
+    let origin = SymbolId::script(file);
+
+    for tok in toks.iter().filter(|t| t.kind == TokKind::Heredoc) {
+        for spelling in shared::spellings(&tok.text) {
+            match spelling {
+                shared::Spelling::Exact(name) => out.re(Reference {
+                    name,
+                    recv: None,
+                    file: file.to_path_buf(),
+                    line: tok.line,
+                    origin: Some(origin.clone()),
+                    target: None,
+                    owned: true,
+                    member: false,
+                }),
+                shared::Spelling::Fit { head, tail, whole } => out.fit(Fit {
+                    head,
+                    tail,
+                    whole,
+                    file: file.to_path_buf(),
+                    line: tok.line,
+                    origin: Some(origin.clone()),
+                }),
+            }
+        }
+    }
+}
+
 /// FUNCTION: Record each write of a variable every file shares, as a
 /// declaration of it.
 ///
