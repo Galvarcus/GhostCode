@@ -19,6 +19,7 @@ use crate::lang::vim9::types;
 use crate::lang::vim9::types::Blocks;
 use crate::lang::vim9::types::Locals;
 use crate::lang::vim9::types::Types;
+use crate::model::Fit;
 use crate::model::Import;
 use crate::model::Kind;
 use crate::model::Reference;
@@ -113,6 +114,7 @@ pub fn statements(toks: &[Tok]) -> Vec<Vec<Tok>> {
 /// than the rest of the file.
 pub fn declarations(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
     let mut scope = Scope::default();
+    let consts = shared::consts(stmts);
 
     for stmt in stmts {
         let words: Vec<&str> = stmt
@@ -125,7 +127,7 @@ pub fn declarations(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
             continue;
         };
 
-        shared_writes(file, stmt, out);
+        shared_writes(file, stmt, &consts, out);
 
         if close_container(&words, &mut scope) {
             continue;
@@ -166,9 +168,11 @@ pub fn declarations(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
 /// The variable is one for the project, so its id names no file, and
 /// each write of it gives the same id. The report keeps one of them.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
-fn shared_writes(file: &Path, stmt: &[Tok], out: &mut dyn Sink) {
-    for used in shared::uses(stmt, &shared::Consts::new()).found {
-        let shared::Spelling::Exact(name) = used.spelling;
+fn shared_writes(file: &Path, stmt: &[Tok], consts: &shared::Consts, out: &mut dyn Sink) {
+    for used in shared::uses(stmt, consts).found {
+        let shared::Spelling::Exact(name) = used.spelling else {
+            continue;
+        };
 
         if !used.write {
             continue;
@@ -908,6 +912,7 @@ pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
     let mut scope = Scope::default();
     let mut locals = Locals::default();
     let mut blocks = Blocks::default();
+    let consts = shared::consts(stmts);
 
     for stmt in stmts {
         let words: Vec<&str> = stmt
@@ -971,23 +976,36 @@ pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
         // variable the project never writes is another plugin's or
         // the user's, and no gap.
         // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
-        let used = shared::uses(stmt, &shared::Consts::new());
+        //
+        // A name with a gap in it is kept until every variable is
+        // known, and then read as each one its fixed parts fit.
+        let used = shared::uses(stmt, &consts);
         let mut passed = skip.clone();
         passed.extend(&used.taken);
 
         for read in used.found.into_iter().filter(|u| !u.write) {
-            let shared::Spelling::Exact(name) = read.spelling;
+            let line = stmt[read.at].line;
 
-            out.re(Reference {
-                name,
-                recv: None,
-                file: file.to_path_buf(),
-                line: stmt[read.at].line,
-                origin: Some(origin.clone()),
-                target: None,
-                owned: true,
-                member: false,
-            });
+            match read.spelling {
+                shared::Spelling::Exact(name) => out.re(Reference {
+                    name,
+                    recv: None,
+                    file: file.to_path_buf(),
+                    line,
+                    origin: Some(origin.clone()),
+                    target: None,
+                    owned: true,
+                    member: false,
+                }),
+                shared::Spelling::Fit { head, tail, whole } => out.fit(Fit {
+                    head,
+                    tail,
+                    whole,
+                    file: file.to_path_buf(),
+                    line,
+                    origin: Some(origin.clone()),
+                }),
+            }
         }
 
         let mut sink = Collect {

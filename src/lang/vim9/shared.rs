@@ -43,6 +43,23 @@ const ARROW: &str = "->";
 // What divides the arguments of a call.
 const COMMA: &str = ",";
 
+// What opens the part of a name that only a run of the program can
+// give, in an interpolated string and in a legacy curly-brace name.
+const GAP: char = '{';
+
+// What closes it.
+const GAP_END: char = '}';
+
+// What declares a constant.
+const CONST: &str = "const";
+
+// What gives a declaration its value.
+const ASSIGN: &str = "=";
+
+// What may stand against a scope that has no name behind it: the end
+// of an argument, an index, and an arrow.
+const AFTER_SCOPE: &[&str] = &[",", ")", "[", "->"];
+
 // What opens an option name where a function takes one in place of a
 // variable name: `getbufvar(nr, '&modified')`.
 const OPTION_NAME: char = '&';
@@ -77,6 +94,32 @@ pub(super) type Consts = HashMap<String, String>;
 pub(super) enum Spelling {
     /// The full spelling, as `g:x`.
     Exact(String),
+    /// A name with a gap. `whole` is set where no part of the name
+    /// is fixed, and `head` is then the scope alone, as `g:`.
+    Fit {
+        head: String,
+        tail: String,
+        whole: bool,
+    },
+}
+
+impl Spelling {
+    /// METHOD: The full spelling, where the name has no gap.
+    fn exact(&self) -> Option<&str> {
+        match self {
+            Self::Exact(name) => Some(name),
+            Self::Fit { .. } => None,
+        }
+    }
+
+    /// METHOD: Every variable of one scope.
+    fn whole(scope: char) -> Self {
+        Self::Fit {
+            head: format!("{scope}{COLON}"),
+            tail: String::new(),
+            whole: true,
+        }
+    }
 }
 
 /// One use of a scoped variable.
@@ -111,35 +154,85 @@ pub(super) struct Uses {
 /// at a bar, so the guard of `if !exists('g:x') | g:x = 1` is a read
 /// of its own.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
-pub(super) fn uses(stmt: &[Tok], _consts: &Consts) -> Uses {
+pub(super) fn uses(stmt: &[Tok], consts: &Consts) -> Uses {
     let mut out = Uses::default();
 
     for run in runs(stmt) {
         let mut found = named(stmt, run.clone(), &mut out.taken);
-        let keyed = called(stmt, run.clone(), &mut found);
+        let keyed = called(stmt, run.clone(), consts, &mut found);
         quoted(stmt, run, &mut found);
 
         let written: Vec<String> = found
             .iter()
             .filter(|u| u.write)
-            .map(|u| match &u.spelling {
-                Spelling::Exact(name) => name.clone(),
-            })
+            .filter_map(|u| u.spelling.exact().map(str::to_string))
             .collect();
 
         for u in found.iter_mut().filter(|u| u.write) {
-            let Spelling::Exact(name) = &u.spelling;
-            u.lead = keyed.contains(name);
+            u.lead = u
+                .spelling
+                .exact()
+                .is_some_and(|name| keyed.iter().any(|k| k == name));
         }
 
         found.retain(|u| {
             u.write
-                || match &u.spelling {
-                    Spelling::Exact(name) => !written.contains(name),
-                }
+                || !u
+                    .spelling
+                    .exact()
+                    .is_some_and(|name| written.iter().any(|w| w == name))
         });
 
         out.found.extend(found);
+    }
+
+    out
+}
+
+/// FUNCTION: The string constants of one file: each `const` whose
+/// value is one plain string.
+///
+/// A project names a buffer variable once, as
+/// `const PENDING = 'plugin_pending'`, and passes the constant where
+/// Vim takes the name. A name two statements give two values is left
+/// out, because the scan cannot tell which one a use means.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
+pub(super) fn consts(stmts: &[Vec<Tok>]) -> Consts {
+    let mut out = Consts::new();
+    let mut twice: Vec<String> = Vec::new();
+
+    for stmt in stmts {
+        let code: Vec<&Tok> = stmt
+            .iter()
+            .filter(|t| !matches!(t.kind, TokKind::Comment | TokKind::Newline))
+            .collect();
+
+        let Some(at) = code.iter().take(2).position(|t| t.text == CONST) else {
+            continue;
+        };
+
+        let (Some(name), Some(value)) = (code.get(at + 1), code.last()) else {
+            continue;
+        };
+
+        let assigned = code.len() >= 2 && code[code.len() - 2].text == ASSIGN;
+
+        if !assigned || name.kind != TokKind::Ident || value.kind != TokKind::Str {
+            continue;
+        }
+
+        let text = unquote(&value.text);
+
+        match out.get(&name.text) {
+            Some(held) if *held != text => twice.push(name.text.clone()),
+            _ => {
+                out.insert(name.text.clone(), text);
+            }
+        }
+    }
+
+    for name in twice {
+        out.remove(&name);
     }
 
     out
@@ -168,7 +261,31 @@ pub(super) fn spellings(text: &str) -> Vec<Spelling> {
         }
 
         let name: String = chars[i + 2..].iter().take_while(|c| word(**c)).collect();
-        out.push(Spelling::Exact(format!("{}{COLON}{name}", chars[i])));
+        let full = format!("{}{COLON}{name}", chars[i]);
+        let rest = &chars[i + 2 + name.chars().count()..];
+
+        if rest.first() != Some(&GAP) {
+            out.push(Spelling::Exact(full));
+            continue;
+        }
+
+        // The name runs into a gap, and what stands against the end
+        // of the gap is the end of the name, where no second gap
+        // follows it.
+        let after: Vec<char> = rest
+            .iter()
+            .skip_while(|c| **c != GAP_END)
+            .skip(1)
+            .copied()
+            .collect();
+        let tail: String = after.iter().take_while(|c| word(**c)).collect();
+        let again = after.get(tail.chars().count()) == Some(&GAP);
+
+        out.push(Spelling::Fit {
+            head: full,
+            tail: if again { String::new() } else { tail },
+            whole: false,
+        });
     }
 
     out
@@ -177,8 +294,11 @@ pub(super) fn spellings(text: &str) -> Vec<Spelling> {
 /// FUNCTION: The variables one command names through a function that
 /// takes the name as a string. It answers the names a `get()` on a
 /// scope read, which is what marks a write beside one as the lead.
-fn called(stmt: &[Tok], run: Range<usize>, found: &mut Vec<Use>) -> Vec<String> {
+fn called(stmt: &[Tok], run: Range<usize>, consts: &Consts, found: &mut Vec<Use>) -> Vec<String> {
     let mut keyed = Vec::new();
+
+    // Where the scope of a `get()` stands, once its key was read.
+    let mut answered: Vec<usize> = Vec::new();
 
     for i in run.clone() {
         let opens = stmt[i].kind == TokKind::Ident
@@ -198,21 +318,21 @@ fn called(stmt: &[Tok], run: Range<usize>, found: &mut Vec<Use>) -> Vec<String> 
         let piped = i > run.start && stmt[i - 1].text == ARROW;
 
         if KEYED.contains(&word) {
-            let scope = if piped {
-                (i >= run.start + 3)
-                    .then(|| bare_scope(stmt, i - 3..i - 1))
-                    .flatten()
+            let dict = if piped {
+                (i >= run.start + 3).then(|| i - 3..i - 1)
             } else {
-                args.first().and_then(|a| bare_scope(stmt, a.clone()))
+                args.first().cloned()
             };
 
+            let scope = dict.clone().and_then(|d| bare_scope(stmt, d));
             let key = args.get(usize::from(!piped));
 
-            if let (Some(scope), Some(key)) = (scope, key) {
-                if let Some(name) = name_of(stmt, key.clone(), scope) {
-                    keyed.push(name.clone());
+            if let (Some(scope), Some(dict), Some(key)) = (scope, dict, key) {
+                if let Some(spelling) = name_of(stmt, key.clone(), scope, consts) {
+                    answered.push(dict.start);
+                    keyed.extend(spelling.exact().map(str::to_string));
                     found.push(Use {
-                        spelling: Spelling::Exact(name),
+                        spelling,
                         at: key.start,
                         write: false,
                         lead: false,
@@ -237,22 +357,50 @@ fn called(stmt: &[Tok], run: Range<usize>, found: &mut Vec<Use>) -> Vec<String> 
             continue;
         };
 
-        let Some(name) = name_of(stmt, arg.clone(), *scope) else {
+        let Some(spelling) = name_of(stmt, arg.clone(), *scope, consts) else {
             continue;
         };
 
         let write = setter.is_some();
 
-        if write && scopevars::has(&name) {
+        // A variable the help documents is written for Vim to read,
+        // and a write whose name has a gap declares nothing the scan
+        // can name.
+        if write && !spelling.exact().is_some_and(|name| !scopevars::has(name)) {
             continue;
         }
 
         found.push(Use {
-            spelling: Spelling::Exact(name),
+            spelling,
             at: arg.start,
             write,
             lead: false,
         });
+    }
+
+    // A scope with no name behind it stands for every variable it
+    // holds: `keys(g:)`, `g:[name]`, `extend(g:, defaults)`. The scope
+    // of a `get()` whose key was read above is the one exception.
+    for i in run.clone() {
+        let Some(scope) = (i + 1 < run.end)
+            .then(|| bare_scope(stmt, i..i + 2))
+            .flatten()
+        else {
+            continue;
+        };
+
+        let next = stmt.get(i + 2).filter(|_| i + 2 < run.end);
+        let alone = next.is_some_and(|t| t.glued && AFTER_SCOPE.contains(&t.text.as_str()));
+        let option = i > 0 && stmt[i - 1].text == OPTION && stmt[i].glued;
+
+        if alone && !option && !answered.contains(&i) {
+            found.push(Use {
+                spelling: Spelling::whole(scope),
+                at: i,
+                write: false,
+                lead: false,
+            });
+        }
     }
 
     keyed
@@ -329,17 +477,51 @@ fn bare_scope(stmt: &[Tok], arg: Range<usize>) -> Option<char> {
     (letters.next().is_none() && colon.text == COLON && colon.glued).then_some(letter)
 }
 
-/// FUNCTION: The full spelling an argument names in a scope, where the
-/// argument is one plain string. An option name is no variable.
-fn name_of(stmt: &[Tok], arg: Range<usize>, scope: char) -> Option<String> {
-    if arg.len() != 1 || stmt[arg.start].kind != TokKind::Str {
+/// FUNCTION: How an argument spells the variable it names in a
+/// scope, or none where it names an option.
+///
+/// One plain string is the name. A constant of the file that holds
+/// one is the same. A string with a gap fixes the parts around the
+/// gap. Anything else is a name only a run of the program gives, and
+/// stands for every variable of the scope.
+fn name_of(stmt: &[Tok], arg: Range<usize>, scope: char, consts: &Consts) -> Option<Spelling> {
+    let first = &stmt[arg.start];
+
+    let text = match first.kind {
+        TokKind::Str => unquote(&first.text),
+        TokKind::Ident if arg.len() == 1 => match consts.get(&first.text) {
+            Some(held) => held.clone(),
+            None => return Some(Spelling::whole(scope)),
+        },
+        _ => return Some(Spelling::whole(scope)),
+    };
+
+    if text.starts_with(OPTION_NAME) {
         return None;
     }
 
-    let name = unquote(&stmt[arg.start].text);
-    let plain = !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+    let word = |s: &str| s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
 
-    (plain && !name.starts_with(OPTION_NAME)).then(|| format!("{scope}{COLON}{name}"))
+    if let Some((head, rest)) = text.split_once(GAP) {
+        let tail = rest.rsplit_once(GAP_END).map_or("", |(_, tail)| tail);
+
+        if !word(head) || !word(tail) {
+            return Some(Spelling::whole(scope));
+        }
+
+        return Some(Spelling::Fit {
+            head: format!("{scope}{COLON}{head}"),
+            tail: tail.to_string(),
+            whole: head.is_empty() && tail.is_empty(),
+        });
+    }
+
+    // A string followed by more is an expression, as `'p_' .. kind`.
+    if arg.len() != 1 || text.is_empty() || !word(&text) {
+        return Some(Spelling::whole(scope));
+    }
+
+    Some(Spelling::Exact(format!("{scope}{COLON}{text}")))
 }
 
 /// FUNCTION: A string token without its quotes.

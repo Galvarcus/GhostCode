@@ -218,6 +218,25 @@ pub struct Text {
     pub origin: Option<SymbolId>,
 }
 
+/// A name with a gap in it. Part of a name can be known only when the
+/// program runs, as the `{kind}` of `g:plugin_{kind}_width`, and the
+/// read then names every symbol that the fixed parts fit. It is kept
+/// until all the symbols are known, as text is.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Fit {
+    /// What the name starts with.
+    pub head: String,
+    /// What the name ends with, which may be nothing.
+    pub tail: String,
+    /// Set where no part of the name itself is fixed, so that the read
+    /// names everything the start alone admits.
+    pub whole: bool,
+    pub file: PathBuf,
+    pub line: u32,
+    pub origin: Option<SymbolId>,
+}
+
 /// TRAIT: What a language's scan writes its findings into, so that a
 /// language need not know how they are stored.
 pub trait Sink {
@@ -226,6 +245,7 @@ pub trait Sink {
     fn import(&mut self, i: Import);
     fn root(&mut self, id: SymbolId);
     fn text(&mut self, t: Text);
+    fn fit(&mut self, f: Fit);
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -235,6 +255,7 @@ pub struct Analysis {
     pub roots: Vec<SymbolId>,
     pub imports: Vec<Import>,
     pub texts: Vec<Text>,
+    pub fits: Vec<Fit>,
 }
 
 impl Analysis {
@@ -264,6 +285,10 @@ impl Sink for Analysis {
 
     fn text(&mut self, t: Text) {
         self.texts.push(t);
+    }
+
+    fn fit(&mut self, f: Fit) {
+        self.fits.push(f);
     }
 }
 

@@ -324,3 +324,109 @@ fn a_guard_and_its_write_on_one_line_still_credits() {
     assert!(declares(text, "g:x"));
     assert_eq!(reads(text, "g:x"), 1);
 }
+
+/// FUNCTION: The names with a gap one snippet reads, each as its
+/// fixed start, its fixed end, and whether nothing of it is fixed.
+fn fits(text: &str) -> Vec<(String, String, bool)> {
+    scan(text)
+        .fits
+        .into_iter()
+        .map(|f| (f.head, f.tail, f.whole))
+        .collect()
+}
+
+/// FUNCTION: One fit, as `fits` gives it.
+fn fit(head: &str, tail: &str, whole: bool) -> (String, String, bool) {
+    (head.to_string(), tail.to_string(), whole)
+}
+
+#[test]
+fn a_constant_of_the_file_names_the_variable() {
+    let text = "vim9script\nconst KEY: string = 'p_doc'\ndef F()\n  echo get(b:, KEY, 0)\nenddef\n";
+
+    assert_eq!(reads(text, "b:p_doc"), 1);
+    assert!(fits(text).is_empty());
+}
+
+#[test]
+fn a_constant_names_the_variable_a_setter_declares() {
+    let text = "vim9script\nexport const KEY = 'p_doc'\ndef F(nr: number)\n  setbufvar(nr, KEY, 1)\nenddef\n";
+
+    assert!(declares(text, "b:p_doc"));
+}
+
+#[test]
+fn a_constant_given_two_values_is_not_resolved() {
+    let text = "vim9script\ndef F()\n  const KEY = 'a'\n  echo get(b:, KEY, 0)\nenddef\ndef G()\n  const KEY = 'b'\nenddef\n";
+
+    assert_eq!(fits(text), vec![fit("b:", "", true)]);
+}
+
+#[test]
+fn an_interpolated_name_is_a_fit() {
+    let text = "vim9script\ndef F(opt: string)\n  echo get(g:, $'logger_{opt}', 0)\nenddef\n";
+
+    assert_eq!(fits(text), vec![fit("g:logger_", "", false)]);
+}
+
+#[test]
+fn a_spelling_with_a_gap_in_a_string_is_a_fit() {
+    let text = "vim9script\ndef F(k: string)\n  echo $'g:p_conceal_{k}fg'\nenddef\n";
+
+    assert_eq!(fits(text), vec![fit("g:p_conceal_", "fg", false)]);
+}
+
+#[test]
+fn a_computed_name_credits_the_whole_scope() {
+    let text = "vim9script\ndef F(name: string)\n  echo get(g:, name)\nenddef\n";
+
+    assert_eq!(fits(text), vec![fit("g:", "", true)]);
+}
+
+#[test]
+fn an_index_on_a_scope_credits_the_whole_scope() {
+    let text = "vim9script\ndef F(name: string)\n  echo g:[name]\nenddef\n";
+
+    assert_eq!(fits(text), vec![fit("g:", "", true)]);
+}
+
+#[test]
+fn a_scope_passed_whole_credits_it() {
+    let text = "vim9script\ndef F()\n  echo keys(g:)\n  echo t:->keys()\nenddef\n";
+
+    assert_eq!(fits(text), vec![fit("g:", "", true), fit("t:", "", true)]);
+}
+
+#[test]
+fn an_empty_name_credits_the_whole_scope() {
+    let text = "vim9script\ndef F(nr: number)\n  echo getbufvar(nr, '')\nenddef\n";
+
+    assert_eq!(fits(text), vec![fit("b:", "", true)]);
+}
+
+#[test]
+fn a_name_read_whole_credits_no_scope() {
+    let text = "vim9script\ndef F()\n  echo get(g:, 'p_x', 0) g:->get('p_y', 0)\nenddef\n";
+
+    assert!(fits(text).is_empty());
+}
+
+#[test]
+fn a_fit_write_declares_nothing() {
+    let text = "vim9script\ndef F(nr: number, k: string)\n  setbufvar(nr, $'p_{k}', 1)\nenddef\n";
+    let a = scan(text);
+
+    assert!(a.syms.iter().all(|s| !s.id.is_shared()));
+    assert!(a.fits.is_empty());
+}
+
+/// A dictionary key, a parameter and the arms of a ternary all put a
+/// letter beside a colon, and none of them names a scope.
+#[test]
+fn a_letter_that_is_no_scope_reads_nothing() {
+    let text = "vim9script\ndef F(ok: bool, g: number, b: number)\n  var d = {g: 1, b: 2}\n  var L = (w: number) => w\n  echo ok ? g : b\nenddef\n";
+    let a = scan(text);
+
+    assert!(a.fits.is_empty());
+    assert!(a.refs.iter().all(|r| !r.name.contains(':')));
+}

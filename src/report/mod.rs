@@ -126,6 +126,7 @@ pub fn analyze(root: &Path, cfg: &Config) -> anyhow::Result<Report> {
 
     fold(&mut a);
     text_references(&mut a);
+    fit_references(&mut a);
 
     let resolved = resolve::all(&a);
     let reached = reach::walk(&a, &resolved);
@@ -239,6 +240,50 @@ fn text_references(a: &mut Analysis) {
                 origin: t.origin.clone(),
                 target: None,
                 owned: false,
+                member: false,
+            });
+        }
+    }
+
+    a.refs.extend(found);
+}
+
+/// FUNCTION: Turn each name with a gap into a reference to every
+/// symbol its fixed parts fit.
+///
+/// Only a symbol that belongs to no file can be named this way. Their
+/// names are sorted once, so a fit reads the run that shares its
+/// start and never the whole list: the cost stays that of the names
+/// it credits.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
+fn fit_references(a: &mut Analysis) {
+    let mut names: Vec<(&str, &SymbolId)> = a
+        .syms
+        .iter()
+        .filter(|s| s.id.is_shared())
+        .map(|s| (s.name.as_str(), &s.id))
+        .collect();
+    names.sort_unstable();
+
+    let mut found: Vec<crate::model::Reference> = Vec::new();
+
+    for fit in &a.fits {
+        let from = names.partition_point(|(name, _)| *name < fit.head.as_str());
+        let least = fit.head.len() + fit.tail.len();
+
+        for (name, id) in names[from..]
+            .iter()
+            .take_while(|(name, _)| name.starts_with(&fit.head))
+            .filter(|(name, _)| name.len() >= least && name.ends_with(&fit.tail))
+        {
+            found.push(crate::model::Reference {
+                name: (*name).to_string(),
+                recv: None,
+                file: fit.file.clone(),
+                line: fit.line,
+                origin: fit.origin.clone(),
+                target: Some((*id).clone()),
+                owned: true,
                 member: false,
             });
         }
@@ -428,5 +473,59 @@ mod tests {
         two.line = 5;
 
         assert_eq!(folded(vec![one, two]).len(), 2);
+    }
+
+    /// FUNCTION: A name with a gap, read at one line of one file.
+    fn gap(head: &str, tail: &str) -> crate::model::Fit {
+        crate::model::Fit {
+            head: head.to_string(),
+            tail: tail.to_string(),
+            whole: tail.is_empty() && head.len() == 2,
+            file: PathBuf::from("autoload/a.vim"),
+            line: 3,
+            origin: None,
+        }
+    }
+
+    /// FUNCTION: The names the fits of an analysis credit, in order.
+    fn credited(names: &[&str], fits: Vec<crate::model::Fit>) -> Vec<String> {
+        let mut a = Analysis {
+            syms: names
+                .iter()
+                .map(|n| write(n, "plugin/p.vim", 1, false))
+                .collect(),
+            fits,
+            ..Analysis::default()
+        };
+        fit_references(&mut a);
+
+        assert!(a.refs.iter().all(|r| r.owned && r.target.is_some()));
+
+        let mut out: Vec<String> = a.refs.into_iter().map(|r| r.name).collect();
+        out.sort();
+        out
+    }
+
+    #[test]
+    fn a_fit_credits_each_name_its_fixed_parts_fit() {
+        let names = ["g:p_a_fg", "g:p_b_fg", "g:p_a_bg", "b:p_a_fg"];
+
+        assert_eq!(
+            credited(&names, vec![gap("g:p_", "fg")]),
+            vec!["g:p_a_fg", "g:p_b_fg"]
+        );
+    }
+
+    #[test]
+    fn a_whole_fit_credits_every_name_of_its_scope_and_no_other() {
+        let names = ["g:a", "g:b", "b:a", "t:a"];
+
+        assert_eq!(credited(&names, vec![gap("g:", "")]), vec!["g:a", "g:b"]);
+    }
+
+    /// The start and the end may not share a character of the name.
+    #[test]
+    fn a_fit_longer_than_a_name_does_not_fit_it() {
+        assert!(credited(&["g:ab"], vec![gap("g:ab", "b")]).is_empty());
     }
 }
