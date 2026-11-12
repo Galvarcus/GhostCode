@@ -251,3 +251,40 @@ fn a_local_after_a_nested_def_is_still_a_local() {
         "the nested enddef closed Inner, not Outer"
     );
 }
+
+/// `def g:Name()` declares a global function. The scope letter is
+/// Vim's, and the name behind it is the function.
+#[test]
+fn a_def_behind_the_global_scope_is_a_function_of_its_own_name() {
+    let a = scan(
+        "tests/t.vim",
+        "vim9script\ndef g:Capture(): void\n  echo 1\nenddef\n",
+    );
+
+    assert_eq!(decls(&a), vec!["function Capture"]);
+}
+
+#[test]
+fn the_name_of_a_def_behind_the_global_scope_is_no_reference_to_itself() {
+    let a = scan(
+        "tests/t.vim",
+        "vim9script\ndef g:Capture(): void\n  echo 1\nenddef\n",
+    );
+
+    assert!(a.refs.iter().all(|r| r.name != "Capture"));
+}
+
+/// The body of such a def belongs to the function, so a variable it
+/// declares is scoped to that name.
+#[test]
+fn a_variable_in_a_def_behind_the_global_scope_is_scoped_to_the_function() {
+    let a = scan(
+        "tests/t.vim",
+        "vim9script\ndef g:Capture(): void\n  var row = 1\n  echo row\nenddef\n",
+    );
+
+    assert!(a
+        .syms
+        .iter()
+        .any(|s| s.id.to_string() == "tests/t.vim::Capture.row"));
+}

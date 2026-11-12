@@ -54,6 +54,7 @@ pub fn names(arg: &str) -> Vec<(String, bool)> {
         AUTOCMD => Vec::new(),
         OPTION => vims(past_scope(rest)),
         FEATURE | ENV => vims(rest),
+        FUNCTION if builtin(rest) => vims(rest),
         FUNCTION | COMMAND => theirs(rest),
         _ => match scope(arg) {
             Some((SCRIPT, name)) => theirs(name),
@@ -84,6 +85,13 @@ fn scope(arg: &str) -> Option<(char, &str)> {
 /// does, and the option's name stands behind it.
 fn past_scope(rest: &str) -> &str {
     scope(rest).map_or(rest, |(_, name)| name)
+}
+
+/// FUNCTION: Whether a function name is one only Vim can carry. Vim
+/// refuses a function of a plugin whose name opens with a lowercase
+/// letter, unless the name is an autoload one.
+fn builtin(name: &str) -> bool {
+    name.starts_with(|c: char| c.is_ascii_lowercase()) && !name.contains(AUTOCMD)
 }
 
 fn vims(text: &str) -> Vec<(String, bool)> {
@@ -140,5 +148,17 @@ mod tests {
     fn an_autocommand_group_holds_no_name() {
         assert!(names("#User#").is_empty());
         assert!(names("#bartleby_follow#BufEnter").is_empty());
+    }
+
+    /// Vim refuses a function of the project whose name opens with a
+    /// lowercase letter, unless the name is an autoload one.
+    #[test]
+    fn a_builtin_behind_the_function_sigil_is_vims() {
+        assert_eq!(names("*strptime"), vec![("strptime".to_string(), true)]);
+    }
+
+    #[test]
+    fn a_function_with_a_capital_behind_the_function_sigil_is_not_vims() {
+        assert_eq!(names("*Open"), vec![("Open".to_string(), false)]);
     }
 }

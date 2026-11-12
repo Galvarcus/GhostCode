@@ -308,9 +308,10 @@ fn function(
         return false;
     }
 
-    let Some(name) = rest.get(1) else {
+    let Some(name) = def_name(stmt, rest) else {
         return false;
     };
+    let name = &name;
 
     // A def's name is followed by its parameter list. Without one the
     // statement is not a declaration the analyzer can trust.
@@ -863,6 +864,9 @@ const ARROW: &str = "=>";
 // What closes a bracket, which opens no command at the head of a line.
 const CLOSERS: &[&str] = &[")", "]", "}"];
 
+// The scope letter of a global function, as in `def g:Name()`.
+const GLOBAL: &str = "g";
+
 // The colon that opens a command line, which Vim9 script requires
 // before a range.
 const COLON: &str = ":";
@@ -877,7 +881,7 @@ const RANGE: &[&str] = &["%", ".", "$", "+", "-", ",", ";"];
 // `a:` is legacy, for a function's arguments, and is here because the
 // scan reads legacy files too.
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-const SCOPES: &[&str] = &["a", "b", "g", "l", "s", "t", "v", "w"];
+pub(super) const SCOPES: &[&str] = &["a", "b", "g", "l", "s", "t", "v", "w"];
 
 // Vim's command modifiers, which are the only words a command may
 // stand behind. Twenty-three are the list at `:help <mods>`, and
@@ -1464,11 +1468,45 @@ fn declared_name_at(stmt: &[Tok], words: &[&str]) -> Option<usize> {
     }
 
     let at = stmt.iter().position(|t| t.text == keyword)?;
-    stmt.iter()
+    let name = stmt
+        .iter()
         .enumerate()
         .skip(at + 1)
         .find(|(_, t)| t.kind == TokKind::Ident)
-        .map(|(i, _)| i)
+        .map(|(i, _)| i)?;
+
+    Some(global_def_at(stmt, name).unwrap_or(name))
+}
+
+/// FUNCTION: The name a `def` statement declares.
+///
+/// `def g:Name()` declares a global function, and the word after
+/// `def` is then the scope letter and not the name.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+fn def_name<'a>(stmt: &'a [Tok], rest: &[&'a str]) -> Option<&'a str> {
+    let first = rest.get(1).copied()?;
+
+    let behind = stmt
+        .iter()
+        .position(|t| t.text == first)
+        .and_then(|at| global_def_at(stmt, at));
+
+    Some(behind.map_or(first, |at| stmt[at].text.as_str()))
+}
+
+/// FUNCTION: Where the name behind the global scope stands, when the
+/// word at `at` is that scope letter with a colon and a name glued
+/// behind it.
+fn global_def_at(stmt: &[Tok], at: usize) -> Option<usize> {
+    let colon = stmt.get(at + 1)?;
+    let name = stmt.get(at + 2)?;
+
+    (stmt[at].text == GLOBAL
+        && colon.text == COLON
+        && colon.glued
+        && name.glued
+        && name.kind == TokKind::Ident)
+        .then_some(at + 2)
 }
 
 /// FUNCTION: The symbol a statement opens a body for, so that what
@@ -1501,7 +1539,7 @@ fn body_id(file: &Path, stmt: &[Tok], words: &[&str], scope: &Scope) -> Option<S
         return None;
     }
 
-    let name = rest.get(1)?;
+    let name = def_name(stmt, rest)?;
     if !stmt.iter().any(|t| t.text == "(") {
         return None;
     }
@@ -2174,7 +2212,36 @@ fn in_type(stmt: &[Tok], i: usize) -> bool {
             continue;
         }
 
+        // A class stands in a list of types as a builtin type does,
+        // alone or behind the alias of an import: `func(BI.Item,
+        // list<BI.Item>)`. Only inside the brackets of a type, which
+        // the token behind the walk says: a value before a comma in a
+        // call would otherwise read as one.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+        if (text == DOT || user_command(text)) && class_in_types(stmt, at) {
+            continue;
+        }
+
         return text == ":";
+    }
+
+    false
+}
+
+/// FUNCTION: Whether the class at `at` stands inside the brackets of
+/// a type: the nearest bracket that is still open before it follows
+/// a type word, as the `(` of `func(` and the `<` of `list<` do.
+fn class_in_types(stmt: &[Tok], at: usize) -> bool {
+    let mut closed = 0usize;
+
+    for k in (0..at).rev() {
+        match stmt[k].text.as_str() {
+            ")" | ">" => closed += 1,
+            ">>" => closed += 2,
+            "(" | "<" if closed > 0 => closed -= 1,
+            "(" | "<" => return k > 0 && TYPES.contains(&stmt[k - 1].text.as_str()),
+            _ => {}
+        }
     }
 
     false

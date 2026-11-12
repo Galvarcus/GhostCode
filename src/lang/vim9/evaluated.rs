@@ -39,9 +39,6 @@ const KEY_JOIN: &str = "-";
 /// What opens the arguments of a call.
 const CALL: &str = "(";
 
-/// The letters that open a scope, as in `t:session`.
-const SCOPES: &[&str] = &["g", "b", "w", "t", "s", "l", "a", "v"];
-
 /// FUNCTION: Every name the argument holds, in order, each with
 /// whether it is Vim's own word.
 ///
@@ -55,14 +52,14 @@ const SCOPES: &[&str] = &["g", "b", "w", "t", "s", "l", "a", "v"];
 /// Past the gap a word is marked for one of two reasons. Its own
 /// shape says it is Vim's, wherever it stands: see `loose_words`. Or
 /// the command before the gap takes the rest of its line as text or
-/// as keys, and the word is outside every gap and is not called. A
-/// mark never takes a credit from a symbol, so a wrong mark costs a
-/// count and no finding.
+/// as keys, and the word is outside every gap and is not called, or
+/// stands in a string inside a gap. A mark never takes a credit from
+/// a symbol, so a wrong mark costs a count and no finding.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 pub fn names(arg: &str) -> Vec<(String, bool)> {
     let (head, tail) = arg.split_once(GAP).unwrap_or((arg, ""));
     let stmts = parse::statements(&lex::tokens(head));
-    let owns = stmts.last().is_some_and(|stmt| parse::owns_line(stmt));
+    let mut owns = stmts.last().is_some_and(|stmt| parse::owns_line(stmt));
 
     let mut vims = vims_words(&stmts);
     vims.extend(loose_words(head, false));
@@ -77,10 +74,33 @@ pub fn names(arg: &str) -> Vec<(String, bool)> {
     let mut code = true;
     let mut rest = tail;
 
+    // A word glued behind a gap that opens the text is the rest of a
+    // command the gap began, as `{mode}noremap` is, so the text behind
+    // that gap is read by position as a head is.
+    let mut glued = head.is_empty();
+
     while !rest.is_empty() {
         let end = if code { CLOSE } else { GAP };
         let (part, after) = rest.split_once(end).unwrap_or((rest, ""));
-        let loose = loose_words(part, code);
+        let mut loose = loose_words(part, code);
+
+        if !code && glued {
+            if part.starts_with(|c: char| c.is_ascii_alphabetic()) {
+                let stmts = parse::statements(&lex::tokens(part));
+
+                owns = stmts.last().is_some_and(|stmt| parse::owns_line(stmt));
+                loose.extend(vims_words(&stmts));
+            }
+
+            glued = false;
+        }
+
+        // A string inside a gap of a line that a command owns is text
+        // that goes into that line, as the keyword of a menu command
+        // is in `amenu {on ? "enable" : "disable"}`.
+        if code && owns {
+            loose.extend(string_words(part));
+        }
 
         // A word that is called is a function, and one the shape
         // rules did not take is no builtin: it is the project's, as
@@ -184,9 +204,11 @@ fn loose_words(text: &str, keys: bool) -> HashSet<String> {
         let behind = |text: &str| i > 0 && tok.glued && is(i - 1, text);
 
         let option = word.starts_with(OPTION) || behind(OPTION);
-        let scope = SCOPES.contains(&word) && is(i + 1, COLON) && glued(i + 1);
-        let scoped =
-            behind(COLON) && i > 1 && glued(i - 1) && SCOPES.contains(&toks[i - 2].text.as_str());
+        let scope = parse::SCOPES.contains(&word) && is(i + 1, COLON) && glued(i + 1);
+        let scoped = behind(COLON)
+            && i > 1
+            && glued(i - 1)
+            && parse::SCOPES.contains(&toks[i - 2].text.as_str());
         let called = is(i + 1, CALL) && builtins::has(word);
         let key = keys && behind(DOT) && i > 1 && toks[i - 2].kind == TokKind::Ident;
 
@@ -196,6 +218,15 @@ fn loose_words(text: &str, keys: bool) -> HashSet<String> {
     }
 
     out
+}
+
+/// FUNCTION: The words inside the strings of an expression.
+fn string_words(text: &str) -> HashSet<String> {
+    lex::tokens(text)
+        .iter()
+        .filter(|tok| tok.kind == TokKind::Str)
+        .flat_map(|tok| identifiers(&tok.text))
+        .collect()
 }
 
 /// FUNCTION: The words of a text that are called.
@@ -359,7 +390,7 @@ mod tests {
     #[test]
     fn key_notation_past_a_gap_is_vims() {
         assert_eq!(
-            words_of("{m}noremap <silent> <Plug>({name}) <C-g>"),
+            words_of("{m} <silent> <Plug>({name}) <C-g>"),
             vec!["silent", "Plug", "C", "g"]
         );
     }
@@ -428,6 +459,45 @@ mod tests {
         assert_eq!(
             words_of("&fullscreen = {on ? \"true\" : \"false\"}"),
             vec!["fullscreen", "true", "false"]
+        );
+    }
+
+    /// A word glued behind the gap that opens the text is the rest of
+    /// a command the gap began, as the mode letter of a mapping
+    /// command is put before `noremap`.
+    #[test]
+    fn a_command_glued_behind_the_gap_that_opens_the_text_is_vims() {
+        assert_eq!(
+            words_of("{m}noremap <silent> <Plug>({name}) {rhs}"),
+            vec!["noremap", "silent", "Plug"]
+        );
+    }
+
+    #[test]
+    fn the_keys_behind_a_command_glued_to_the_opening_gap_are_vims() {
+        assert_eq!(words_of("{m}map {lhs} x"), vec!["map", "x"]);
+    }
+
+    #[test]
+    fn a_word_apart_from_the_gap_that_opens_the_text_is_not_vims() {
+        assert_eq!(words_of("{m} noremap"), Vec::<String>::new());
+    }
+
+    /// A string inside a gap of a line that a command owns is text
+    /// that goes into that line.
+    #[test]
+    fn a_string_inside_a_gap_of_a_menu_command_is_vims() {
+        assert_eq!(
+            words_of("amenu {on ? \"enable\" : \"disable\"} {path}"),
+            vec!["amenu", "enable", "disable"]
+        );
+    }
+
+    #[test]
+    fn a_string_inside_a_gap_of_a_command_that_owns_no_line_is_not_vims() {
+        assert_eq!(
+            words_of("edit {on ? \"enable\" : \"disable\"}"),
+            vec!["edit"]
         );
     }
 }

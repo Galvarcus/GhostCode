@@ -9,6 +9,7 @@
 //! License: GNU GPL 3.0
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -24,6 +25,11 @@ pub struct Resolved {
     pub targets: HashMap<usize, Vec<SymbolId>>,
     pub unplaced: usize,
 }
+
+/// What divides the parts of a classic autoload name, and the
+/// directory those parts are a path under.
+const AUTOLOAD_SEP: char = '#';
+const AUTOLOAD_DIR: &str = "autoload";
 
 /// Every way a reference can be looked up, each built once.
 #[derive(Debug, Default)]
@@ -42,6 +48,10 @@ pub struct Index<'a> {
     /// a reference elsewhere in the project from crediting it.
     /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
     scoped: HashMap<&'a SymbolId, HashMap<&'a str, &'a SymbolId>>,
+    /// Every file that declares a symbol, which is how an autoload
+    /// name is told from one of another plugin.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+    files: HashSet<&'a Path>,
 }
 
 impl<'a> Index<'a> {
@@ -52,6 +62,7 @@ impl<'a> Index<'a> {
 
         for sym in &a.syms {
             idx.by_id.insert(&sym.id, sym);
+            idx.files.insert(sym.file.as_path());
 
             // A scoped symbol enters no index keyed by name alone.
             if let Some(scope) = &sym.scope {
@@ -227,11 +238,24 @@ impl<'a> Index<'a> {
     /// METHOD: The symbol a classic autoload name states, as
     /// `foo#bar#Func` states `autoload/foo/bar.vim::Func`.
     fn autoload(&self, name: &str) -> Option<SymbolId> {
-        let (prefix, func) = name.rsplit_once('#')?;
-        let path = PathBuf::from("autoload").join(format!("{}.vim", prefix.replace('#', "/")));
+        let (path, func) = autoload_parts(name)?;
         let id = SymbolId::of(&path, None, func);
 
         self.by_id.contains_key(&id).then_some(id)
+    }
+
+    /// METHOD: Whether a reference is an autoload name of a file the
+    /// project declares nothing in, which is no unplaced name.
+    ///
+    /// The name states its file. A file with no symbol of the project
+    /// is another plugin's, or a legacy script the scan does not read,
+    /// and no rule could place the function. Where the project does
+    /// declare symbols in the file, a function it lacks may be one
+    /// the scan missed, so that one stays counted.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+    fn foreign(&self, r: &Reference) -> bool {
+        r.recv.is_none()
+            && autoload_parts(&r.name).is_some_and(|(path, _)| !self.files.contains(path.as_path()))
     }
 
     /// METHOD: The symbol a named import binds, under the name this
@@ -260,6 +284,16 @@ impl<'a> Index<'a> {
     }
 }
 
+/// FUNCTION: The file and the function a classic autoload name
+/// states, as `foo#bar#Func` states `autoload/foo/bar.vim` and `Func`.
+fn autoload_parts(name: &str) -> Option<(PathBuf, &str)> {
+    let (prefix, func) = name.rsplit_once(AUTOLOAD_SEP)?;
+    let path =
+        PathBuf::from(AUTOLOAD_DIR).join(format!("{}.vim", prefix.replace(AUTOLOAD_SEP, "/")));
+
+    Some((path, func))
+}
+
 /// FUNCTION: Resolve every reference of an analysis.
 pub fn all(a: &Analysis) -> Resolved {
     let idx = Index::build(a);
@@ -272,8 +306,9 @@ pub fn all(a: &Analysis) -> Resolved {
             // A name the language owns, and a name the analyzer
             // recorded itself, are both names it placed: neither is a
             // gap, and neither credits a symbol. A key behind a dot is
-            // no name the project could declare.
-            if !r.owned && !idx.knows(r) && !idx.keyed(r) {
+            // no name the project could declare, and neither is an
+            // autoload function of a file the project does not hold.
+            if !r.owned && !idx.knows(r) && !idx.keyed(r) && !idx.foreign(r) {
                 out.unplaced += 1;
             }
 
@@ -816,5 +851,33 @@ mod tests {
             spent < std::time::Duration::from_secs(2),
             "resolution took {spent:?}, which is not an index lookup"
         );
+    }
+
+    /// An autoload name states its file. Where the project holds no
+    /// symbol of that file, the function is another plugin's, and no
+    /// rule could place it.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+    #[test]
+    fn an_autoload_function_of_a_file_outside_the_project_is_not_an_unplaced_name() {
+        let a = Analysis {
+            syms: vec![sym("autoload/a.vim", None, "Helper", Kind::Function)],
+            refs: vec![re("autoload/a.vim", None, "other#plugin#Enable")],
+            ..Analysis::default()
+        };
+
+        assert_eq!(all(&a).unplaced, 0);
+    }
+
+    /// Where the project does hold the file, a function it lacks may
+    /// be one the scan missed, so that one stays counted.
+    #[test]
+    fn an_autoload_function_missing_from_a_file_of_the_project_is_an_unplaced_name() {
+        let a = Analysis {
+            syms: vec![sym("autoload/a.vim", None, "Helper", Kind::Function)],
+            refs: vec![re("plugin/p.vim", None, "a#Missing")],
+            ..Analysis::default()
+        };
+
+        assert_eq!(all(&a).unplaced, 1);
     }
 }
