@@ -128,3 +128,102 @@ fn the_path_an_emenu_command_names_is_marked_as_vims() {
         assert!(one(text, name).owned, "{name}");
     }
 }
+
+/// A `#` behind a space is a key in a mapping, and no comment: a
+/// mapping command takes no comment at all. What stands behind the key
+/// is still read, so the function the mapping calls is called.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/52
+#[test]
+fn a_hash_a_mapping_maps_hides_no_call() {
+    let text = "vim9script\ninoremap <buffer> # #<ScriptCmd>Heads()<CR>\n";
+
+    assert!(!one(text, "Heads").owned);
+}
+
+#[test]
+fn a_hash_a_mapping_maps_behind_a_modifier_hides_no_call() {
+    let text = "vim9script\nsilent! inoremap <buffer> # #<ScriptCmd>Heads()<CR>\n";
+
+    assert!(!one(text, "Heads").owned);
+}
+
+/// An autocommand runs a command behind its pattern, and a mapping
+/// there reads its keys as one at the head of a line does.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/52
+#[test]
+fn a_hash_a_mapping_in_an_autocommand_maps_hides_no_call() {
+    let text =
+        "vim9script\nautocmd FileType markdown inoremap <buffer> # #<ScriptCmd>Heads()<CR>\n";
+
+    assert!(!one(text, "Heads").owned);
+}
+
+#[test]
+fn a_hash_on_a_line_that_continues_a_mapping_hides_no_call() {
+    let text = "vim9script\ninoremap <buffer> #\n      \\ #<ScriptCmd>Heads()<CR>\n";
+
+    assert!(!one(text, "Heads").owned);
+}
+
+/// A bar ends a mapping, and the command behind it takes a comment
+/// again.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/52
+#[test]
+fn a_hash_behind_the_bar_that_ends_a_mapping_is_a_comment() {
+    let text = "vim9script\nnnoremap <buffer> x y | echo 1 # Hidden()\n";
+
+    assert!(refs(text).iter().all(|r| r.name != "Hidden"));
+}
+
+#[test]
+fn a_hash_behind_a_variable_named_after_a_mapping_command_is_a_comment() {
+    let text = "vim9script\ndef F()\n  var nmap = 1\n  nmap = 2 # Hidden()\nenddef\n";
+
+    assert!(refs(text).iter().all(|r| r.name != "Hidden"));
+}
+
+/// A bracket a mapping maps opens nothing, so the line behind the
+/// mapping is a statement of its own and its command stands at a head.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/52
+#[test]
+fn a_bracket_a_mapping_maps_joins_no_line_to_it() {
+    let text = "vim9script\ninoremap <buffer> [ [<ScriptCmd>Titles()<CR>\ninoremap <buffer> x y\n";
+
+    assert!(refs(text)
+        .iter()
+        .filter(|r| r.name == "inoremap")
+        .all(|r| r.owned));
+    assert!(!one(text, "Titles").owned);
+}
+
+/// A bracket behind a space is a key, where a bracket against the
+/// word would index a variable.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/52
+#[test]
+fn a_bracket_as_the_left_side_of_a_mapping_is_a_key() {
+    let text = "vim9script\nnnoremap [ dd\n";
+
+    assert!(one(text, "dd").owned);
+}
+
+/// A mapping command stands apart from its arguments, so a word with
+/// a colon against it is the key of a dictionary, and the bracket on
+/// its line closes what the line above opened.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/52
+#[test]
+fn a_dictionary_key_named_after_a_mapping_command_is_no_mapping() {
+    let text = "vim9script\nvar d = {\n  map: [1],\n  unmap: 2}\nnnoremap <buffer> x y\n";
+
+    assert!(refs(text)
+        .iter()
+        .filter(|r| r.name == "nnoremap")
+        .all(|r| r.owned));
+    assert!(one(text, "x").owned);
+}
+
+#[test]
+fn a_mapping_command_with_its_argument_against_it_is_a_mapping() {
+    let text = "vim9script\ninoremap<buffer> # #<ScriptCmd>Heads()<CR>\n";
+
+    assert!(!one(text, "Heads").owned);
+}

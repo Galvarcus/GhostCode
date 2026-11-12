@@ -714,6 +714,18 @@ const MAP_ARGS: &[&str] = &[
 ];
 const EXPR: &str = "expr";
 
+// What a mapping command maps as a key where a space stands before
+// it, and what indexes, calls or reaches into a variable where none
+// does.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/52
+const KEYS: &[&str] = &["(", "[", "."];
+
+// What can stand against a mapping command with no space between:
+// its bang, and the bracket that opens its first argument or key
+// name, as in `nnoremap<buffer>`.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/52
+const AGAINST: &[&str] = &["!", "<"];
+
 // The key names that make the right side of a mapping run a command
 // line, where the word behind the name is a command.
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
@@ -1660,11 +1672,7 @@ fn map_args(stmt: &[Tok], i: usize) -> bool {
         return false;
     };
 
-    if i <= at
-        || !reads_command(stmt, at)
-        || !excmds::canonical(&stmt[at].text).is_some_and(|name| name.ends_with(MAP))
-        || stmt[at..i].iter().any(|tok| tok.text == BAR)
-    {
+    if i <= at || !maps(stmt, at) || stmt[at..i].iter().any(|tok| tok.text == BAR) {
         return false;
     }
 
@@ -1697,6 +1705,39 @@ fn map_args(stmt: &[Tok], i: usize) -> bool {
         && RUNS.contains(&stmt[i - 2].text.as_str())
         && excmds::canonical(&stmt[i].text).is_some()
         && reads_command(stmt, i)
+}
+
+/// FUNCTION: Whether Vim reads a mapping or an unmapping command at
+/// `at`.
+///
+/// The command stands apart from its arguments, with a space, a bang
+/// or an angle bracket behind it: a word with a colon against it is
+/// the key of a dictionary, and one with a comma is an item of a
+/// list. A bracket or a dot behind that space is a key the command
+/// maps. Against the word it indexes a variable or reaches into one,
+/// and Vim9 allows no space there.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/52
+fn maps(stmt: &[Tok], at: usize) -> bool {
+    let Some(next) = stmt.get(at + 1) else {
+        return false;
+    };
+
+    excmds::canonical(&stmt[at].text).is_some_and(|name| name.ends_with(MAP))
+        && (!next.glued || AGAINST.contains(&next.text.as_str()))
+        && (KEYS.contains(&next.text.as_str()) || reads_command(stmt, at))
+}
+
+/// FUNCTION: Where the first mapping or unmapping command of a line
+/// stands, or none: at its head, behind a modifier, behind the pattern
+/// of an autocommand, or behind a bar.
+///
+/// The lexer asks, because the keys behind such a command are no
+/// code: a `#` there opens no comment and a bracket opens nothing.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/52
+pub(super) fn map_at(line: &[Tok]) -> Option<usize> {
+    heads(line)
+        .into_iter()
+        .find(|at| *at < line.len() && maps(line, *at))
 }
 
 /// FUNCTION: The argument of a mapping command that one word states,
