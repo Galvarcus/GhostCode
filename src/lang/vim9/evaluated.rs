@@ -43,7 +43,7 @@ pub fn names(arg: &str) -> Vec<(String, bool)> {
 
 /// FUNCTION: The words of a readable head that Vim reads as its own: a
 /// command at a head position, a modifier before one, and the
-/// arguments of a set-family command.
+/// arguments of a set-family command, of `:highlight` and of `:syntax`.
 ///
 /// The head is lexed and run through the statement rules, so a
 /// command written short is read as one and a bar starts the next
@@ -61,7 +61,8 @@ fn vims_words(head: &str) -> HashSet<String> {
 
             let vims = (parse::in_command(&stmt, i, &heads)
                 && excmds::canonical(&tok.text).is_some())
-                || parse::set_args(&stmt, i, &heads);
+                || parse::set_args(&stmt, i, &heads)
+                || parse::syntax_args(&stmt, i, &heads);
 
             if vims {
                 out.insert(tok.text.clone());
@@ -122,7 +123,15 @@ mod tests {
 
     #[test]
     fn an_argument_that_is_no_command_is_left_alone() {
-        assert_eq!(words_of("highlight link Foo Normal"), vec!["highlight"]);
+        assert_eq!(words_of("edit Foo"), vec!["edit"]);
+    }
+
+    #[test]
+    fn the_arguments_of_a_highlight_command_are_vims() {
+        assert_eq!(
+            words_of("highlight link Foo Normal"),
+            vec!["highlight", "link", "Foo", "Normal"]
+        );
     }
 
     #[test]

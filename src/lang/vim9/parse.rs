@@ -684,6 +684,18 @@ const DICT: &str = "dict";
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 const SET_FAMILY: &[&str] = &["set", "setlocal", "setglobal"];
 
+// The commands whose arguments are text Vim keeps for itself from the
+// command to its end: a highlight group, an attribute and its value,
+// a keyword of the command, and the words of a pattern. `canonical`
+// reaches both from an abbreviation, as it does a set command.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+const SYNTAX_FAMILY: &[&str] = &["highlight", "syntax"];
+
+// What stands before a bar that ends no command, as a pattern writes
+// its alternation.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+const ESCAPE: &str = "\\";
+
 // What Vim writes between two commands on one line. The lexer keeps a
 // line that opens with one in the statement before it, so a bar stands
 // inside a statement rather than ending it.
@@ -1030,6 +1042,7 @@ impl Collect<'_> {
 
         let owned = vims
             || (recv.is_none() && set_args(stmt, i, heads))
+            || (recv.is_none() && syntax_args(stmt, i, heads))
             || NULLS.contains(&word)
             || (TYPES.contains(&word) && in_type(stmt, i) && !called(stmt, i));
 
@@ -1555,6 +1568,28 @@ pub(super) fn set_args(stmt: &[Tok], i: usize, heads: &[usize]) -> bool {
     }
 
     stmt[at..i].iter().all(|tok| tok.text != BAR)
+}
+
+/// FUNCTION: Whether the token at `i` is an argument of `:highlight`
+/// or `:syntax`: after a head whose command is one, and before the bar
+/// that ends it.
+///
+/// A group is a name Vim keeps, and the project declares nothing that
+/// one of these commands could mean. The answer is a mark and never a
+/// drop, so a symbol that shares a spelling with a group keeps the
+/// credit it had, and where none exists the word is not counted.
+///
+/// An escaped bar ends nothing, because that is how a pattern writes
+/// its alternation. `heads` still lists the word behind one, so the
+/// nearest head cannot be trusted here and every head before the
+/// token is asked.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+pub(super) fn syntax_args(stmt: &[Tok], i: usize, heads: &[usize]) -> bool {
+    heads.iter().copied().filter(|at| *at < i).any(|at| {
+        excmds::canonical(&stmt[at].text).is_some_and(|name| SYNTAX_FAMILY.contains(&name))
+            && reads_command(stmt, at)
+            && (at + 1..i).all(|k| stmt[k].text != BAR || stmt[k - 1].text == ESCAPE)
+    })
 }
 
 /// FUNCTION: Every index at which Vim reads a command: the statement's
