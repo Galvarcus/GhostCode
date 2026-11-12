@@ -500,4 +500,13 @@ mod tests {
             vec!["edit"]
         );
     }
+
+    /// `:source` takes a file name to the end of its line.
+    #[test]
+    fn the_file_a_source_command_names_is_vims() {
+        assert_eq!(
+            words_of("source {expand('<sfile>:h:h')}/plugin/logger.vim"),
+            vec!["source", "expand", "sfile", "h", "h", "plugin", "logger", "vim"]
+        );
+    }
 }

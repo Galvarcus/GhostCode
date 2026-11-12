@@ -55,7 +55,11 @@ pub fn names(arg: &str) -> Vec<(String, bool)> {
         OPTION => vims(past_scope(rest)),
         FEATURE | ENV => vims(rest),
         FUNCTION if builtin(rest) => vims(rest),
-        FUNCTION | COMMAND => theirs(rest),
+        FUNCTION => theirs(rest),
+        // A user command is a name Vim owns once a plugin defines
+        // it, and the scan records no symbol for one.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+        COMMAND => vims(rest),
         _ => match scope(arg) {
             Some((SCRIPT, name)) => theirs(name),
             // A variable every file shares is read by its full
@@ -131,9 +135,15 @@ mod tests {
     }
 
     #[test]
-    fn a_function_or_a_command_may_be_the_projects() {
+    fn a_function_may_be_the_projects() {
         assert_eq!(names("*Func"), vec![("Func".to_string(), false)]);
-        assert_eq!(names(":Recover"), vec![("Recover".to_string(), false)]);
+    }
+
+    /// A user command is a name Vim owns once a plugin defines it,
+    /// and the scan records no symbol for one.
+    #[test]
+    fn a_command_is_vims() {
+        assert_eq!(names(":Recover"), vec![("Recover".to_string(), true)]);
     }
 
     #[test]

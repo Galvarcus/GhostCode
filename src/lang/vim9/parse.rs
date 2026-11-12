@@ -785,8 +785,9 @@ const SET_FAMILY: &[&str] = &["set", "setlocal", "setglobal"];
 // command.
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 //
-// `:sleep` takes a count with its unit, and `:vimgrep` a pattern, its
-// flags and file names.
+// `:sleep` takes a count with its unit, `:vimgrep` a pattern, its
+// flags and file names, `:messages` a keyword or a count, and
+// `:source` a file name.
 const TEXT_FAMILY: &[&str] = &[
     "highlight",
     "syntax",
@@ -796,6 +797,8 @@ const TEXT_FAMILY: &[&str] = &[
     "setfiletype",
     "sleep",
     "vimgrep",
+    "messages",
+    "source",
 ];
 
 // What the name of every menu command ends with: `amenu`, `emenu`,

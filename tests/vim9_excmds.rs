@@ -374,3 +374,18 @@ fn a_word_with_a_capital_behind_a_command_is_not_marked() {
 
     assert!(!one(text, "PluginOpen").owned);
 }
+
+/// `:messages` takes a keyword or a count, and nothing of the project.
+#[test]
+fn the_keyword_a_messages_command_takes_is_marked_as_vims() {
+    let text = "vim9script\ndef F()\n  messages clear\nenddef\n";
+
+    assert!(one(text, "clear").owned);
+}
+
+#[test]
+fn the_file_a_source_command_names_is_marked_as_vims() {
+    let text = "vim9script\nsource plugin/logger.vim\n";
+
+    assert!(one(text, "logger").owned);
+}

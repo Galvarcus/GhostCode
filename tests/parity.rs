@@ -100,8 +100,8 @@ fn each_corpus_counts_what_it_counted() {
     const COUNTS: &[(&str, u64, u64)] = &[
         ("bartleby", 0, 42),
         ("ghostcode", 0, 3),
-        ("logger", 0, 7),
-        ("nested", 2, 71),
+        ("logger", 0, 0),
+        ("nested", 2, 64),
     ];
 
     let mut differences: Vec<String> = Vec::new();
