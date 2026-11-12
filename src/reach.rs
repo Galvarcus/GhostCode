@@ -117,6 +117,7 @@ mod tests {
             }),
             target: None,
             owned: false,
+            member: false,
         }
     }
 

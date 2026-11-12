@@ -672,6 +672,18 @@ const WRITES: &[&str] = &["=", "=<<"];
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 const DISCARD: &str = "_";
 
+// What stands between a receiver and its member. A concatenation is
+// `..`, which the lexer reads as one operator of its own.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+const DOT: &str = ".";
+
+// The constructor Vim supplies for a class that declares none. Behind
+// a dot the name is the language's, and a constructor a class does
+// declare still takes the credit, because the mark is read only where
+// nothing resolved.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+const NEW: &str = "new";
+
 // Vim9's keyed container. A member access on one reads a key, which
 // `recv_type` reports as this type because it reports the outermost
 // one: `dict<string, Config>` is a dict. No class can carry the name,
@@ -688,10 +700,54 @@ const SET_FAMILY: &[&str] = &["set", "setlocal", "setglobal"];
 
 // The commands whose arguments are text Vim keeps for itself from the
 // command to its end: a highlight group, an attribute and its value,
-// a keyword of the command, and the words of a pattern. `canonical`
-// reaches both from an abbreviation, as it does a set command.
+// a keyword of the command, the words of a pattern, and the path of a
+// menu. `canonical` reaches each from an abbreviation, as it does a
+// set command.
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-const SYNTAX_FAMILY: &[&str] = &["highlight", "syntax"];
+const TEXT_FAMILY: &[&str] = &["highlight", "syntax", "emenu"];
+
+// The command that runs its argument as keys. It is apart from the
+// family above because it takes a bar as one of those keys, so
+// nothing ends it before the line does.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+const NORMAL: &str = "normal";
+
+// What the name of every mapping and unmapping command ends with:
+// `nnoremap`, `xmap`, `iunmap`.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+const MAP: &str = "map";
+
+// The arguments a mapping command takes before its left side, each
+// written in angle brackets. `expr` is apart because it also says the
+// right side is an expression and no keys.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+const MAP_ARGS: &[&str] = &[
+    "buffer", "nowait", "silent", "special", "script", "expr", "unique",
+];
+const EXPR: &str = "expr";
+
+// What a mapping command maps as a key where a space stands before
+// it, and what indexes, calls or reaches into a variable where none
+// does.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/52
+const KEYS: &[&str] = &["(", "[", "."];
+
+// What can stand against a mapping command with no space between:
+// its bang, and the bracket that opens its first argument or key
+// name, as in `nnoremap<buffer>`.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/52
+const AGAINST: &[&str] = &["!", "<"];
+
+// The key names that make the right side of a mapping run a command
+// line, where the word behind the name is a command.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+const RUNS: &[&str] = &["ScriptCmd", "Cmd"];
+
+// What says the right side of a mapping holds code and not keys
+// alone: a key name that runs or names code, the colon that opens a
+// command line, and the bracket of a call.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+const CODE: &[&str] = &["ScriptCmd", "Cmd", "SID", "Plug", ":", "("];
 
 // What stands before a bar that ends no command, as a pattern writes
 // its alternation.
@@ -1042,9 +1098,13 @@ impl Collect<'_> {
             return;
         }
 
+        let member = i > 0 && stmt[i - 1].text == DOT;
+
         let owned = vims
+            || (member && word == NEW)
             || (recv.is_none() && set_args(stmt, i, heads))
-            || (recv.is_none() && syntax_args(stmt, i, heads))
+            || text_args(stmt, i, heads)
+            || (recv.is_none() && map_args(stmt, i))
             || NULLS.contains(&word)
             || (TYPES.contains(&word) && in_type(stmt, i) && !called(stmt, i));
 
@@ -1056,6 +1116,7 @@ impl Collect<'_> {
             origin: Some(self.origin.clone()),
             target: None,
             owned,
+            member,
         });
     }
 
@@ -1165,6 +1226,7 @@ impl Collect<'_> {
                 origin: Some(self.origin.clone()),
                 target: None,
                 owned,
+                member: false,
             });
         }
     }
@@ -1572,26 +1634,136 @@ pub(super) fn set_args(stmt: &[Tok], i: usize, heads: &[usize]) -> bool {
     stmt[at..i].iter().all(|tok| tok.text != BAR)
 }
 
-/// FUNCTION: Whether the token at `i` is an argument of `:highlight`
-/// or `:syntax`: after a head whose command is one, and before the bar
+/// FUNCTION: Whether the token at `i` is an argument of a command
+/// whose arguments are Vim's own text: after a head whose command is
+/// `:highlight`, `:syntax`, `:emenu` or `:normal`, and before the bar
 /// that ends it.
 ///
-/// A group is a name Vim keeps, and the project declares nothing that
-/// one of these commands could mean. The answer is a mark and never a
-/// drop, so a symbol that shares a spelling with a group keeps the
-/// credit it had, and where none exists the word is not counted.
+/// A group, a menu and a key are names Vim keeps, and the project
+/// declares nothing that one of these commands could mean. The answer
+/// is a mark and never a drop, so a symbol that shares a spelling
+/// with a group keeps the credit it had, and where none exists the
+/// word is not counted. A receiver changes nothing, because the part
+/// of a menu path behind a dot is the menu's as well.
 ///
 /// An escaped bar ends nothing, because that is how a pattern writes
 /// its alternation. `heads` still lists the word behind one, so the
 /// nearest head cannot be trusted here and every head before the
-/// token is asked.
+/// token is asked. `:normal` takes every bar as a key.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-pub(super) fn syntax_args(stmt: &[Tok], i: usize, heads: &[usize]) -> bool {
+pub(super) fn text_args(stmt: &[Tok], i: usize, heads: &[usize]) -> bool {
     heads.iter().copied().filter(|at| *at < i).any(|at| {
-        excmds::canonical(&stmt[at].text).is_some_and(|name| SYNTAX_FAMILY.contains(&name))
-            && reads_command(stmt, at)
-            && (at + 1..i).all(|k| stmt[k].text != BAR || stmt[k - 1].text == ESCAPE)
+        let Some(name) = excmds::canonical(&stmt[at].text) else {
+            return false;
+        };
+
+        if !reads_command(stmt, at) {
+            return false;
+        }
+
+        name == NORMAL
+            || (TEXT_FAMILY.contains(&name)
+                && (at + 1..i).all(|k| stmt[k].text != BAR || stmt[k - 1].text == ESCAPE))
     })
+}
+
+/// FUNCTION: Whether the token at `i` is a key of a mapping or an
+/// unmapping command: a word of its left side, a word of a right side
+/// that holds keys and no code, or a command of Vim's own that the
+/// right side runs.
+///
+/// The left side is the first word behind the command that is not
+/// one of its arguments, and a word is what stands between two
+/// spaces. The right side is the project's wherever it may hold code:
+/// under `<expr>` it is an expression, and with a key name that runs
+/// code, a colon or a call it is a command line. There the one word
+/// claimed is a command that stands against `<ScriptCmd>` or `<Cmd>`,
+/// as `close` does, and a function there is called, which
+/// `reads_command` refuses.
+///
+/// The answer is a mark, so a symbol of the same spelling keeps its
+/// credit either way.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+fn map_args(stmt: &[Tok], i: usize) -> bool {
+    let Some(at) = command_at(stmt) else {
+        return false;
+    };
+
+    if i <= at || !maps(stmt, at) || stmt[at..i].iter().any(|tok| tok.text == BAR) {
+        return false;
+    }
+
+    // Each word behind the command, as the index it starts at.
+    let starts: Vec<usize> = (at + 1..stmt.len()).filter(|k| !stmt[*k].glued).collect();
+    let word = |n: usize| &stmt[starts[n]..starts.get(n + 1).copied().unwrap_or(stmt.len())];
+    let Some(lhs) = (0..starts.len()).find(|n| map_arg(word(*n)).is_none()) else {
+        return false;
+    };
+
+    let rhs = starts.get(lhs + 1).copied().unwrap_or(stmt.len());
+
+    if i < rhs {
+        return i >= starts[lhs];
+    }
+
+    if (0..lhs).any(|n| map_arg(word(n)) == Some(EXPR)) {
+        return false;
+    }
+
+    if !stmt[rhs..]
+        .iter()
+        .any(|tok| CODE.contains(&tok.text.as_str()))
+    {
+        return true;
+    }
+
+    i >= 2
+        && stmt[i - 1].text == ">"
+        && RUNS.contains(&stmt[i - 2].text.as_str())
+        && excmds::canonical(&stmt[i].text).is_some()
+        && reads_command(stmt, i)
+}
+
+/// FUNCTION: Whether Vim reads a mapping or an unmapping command at
+/// `at`.
+///
+/// The command stands apart from its arguments, with a space, a bang
+/// or an angle bracket behind it: a word with a colon against it is
+/// the key of a dictionary, and one with a comma is an item of a
+/// list. A bracket or a dot behind that space is a key the command
+/// maps. Against the word it indexes a variable or reaches into one,
+/// and Vim9 allows no space there.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/52
+fn maps(stmt: &[Tok], at: usize) -> bool {
+    let Some(next) = stmt.get(at + 1) else {
+        return false;
+    };
+
+    excmds::canonical(&stmt[at].text).is_some_and(|name| name.ends_with(MAP))
+        && (!next.glued || AGAINST.contains(&next.text.as_str()))
+        && (KEYS.contains(&next.text.as_str()) || reads_command(stmt, at))
+}
+
+/// FUNCTION: Where the first mapping or unmapping command of a line
+/// stands, or none: at its head, behind a modifier, behind the pattern
+/// of an autocommand, or behind a bar.
+///
+/// The lexer asks, because the keys behind such a command are no
+/// code: a `#` there opens no comment and a bracket opens nothing.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/52
+pub(super) fn map_at(line: &[Tok]) -> Option<usize> {
+    heads(line)
+        .into_iter()
+        .find(|at| *at < line.len() && maps(line, *at))
+}
+
+/// FUNCTION: The argument of a mapping command that one word states,
+/// as `<buffer>` states `buffer`, or none where the word is no such
+/// argument.
+fn map_arg(word: &[Tok]) -> Option<&str> {
+    (word.len() == 3 && word[0].text == "<" && word[2].text == ">")
+        .then(|| word[1].text.as_str())
+        .filter(|name| MAP_ARGS.contains(name))
 }
 
 /// FUNCTION: Every index at which Vim reads a command: the statement's

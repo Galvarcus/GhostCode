@@ -160,6 +160,12 @@ pub struct Reference {
     /// where nothing resolved, to say that the gap is not one.
     /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
     pub owned: bool,
+    /// Set where the name stands behind a dot, whatever the receiver
+    /// is: a name, a call or an index. Such a name is a member of a
+    /// class or a key of a dictionary, and never a bare name of the
+    /// project.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+    pub member: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

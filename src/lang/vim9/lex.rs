@@ -2,6 +2,8 @@
 //!
 //! License: GNU GPL 3.0
 
+use crate::lang::vim9::parse;
+
 /// What a token is. There is no keyword kind: a word is a word, and the
 /// parser decides whether its position makes it `def` the command or
 /// `def` the name of something.
@@ -75,6 +77,12 @@ const RESYNC: &[&str] = &[
     "autocmd",
 ];
 
+// What ends the keys of a mapping, and what stands before one that
+// ends nothing.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/52
+const BAR: char = '|';
+const ESCAPE: char = '\\';
+
 const OPS: &[&str] = &[
     "=<<", "...", "->>", "==#", "==?", "!=#", "!=?", "=~#", "=~?", "!~#", "!~?", "<=#", ">=#",
     "..=", "<<=", ">>=", "->", "=>", "..", "==", "!=", "<=", ">=", "&&", "||", "+=", "-=", "*=",
@@ -88,6 +96,9 @@ pub fn tokens(text: &str) -> Vec<Tok> {
     let mut toks: Vec<Tok> = Vec::new();
     let mut depth: i32 = 0;
     let mut heredoc: Option<String> = None;
+    // Whether the line before ended inside the keys of a mapping, which
+    // a line that opens with a backslash carries on.
+    let mut keys = false;
 
     for (i, raw) in text.lines().enumerate() {
         let line = i as u32 + 1;
@@ -109,6 +120,8 @@ pub fn tokens(text: &str) -> Vec<Tok> {
 
         let mut rest = raw.trim_start();
 
+        let carried = keys && rest.starts_with('\\');
+
         // A line that opens with a backslash, or with an arrow, carries
         // the line before it on, so the statement did not end there.
         if rest.starts_with('\\') {
@@ -121,7 +134,27 @@ pub fn tokens(text: &str) -> Vec<Tok> {
             push_newline(&mut toks, line.saturating_sub(1));
         }
 
-        lex_line(rest, line, &mut toks, &mut depth, &mut heredoc);
+        // Whether a line is a mapping is a question about its tokens,
+        // so the line is read once as code to ask it. Nothing before
+        // the command differs between the two readings, and what
+        // stands behind it is read again as keys.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/52
+        let from = toks.len();
+        let was = (depth, heredoc.clone());
+        let start = if carried {
+            Some(0)
+        } else {
+            lex_line(rest, line, &mut toks, &mut depth, &mut heredoc, None);
+            parse::map_at(&toks[from..]).map(|at| at + 1)
+        };
+
+        keys = false;
+
+        if start.is_some() {
+            toks.truncate(from);
+            (depth, heredoc) = was;
+            keys = lex_line(rest, line, &mut toks, &mut depth, &mut heredoc, start);
+        }
 
         // Inside brackets the statement continues on the next line.
         if depth <= 0 {
@@ -155,15 +188,28 @@ fn push_tok(toks: &mut Vec<Tok>, kind: TokKind, text: String, line: u32, gap: &m
     });
 }
 
-/// FUNCTION: Tokenise one logical line's worth of text.
+/// FUNCTION: Tokenise one logical line's worth of text, and answer
+/// whether it ended inside the keys of a mapping.
+///
+/// `keys_from` is the number of tokens of the line behind which the
+/// keys of a mapping command begin, or none where the line holds no
+/// such command. Keys run to a bar that no backslash escapes. Among
+/// them a `#` opens no comment, a bracket opens nothing and `=<<`
+/// opens no heredoc, because a mapping command takes its arguments as
+/// they stand.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/52
 fn lex_line(
     text: &str,
     line: u32,
     toks: &mut Vec<Tok>,
     depth: &mut i32,
     heredoc: &mut Option<String>,
-) {
+    keys_from: Option<usize>,
+) -> bool {
     let src: Vec<char> = text.chars().collect();
+    let base = toks.len();
+    let mut ended = false;
+    let mut keys = false;
     let mut i = 0;
     let mut heredoc_here = false;
     // The line's first token stands behind the indent, so nothing is
@@ -179,11 +225,17 @@ fn lex_line(
             continue;
         }
 
+        if keys && c == BAR && (i == 0 || src[i - 1] != ESCAPE) {
+            ended = true;
+        }
+
+        keys = !ended && keys_from.is_some_and(|n| toks.len() - base >= n);
+
         // A comment runs to the end of the line. In Vim9 the marker is
         // `#`, and a double quote opens a string. A hash against a
         // name belongs to it: `bartleby#Open` is the classic autoload
         // calling convention, not a name and a comment.
-        if c == '#' && (i == 0 || src[i - 1].is_whitespace()) {
+        if c == '#' && !keys && (i == 0 || src[i - 1].is_whitespace()) {
             push_tok(
                 toks,
                 TokKind::Comment,
@@ -251,7 +303,7 @@ fn lex_line(
         }
 
         if let Some(op) = op_at(&src, i) {
-            if op == "=<<" {
+            if op == "=<<" && !keys {
                 heredoc_here = true;
             }
             i += op.chars().count();
@@ -260,8 +312,8 @@ fn lex_line(
         }
 
         match c {
-            '(' | '[' | '{' => *depth += 1,
-            ')' | ']' | '}' => *depth -= 1,
+            '(' | '[' | '{' if !keys => *depth += 1,
+            ')' | ']' | '}' if !keys => *depth -= 1,
             _ => {}
         }
 
@@ -282,6 +334,8 @@ fn lex_line(
             .find(|t| t.kind == TokKind::Ident && t.line == line)
             .map(|t| t.text.clone());
     }
+
+    !ended && keys_from.is_some_and(|n| toks.len() - base >= n)
 }
 
 /// FUNCTION: Tokenise an interpolated string: its literal text as one
@@ -325,7 +379,7 @@ fn lex_interpolated(
 
         let code: String = chars[start..end].iter().collect();
         let mut inner = 0i32;
-        lex_line(&code, line, toks, &mut inner, heredoc);
+        lex_line(&code, line, toks, &mut inner, heredoc, None);
 
         i = end + 1;
     }

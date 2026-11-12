@@ -200,6 +200,7 @@ fn text_references(a: &mut Analysis) {
                 origin: t.origin.clone(),
                 target: None,
                 owned: false,
+                member: false,
             });
         }
     }
@@ -289,7 +290,9 @@ fn classify(
 ///
 /// A reference the language owns is not such a read. The analyzer
 /// placed it: the name is the language's there, and no variable was
-/// read, so it hides no finding.
+/// read, so it hides no finding. A name behind a dot is none either:
+/// it is a member or a key, and a variable is never read through a
+/// dot.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/48
 fn unplaced_names_by_file<'a>(
@@ -299,7 +302,7 @@ fn unplaced_names_by_file<'a>(
     a.refs
         .iter()
         .enumerate()
-        .filter(|(at, re)| !re.owned && !r.targets.contains_key(at))
+        .filter(|(at, re)| !re.owned && !re.member && !r.targets.contains_key(at))
         .map(|(_, re)| (re.file.as_path(), re.name.as_str()))
         .collect()
 }
