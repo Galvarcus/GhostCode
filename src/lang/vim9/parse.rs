@@ -672,6 +672,11 @@ const WRITES: &[&str] = &["=", "=<<"];
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 const DISCARD: &str = "_";
 
+// What stands between a receiver and its member. A concatenation is
+// `..`, which the lexer reads as one operator of its own.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+const DOT: &str = ".";
+
 // Vim9's keyed container. A member access on one reads a key, which
 // `recv_type` reports as this type because it reports the outermost
 // one: `dict<string, Config>` is a dict. No class can carry the name,
@@ -1101,6 +1106,7 @@ impl Collect<'_> {
             origin: Some(self.origin.clone()),
             target: None,
             owned,
+            member: i > 0 && stmt[i - 1].text == DOT,
         });
     }
 
@@ -1210,6 +1216,7 @@ impl Collect<'_> {
                 origin: Some(self.origin.clone()),
                 target: None,
                 owned,
+                member: false,
             });
         }
     }

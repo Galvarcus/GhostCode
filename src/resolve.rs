@@ -192,6 +192,27 @@ impl<'a> Index<'a> {
                 .is_some_and(|a| a.contains_key(r.name.as_str()))
     }
 
+    /// METHOD: Whether a reference stood behind a dot of a receiver
+    /// the project does not declare, which is no unplaced name.
+    ///
+    /// The receiver has no type, or names no class and no import of
+    /// the project. The name is then a key of a dictionary or a member
+    /// of a class outside the project, and no rule could place it.
+    /// Where the project does declare the receiver, a member it lacks
+    /// may be one the scan missed, so that one stays counted.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+    fn keyed(&self, r: &Reference) -> bool {
+        let declared = r.recv.as_deref().is_some_and(|recv| {
+            self.containers.contains_key(recv)
+                || self
+                    .aliases
+                    .get(r.file.as_path())
+                    .is_some_and(|a| a.contains_key(recv))
+        });
+
+        r.member && !declared
+    }
+
     /// METHOD: The variable of the body that made this reference, by
     /// that name, where the body declares one.
     fn in_scope(&self, r: &Reference) -> Option<SymbolId> {
@@ -250,8 +271,9 @@ pub fn all(a: &Analysis) -> Resolved {
         if ids.is_empty() {
             // A name the language owns, and a name the analyzer
             // recorded itself, are both names it placed: neither is a
-            // gap, and neither credits a symbol.
-            if !r.owned && !idx.knows(r) {
+            // gap, and neither credits a symbol. A key behind a dot is
+            // no name the project could declare.
+            if !r.owned && !idx.knows(r) && !idx.keyed(r) {
                 out.unplaced += 1;
             }
 
@@ -318,6 +340,7 @@ mod tests {
             origin: Some(SymbolId::script(Path::new(file))),
             target: None,
             owned: false,
+            member: false,
         }
     }
 
@@ -625,6 +648,86 @@ mod tests {
         };
 
         assert_eq!(all(&a).unplaced, 0);
+    }
+
+    /// FUNCTION: A reference that stood behind a dot.
+    fn member(file: &str, recv: Option<&str>, name: &str) -> Reference {
+        Reference {
+            member: true,
+            ..re(file, recv, name)
+        }
+    }
+
+    /// A name behind a dot that no class declares is a key of a
+    /// dictionary or a member of a class outside the project. Neither
+    /// is a symbol the analyzer failed to find.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+    #[test]
+    fn a_member_of_a_receiver_with_no_type_is_not_an_unplaced_name() {
+        let a = Analysis {
+            refs: vec![member("plugin/p.vim", None, "root")],
+            ..Analysis::default()
+        };
+
+        assert_eq!(all(&a).unplaced, 0);
+    }
+
+    #[test]
+    fn a_member_of_a_receiver_the_project_does_not_declare_is_not_an_unplaced_name() {
+        let a = Analysis {
+            refs: vec![member("plugin/p.vim", Some("LM"), "History")],
+            ..Analysis::default()
+        };
+
+        assert_eq!(all(&a).unplaced, 0);
+    }
+
+    /// Where the project declares the receiver, a member it lacks may
+    /// be one the scan missed, so the count keeps it.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+    #[test]
+    fn a_member_missing_from_a_class_of_the_project_is_an_unplaced_name() {
+        let a = Analysis {
+            syms: vec![sym("autoload/m.vim", None, "Menu", Kind::Class)],
+            refs: vec![member("plugin/p.vim", Some("Menu"), "Missing")],
+            ..Analysis::default()
+        };
+
+        assert_eq!(all(&a).unplaced, 1);
+    }
+
+    #[test]
+    fn a_member_missing_behind_an_alias_of_the_project_is_an_unplaced_name() {
+        let mut a = aliased("plugin/p.vim", "util", "autoload/util.vim", "Trim");
+        a.refs = vec![member("plugin/p.vim", Some("util"), "Missing")];
+
+        assert_eq!(all(&a).unplaced, 1);
+    }
+
+    #[test]
+    fn a_bare_name_nothing_declares_is_an_unplaced_name() {
+        let a = Analysis {
+            refs: vec![re("plugin/p.vim", None, "root")],
+            ..Analysis::default()
+        };
+
+        assert_eq!(all(&a).unplaced, 1);
+    }
+
+    /// The field changes the count and no credit: a member of a
+    /// receiver with no type still reaches every member of the name.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/53
+    #[test]
+    fn a_member_of_a_receiver_with_no_type_still_credits_every_member_of_the_name() {
+        let a = Analysis {
+            syms: vec![
+                sym("autoload/m.vim", Some("Menu"), "Open", Kind::Method),
+                sym("autoload/p.vim", Some("Popup"), "Open", Kind::Method),
+            ],
+            ..Analysis::default()
+        };
+
+        assert_eq!(ids(&a, &member("plugin/p.vim", None, "Open")).len(), 2);
     }
 
     /// An alias belongs to the file that imported it. The same word in
