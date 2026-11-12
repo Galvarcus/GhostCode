@@ -52,6 +52,10 @@ pub struct Index<'a> {
     /// name is told from one of another plugin.
     /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
     files: HashSet<&'a Path>,
+    /// Per file, the names an import binds to a file the scan does
+    /// not hold: its alias, and each name it imports.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+    outside: HashMap<&'a Path, HashSet<&'a str>>,
 }
 
 impl<'a> Index<'a> {
@@ -82,6 +86,13 @@ impl<'a> Index<'a> {
             if matches!(sym.kind, Kind::Class | Kind::Enum | Kind::Interface) {
                 idx.containers.entry(&sym.name).or_default().push(&sym.id);
             }
+        }
+
+        for imp in &a.outside {
+            let names = idx.outside.entry(&imp.from).or_default();
+
+            names.extend(imp.alias.as_deref());
+            names.extend(imp.names.iter().map(|(local, _)| local.as_str()));
         }
 
         for imp in &a.imports {
@@ -195,12 +206,18 @@ impl<'a> Index<'a> {
     /// nothing declares. Counting it is counting the analyzer's own
     /// data twice.
     /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+    ///
+    /// A name an import binds to a file the scan does not hold is the
+    /// same case. The plugin it names is outside the root, so no
+    /// symbol can take the credit, and the importing file did declare
+    /// the name.
     fn knows(&self, r: &Reference) -> bool {
+        let file = r.file.as_path();
+        let name = r.name.as_str();
+
         r.recv.is_none()
-            && self
-                .aliases
-                .get(r.file.as_path())
-                .is_some_and(|a| a.contains_key(r.name.as_str()))
+            && (self.aliases.get(file).is_some_and(|a| a.contains_key(name))
+                || self.outside.get(file).is_some_and(|o| o.contains(name)))
     }
 
     /// METHOD: Whether a reference stood behind a dot of a receiver
@@ -875,6 +892,57 @@ mod tests {
         let a = Analysis {
             syms: vec![sym("autoload/a.vim", None, "Helper", Kind::Function)],
             refs: vec![re("plugin/p.vim", None, "a#Missing")],
+            ..Analysis::default()
+        };
+
+        assert_eq!(all(&a).unplaced, 1);
+    }
+
+    /// FUNCTION: An import of a file the scan does not hold.
+    fn outside(from: &str, alias: Option<&str>, names: &[(&str, &str)]) -> Import {
+        Import {
+            from: PathBuf::from(from),
+            to: PathBuf::from("import/Other/lib.vim"),
+            alias: alias.map(str::to_string),
+            names: names
+                .iter()
+                .map(|(local, orig)| (local.to_string(), orig.to_string()))
+                .collect(),
+        }
+    }
+
+    /// An import of a file outside the root of the scan names a
+    /// plugin the scan does not hold. Its alias is a name the file
+    /// declares all the same, and no rule could place it.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+    #[test]
+    fn the_alias_of_an_import_outside_the_scan_is_not_an_unplaced_name() {
+        let a = Analysis {
+            outside: vec![outside("tests/t.vim", Some("LM"), &[])],
+            refs: vec![re("tests/t.vim", None, "LM")],
+            ..Analysis::default()
+        };
+
+        assert_eq!(all(&a).unplaced, 0);
+    }
+
+    #[test]
+    fn a_name_imported_from_outside_the_scan_is_not_an_unplaced_name() {
+        let a = Analysis {
+            outside: vec![outside("tests/t.vim", None, &[("Log", "Logger")])],
+            refs: vec![re("tests/t.vim", None, "Log")],
+            ..Analysis::default()
+        };
+
+        assert_eq!(all(&a).unplaced, 0);
+    }
+
+    /// The import binds the alias in its own file and in no other.
+    #[test]
+    fn the_alias_of_an_import_outside_the_scan_is_unplaced_in_another_file() {
+        let a = Analysis {
+            outside: vec![outside("tests/t.vim", Some("LM"), &[])],
+            refs: vec![re("plugin/p.vim", None, "LM")],
             ..Analysis::default()
         };
 

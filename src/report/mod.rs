@@ -121,8 +121,14 @@ pub fn analyze(root: &Path, cfg: &Config) -> anyhow::Result<Report> {
 
     // An import to a file the scan never discovered names nothing: it
     // is outside the root, or git ignores it, which is the same answer
-    // discovery gave for the file itself.
-    a.imports.retain(|i| files.contains(&i.to));
+    // discovery gave for the file itself. It is kept apart, because
+    // the names it binds are no gap of the analyzer.
+    // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+    let (inside, outside) = std::mem::take(&mut a.imports)
+        .into_iter()
+        .partition(|i| files.contains(&i.to));
+    a.imports = inside;
+    a.outside = outside;
 
     // An exported symbol is public API, so it is a root as well as
     // being unreportable: what its body calls is used.
