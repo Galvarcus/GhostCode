@@ -14,7 +14,7 @@ use crate::lang::vim9::excmds;
 use crate::lang::vim9::exists;
 use crate::lang::vim9::lex::Tok;
 use crate::lang::vim9::lex::TokKind;
-use crate::lang::vim9::scopevars;
+use crate::lang::vim9::shared;
 use crate::lang::vim9::types;
 use crate::lang::vim9::types::Blocks;
 use crate::lang::vim9::types::Locals;
@@ -125,6 +125,8 @@ pub fn declarations(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
             continue;
         };
 
+        shared_writes(file, stmt, out);
+
         if close_container(&words, &mut scope) {
             continue;
         }
@@ -155,6 +157,34 @@ pub fn declarations(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
         }
 
         variable(file, stmt, &words, line, &scope, out);
+    }
+}
+
+/// FUNCTION: Record each write of a variable every file shares, as a
+/// declaration of it.
+///
+/// The variable is one for the project, so its id names no file, and
+/// each write of it gives the same id. The report keeps one of them.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
+fn shared_writes(file: &Path, stmt: &[Tok], out: &mut dyn Sink) {
+    for used in shared::uses(stmt, &shared::Consts::new()).found {
+        let shared::Spelling::Exact(name) = used.spelling;
+
+        if !used.write {
+            continue;
+        }
+
+        out.sym(Symbol {
+            id: SymbolId::shared(&name),
+            kind: Kind::Variable,
+            name,
+            file: file.to_path_buf(),
+            line: stmt[used.at].line,
+            exported: false,
+            owner: None,
+            scope: None,
+            lead: used.lead,
+        });
     }
 }
 
@@ -773,11 +803,6 @@ const BAR: &str = "|";
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 const SCOPES: &[&str] = &["a", "b", "g", "l", "s", "t", "v", "w"];
 
-// The scopes whose variables outlive a script and are shared by every
-// file that names them: global, buffer, window and tab.
-// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
-const SHARED: &[&str] = &["b", "g", "t", "w"];
-
 // Vim's command modifiers, which are the only words a command may
 // stand behind. Twenty-three are the list at `:help <mods>`, and
 // `legacy` is the Vim9 prefix at `:help :legacy`, which that list
@@ -940,6 +965,31 @@ pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
         let mut bound = bound_names(stmt, &words);
         bound.extend(blocks.names());
 
+        // A variable every file shares is read by its full spelling,
+        // and the name behind its scope is no bare name of the
+        // project. The read is marked as the language's, because a
+        // variable the project never writes is another plugin's or
+        // the user's, and no gap.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
+        let used = shared::uses(stmt, &shared::Consts::new());
+        let mut passed = skip.clone();
+        passed.extend(&used.taken);
+
+        for read in used.found.into_iter().filter(|u| !u.write) {
+            let shared::Spelling::Exact(name) = read.spelling;
+
+            out.re(Reference {
+                name,
+                recv: None,
+                file: file.to_path_buf(),
+                line: stmt[read.at].line,
+                origin: Some(origin.clone()),
+                target: None,
+                owned: true,
+                member: false,
+            });
+        }
+
         let mut sink = Collect {
             file,
             origin: &origin,
@@ -952,7 +1002,7 @@ pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
             out,
         };
 
-        sink.statement(stmt, &skip);
+        sink.statement(stmt, &passed);
         blocks.read(stmt);
 
         if let Some(id) = opens_body(file, stmt, &words, &mut scope) {
@@ -1111,16 +1161,7 @@ impl Collect<'_> {
 
         let member = i > 0 && stmt[i - 1].text == DOT;
 
-        // A variable the help documents is Vim's, or a plugin's that Vim
-        // ships, whichever side of it the project stands on.
-        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
-        let documented = i >= 2
-            && stmt[i - 1].text == ":"
-            && SHARED.contains(&stmt[i - 2].text.as_str())
-            && scopevars::has(&format!("{}:{word}", stmt[i - 2].text));
-
         let owned = vims
-            || documented
             || (member && word == NEW)
             || (recv.is_none() && set_args(stmt, i, heads))
             || text_args(stmt, i, heads)

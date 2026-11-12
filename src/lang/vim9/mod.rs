@@ -13,6 +13,7 @@ pub mod lex;
 pub mod parse;
 pub mod rules;
 mod scopevars;
+mod shared;
 pub mod types;
 
 use std::path::Path;

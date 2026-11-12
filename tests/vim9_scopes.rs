@@ -47,14 +47,17 @@ fn a_buffer_scope_prefix_is_not_a_reference() {
     assert_eq!(count(text, "b"), 0);
 }
 
-/// Every scope but `v:` holds names the project or the user chose, so
-/// the name after the colon keeps its reference.
+/// A variable of `g:`, `b:`, `w:` or `t:` is read by its full
+/// spelling. The name after the colon is no bare name of the project:
+/// a script variable of that spelling is another variable.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
 #[test]
-fn a_global_the_project_names_is_still_a_reference() {
+fn a_global_the_project_names_is_a_reference_by_its_full_spelling() {
     let text = "vim9script\ndef F()\n  echo g:plugin_width\nenddef\n";
 
     assert_eq!(count(text, "g"), 0);
-    assert_eq!(count(text, "plugin_width"), 1);
+    assert_eq!(count(text, "plugin_width"), 0);
+    assert_eq!(count(text, "g:plugin_width"), 1);
 }
 
 /// A ternary puts a name immediately before a colon at the top level
