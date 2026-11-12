@@ -90,3 +90,53 @@ fn a_key_behind_a_dot_hides_no_unread_local_of_its_spelling() {
     assert_eq!(found, vec!["local variable root"]);
     assert_eq!(r.summary.unplaced_names, 0);
 }
+
+/// FUNCTION: The report of a plugin of one class, built by one call.
+fn built(tag: &str, class: &str) -> report::Report {
+    let dir = TempDir::new(tag);
+    dir.write(
+        "autoload/lib.vim",
+        &format!("vim9script\nexport class Menu\n{class}endclass\n"),
+    );
+    dir.write(
+        "plugin/p.vim",
+        "vim9script\nimport autoload 'lib.vim' as lib\nvar menu = lib.Menu.new()\necho menu\n",
+    );
+
+    report::analyze(dir.path(), &common::cfg_with_locals(false)).expect("the scan runs")
+}
+
+/// Vim supplies `new` for a class that declares no constructor, so
+/// the name is the language's there and nothing is left to place.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+#[test]
+fn the_constructor_vim_supplies_is_marked_as_vims() {
+    let text = "vim9script\ndef F()\n  var menu = Menu.new()\nenddef\n";
+
+    assert!(one(text, "new").owned);
+}
+
+#[test]
+fn the_constructor_vim_supplies_is_not_an_unplaced_name() {
+    let r = built("new-supplied", "  var title = ''\n");
+
+    assert_eq!(r.summary.unplaced_names, 0);
+}
+
+/// The mark is read only where nothing resolved, so a constructor the
+/// class declares still takes the credit of the call.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+#[test]
+fn a_constructor_the_class_declares_still_takes_the_credit() {
+    let r = built("new-declared", "  def new()\n  enddef\n");
+
+    assert!(r.findings.is_empty());
+    assert_eq!(r.summary.unplaced_names, 0);
+}
+
+#[test]
+fn a_variable_named_new_is_not_marked() {
+    let text = "vim9script\ndef F()\n  echo new\nenddef\n";
+
+    assert!(!one(text, "new").owned);
+}

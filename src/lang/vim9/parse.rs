@@ -677,6 +677,13 @@ const DISCARD: &str = "_";
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 const DOT: &str = ".";
 
+// The constructor Vim supplies for a class that declares none. Behind
+// a dot the name is the language's, and a constructor a class does
+// declare still takes the credit, because the mark is read only where
+// nothing resolved.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+const NEW: &str = "new";
+
 // Vim9's keyed container. A member access on one reads a key, which
 // `recv_type` reports as this type because it reports the outermost
 // one: `dict<string, Config>` is a dict. No class can carry the name,
@@ -1091,7 +1098,10 @@ impl Collect<'_> {
             return;
         }
 
+        let member = i > 0 && stmt[i - 1].text == DOT;
+
         let owned = vims
+            || (member && word == NEW)
             || (recv.is_none() && set_args(stmt, i, heads))
             || text_args(stmt, i, heads)
             || (recv.is_none() && map_args(stmt, i))
@@ -1106,7 +1116,7 @@ impl Collect<'_> {
             origin: Some(self.origin.clone()),
             target: None,
             owned,
-            member: i > 0 && stmt[i - 1].text == DOT,
+            member,
         });
     }
 
