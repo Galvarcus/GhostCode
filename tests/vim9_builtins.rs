@@ -101,3 +101,16 @@ fn a_variable_named_like_a_builtin_is_reported_when_nothing_reads_it() {
 
     assert_eq!(found, vec!["variable filter".to_string()]);
 }
+
+/// A builtin may hold a capital after its first letter, as the four
+/// that read syntax and highlighting do. The first letter is what
+/// makes the name Vim's, so the rest of it must not decide.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/47
+#[test]
+fn a_called_builtin_that_holds_a_capital_is_not_a_reference() {
+    let text = "vim9script\ndef F()\n  echo synIDattr(synIDtrans(hlID('Normal')), 'fg')\nenddef\n";
+
+    for name in ["synIDattr", "synIDtrans", "hlID"] {
+        assert_eq!(count(text, name), 0, "{name}");
+    }
+}

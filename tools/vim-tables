@@ -278,7 +278,7 @@ fi
 
 names=$(
   sed -n '/\*builtin-function-list\*/,/\*builtin-function-details\*/p' "$doc" |
-    grep -oE '^[a-z][a-z0-9_]*\(' |
+    grep -oE '^[a-z][A-Za-z0-9_]*\(' |
     tr -d '(' |
     LC_ALL=C sort -u
 )
