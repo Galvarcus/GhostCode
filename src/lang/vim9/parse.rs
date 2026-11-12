@@ -15,6 +15,7 @@ use crate::lang::vim9::exists;
 use crate::lang::vim9::lex::Tok;
 use crate::lang::vim9::lex::TokKind;
 use crate::lang::vim9::types;
+use crate::lang::vim9::types::Blocks;
 use crate::lang::vim9::types::Locals;
 use crate::lang::vim9::types::Types;
 use crate::model::Import;
@@ -143,7 +144,7 @@ pub fn declarations(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
         // a symbol of that body and of nothing wider.
         // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
         if scope.depth() > 0 {
-            local(file, &words, line, &scope, out);
+            local(file, stmt, &words, line, &scope, out);
             continue;
         }
 
@@ -152,7 +153,7 @@ pub fn declarations(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
             continue;
         }
 
-        variable(file, &words, line, &scope, out);
+        variable(file, stmt, &words, line, &scope, out);
     }
 }
 
@@ -265,7 +266,14 @@ fn function(
 
 /// FUNCTION: Record a `var`, `const`, or `final`: a script variable at
 /// module level, or a field inside a class.
-fn variable(file: &Path, words: &[&str], line: u32, scope: &Scope, out: &mut dyn Sink) {
+fn variable(
+    file: &Path,
+    stmt: &[Tok],
+    words: &[&str],
+    line: u32,
+    scope: &Scope,
+    out: &mut dyn Sink,
+) {
     let (exported, rest) = strip_export(words);
     let rest = strip_modifiers(rest);
 
@@ -273,22 +281,38 @@ fn variable(file: &Path, words: &[&str], line: u32, scope: &Scope, out: &mut dyn
         return;
     }
 
-    let Some(name) = rest.get(1) else {
-        return;
-    };
+    for name in declared_names(stmt, rest) {
+        if name == DISCARD {
+            continue;
+        }
 
-    let (kind, exported) = member_kind(scope, Kind::Variable, Kind::Field, name, exported);
+        let (kind, exported) = member_kind(scope, Kind::Variable, Kind::Field, name, exported);
 
-    out.sym(Symbol {
-        id: SymbolId::of(file, scope.owner.as_deref(), name),
-        kind,
-        name: (*name).to_string(),
-        file: file.to_path_buf(),
-        line,
-        exported,
-        owner: scope.owner.clone(),
-        scope: None,
-    });
+        out.sym(Symbol {
+            id: SymbolId::of(file, scope.owner.as_deref(), name),
+            kind,
+            name: name.to_string(),
+            file: file.to_path_buf(),
+            line,
+            exported,
+            owner: scope.owner.clone(),
+            scope: None,
+        });
+    }
+}
+
+/// FUNCTION: The names a `var` or `const` statement declares: every
+/// name in the brackets of one that unpacks a list, and otherwise the
+/// one name after the declaring word.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+fn declared_names<'a>(stmt: &'a [Tok], rest: &[&'a str]) -> Vec<&'a str> {
+    let unpacked = types::unpacked_at(stmt);
+
+    if unpacked.is_empty() {
+        return rest.get(1).copied().into_iter().collect();
+    }
+
+    unpacked.iter().map(|&at| stmt[at].text.as_str()).collect()
 }
 
 /// FUNCTION: Record a `var` or `const` inside a function body, scoped
@@ -298,7 +322,7 @@ fn variable(file: &Path, words: &[&str], line: u32, scope: &Scope, out: &mut dyn
 /// so the same statement is not read differently one scope out. The
 /// discard placeholder declares nothing worth recording.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-fn local(file: &Path, words: &[&str], line: u32, scope: &Scope, out: &mut dyn Sink) {
+fn local(file: &Path, stmt: &[Tok], words: &[&str], line: u32, scope: &Scope, out: &mut dyn Sink) {
     let Some(body) = scope.body() else {
         return;
     };
@@ -310,33 +334,28 @@ fn local(file: &Path, words: &[&str], line: u32, scope: &Scope, out: &mut dyn Si
         return;
     }
 
-    let Some(name) = rest.get(1) else {
-        return;
-    };
+    for name in declared_names(stmt, rest) {
+        // A name the language owns is dropped wherever it stands, so
+        // no read of this variable ever reaches the reference list
+        // and the analyzer cannot know whether it is used. Recording
+        // it would make a finding of `var set = {}` read on the next
+        // line.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/31
+        if name == DISCARD || KEYWORDS.contains(&name) {
+            continue;
+        }
 
-    if *name == DISCARD {
-        return;
+        out.sym(Symbol {
+            id: SymbolId::in_scope(body, name),
+            kind: Kind::Variable,
+            name: name.to_string(),
+            file: file.to_path_buf(),
+            line,
+            exported: false,
+            owner: scope.owner.clone(),
+            scope: Some(body.clone()),
+        });
     }
-
-    // A name the language owns is dropped wherever it stands, so no
-    // read of this variable ever reaches the reference list and the
-    // analyzer cannot know whether it is used. Recording it would
-    // make a finding of `var set = {}` read on the next line.
-    // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/31
-    if KEYWORDS.contains(name) {
-        return;
-    }
-
-    out.sym(Symbol {
-        id: SymbolId::in_scope(body, name),
-        kind: Kind::Variable,
-        name: (*name).to_string(),
-        file: file.to_path_buf(),
-        line,
-        exported: false,
-        owner: scope.owner.clone(),
-        scope: Some(body.clone()),
-    });
 }
 
 /// FUNCTION: Record the values an enum lists, which arrive several to
@@ -588,6 +607,8 @@ const KEYWORDS: &[&str] = &[
     "enddef",
     "class",
     "endclass",
+    "extends",
+    "implements",
     "endenum",
     "interface",
     "endinterface",
@@ -664,6 +685,18 @@ const DICT: &str = "dict";
 // accepts, so `setl` reaches `setlocal` through `canonical`.
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 const SET_FAMILY: &[&str] = &["set", "setlocal", "setglobal"];
+
+// The commands whose arguments are text Vim keeps for itself from the
+// command to its end: a highlight group, an attribute and its value,
+// a keyword of the command, and the words of a pattern. `canonical`
+// reaches both from an abbreviation, as it does a set command.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+const SYNTAX_FAMILY: &[&str] = &["highlight", "syntax"];
+
+// What stands before a bar that ends no command, as a pattern writes
+// its alternation.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+const ESCAPE: &str = "\\";
 
 // What Vim writes between two commands on one line. The lexer keeps a
 // line that opens with one in the statement before it, so a bar stands
@@ -782,6 +815,7 @@ pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
     let types = Types::of_file(stmts);
     let mut scope = Scope::default();
     let mut locals = Locals::default();
+    let mut blocks = Blocks::default();
 
     for stmt in stmts {
         let words: Vec<&str> = stmt
@@ -792,6 +826,7 @@ pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
 
         if close_container(&words, &mut scope) {
             locals = Locals::default();
+            blocks.clear();
             continue;
         }
 
@@ -815,6 +850,14 @@ pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
         // defaults, and a var's initialiser, are still references.
         let mut skip: Vec<usize> = declared_name_at(stmt, &words).into_iter().collect();
 
+        // An unpacking declares every name in its brackets, and none
+        // of them is a use of itself either.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+        let unpacked = types::unpacked_at(stmt);
+        if !unpacked.is_empty() {
+            skip = unpacked;
+        }
+
         // A value of an enum states no keyword, so nothing above
         // finds the name its line declares. Several values may share
         // one line, which is why this is a list.
@@ -822,6 +865,13 @@ pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
         if skip.is_empty() && !in_def && scope.container == Container::Enum {
             skip = enum_values_at(stmt);
         }
+
+        // A lambda written as a block binds its parameters for every
+        // statement of the block, and this is one of them where a
+        // block is still open.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+        let mut bound = bound_names(stmt, &words);
+        bound.extend(blocks.names());
 
         let mut sink = Collect {
             file,
@@ -831,15 +881,17 @@ pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
             types: &types,
             in_def,
             own: skip.first().map(|&at| stmt[at].text.as_str()),
-            bound: bound_names(stmt, &words),
+            bound,
             out,
         };
 
         sink.statement(stmt, &skip);
+        blocks.read(stmt);
 
         if let Some(id) = opens_body(file, stmt, &words, &mut scope) {
             scope.bodies.push(id);
             locals = Locals::of_signature(stmt);
+            blocks.clear();
         }
     }
 }
@@ -992,6 +1044,7 @@ impl Collect<'_> {
 
         let owned = vims
             || (recv.is_none() && set_args(stmt, i, heads))
+            || (recv.is_none() && syntax_args(stmt, i, heads))
             || NULLS.contains(&word)
             || (TYPES.contains(&word) && in_type(stmt, i) && !called(stmt, i));
 
@@ -1025,8 +1078,17 @@ impl Collect<'_> {
             return true;
         }
 
-        if !self.in_def || Some(word) == self.own {
+        if Some(word) == self.own {
             return false;
+        }
+
+        // A loop at script level binds its variable as one in a body
+        // does, and declares no symbol either. A declaration there is
+        // a script variable, which is a symbol, so the loop variable
+        // is the only binding answered outside a body.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+        if !self.in_def {
+            return self.locals.bound_by(word) == Some(types::Bound::Loop);
         }
 
         // A `var` or `const` of this body is a symbol now, so its
@@ -1084,6 +1146,17 @@ impl Collect<'_> {
         };
 
         for (name, owned) in names {
+            // An interpolation is lexed as code as well, so its names
+            // have been through `ident` already, and a variable of
+            // the code around the string is dropped there. This is
+            // the second reading of the same name, and it has to
+            // agree. It goes by spelling, so a word of the text that
+            // matches such a variable is dropped with it.
+            // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+            if EXECUTE.contains(&gate) && self.local(&name) {
+                continue;
+            }
+
             self.out.re(Reference {
                 name,
                 recv: None,
@@ -1497,6 +1570,28 @@ pub(super) fn set_args(stmt: &[Tok], i: usize, heads: &[usize]) -> bool {
     }
 
     stmt[at..i].iter().all(|tok| tok.text != BAR)
+}
+
+/// FUNCTION: Whether the token at `i` is an argument of `:highlight`
+/// or `:syntax`: after a head whose command is one, and before the bar
+/// that ends it.
+///
+/// A group is a name Vim keeps, and the project declares nothing that
+/// one of these commands could mean. The answer is a mark and never a
+/// drop, so a symbol that shares a spelling with a group keeps the
+/// credit it had, and where none exists the word is not counted.
+///
+/// An escaped bar ends nothing, because that is how a pattern writes
+/// its alternation. `heads` still lists the word behind one, so the
+/// nearest head cannot be trusted here and every head before the
+/// token is asked.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+pub(super) fn syntax_args(stmt: &[Tok], i: usize, heads: &[usize]) -> bool {
+    heads.iter().copied().filter(|at| *at < i).any(|at| {
+        excmds::canonical(&stmt[at].text).is_some_and(|name| SYNTAX_FAMILY.contains(&name))
+            && reads_command(stmt, at)
+            && (at + 1..i).all(|k| stmt[k].text != BAR || stmt[k - 1].text == ESCAPE)
+    })
 }
 
 /// FUNCTION: Every index at which Vim reads a command: the statement's

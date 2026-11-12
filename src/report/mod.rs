@@ -286,7 +286,12 @@ fn classify(
 /// placed, the analyzer has seen a read of that name and cannot say
 /// which variable it meant, so it must not claim any variable of that
 /// name is unread.
+///
+/// A reference the language owns is not such a read. The analyzer
+/// placed it: the name is the language's there, and no variable was
+/// read, so it hides no finding.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/48
 fn unplaced_names_by_file<'a>(
     a: &'a Analysis,
     r: &crate::resolve::Resolved,
@@ -294,7 +299,7 @@ fn unplaced_names_by_file<'a>(
     a.refs
         .iter()
         .enumerate()
-        .filter(|(at, _)| !r.targets.contains_key(at))
+        .filter(|(at, re)| !re.owned && !r.targets.contains_key(at))
         .map(|(_, re)| (re.file.as_path(), re.name.as_str()))
         .collect()
 }

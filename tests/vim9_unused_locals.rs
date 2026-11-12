@@ -195,3 +195,51 @@ fn a_plain_assignment_is_still_only_a_write() {
         vec!["local variable f"]
     );
 }
+
+/// A name declared by unpacking is a variable of the body, so one that
+/// nothing reads is the same finding a plain `var` gives.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+#[test]
+fn an_unpacked_name_nothing_reads_is_reported() {
+    assert_eq!(
+        found("unpack", "  var [first, last] = [1, 2]\n  echo first\n"),
+        vec!["local variable last"]
+    );
+}
+
+#[test]
+fn an_unpacked_name_something_reads_is_not_reported() {
+    assert!(found(
+        "unpackread",
+        "  var [first, last] = [1, 2]\n  echo first + last\n"
+    )
+    .is_empty());
+}
+
+/// A name the analyzer marked as Vim's is one it placed. It saw no
+/// read of a variable there, so the name hides no finding. The file
+/// declares the name twice, which is what leaves the marked name
+/// unresolved: declared once, it would resolve and credit.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/48
+#[test]
+fn a_name_marked_as_vims_does_not_hide_an_unread_local_of_its_spelling() {
+    assert_eq!(
+        found(
+            "owned",
+            "  var x = 1\n  def In()\n    if exists('l:x')\n    endif\n  enddef\n  def Two()\n    var x = 2\n    echo x\n  enddef\n  In()\n  Two()\n"
+        ),
+        vec!["local variable x"]
+    );
+}
+
+/// A read the analyzer could not place may be a read of any variable
+/// of that spelling in the file, so it still hides every one of them.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/48
+#[test]
+fn a_read_nothing_placed_still_hides_a_local_of_its_spelling() {
+    assert!(found(
+        "blind",
+        "  var row = 1\n  def In()\n    echo row\n  enddef\n  def Two()\n    var row = 2\n    echo row\n  enddef\n  In()\n  Two()\n"
+    )
+    .is_empty());
+}

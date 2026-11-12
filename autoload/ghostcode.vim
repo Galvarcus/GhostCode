@@ -138,12 +138,21 @@ enddef
 # one whole, with no shell to quote for, and Vim takes a list only
 # from the patch above. Before it, every argument is quoted here and
 # the shell is asked to run the line.
+#
+# A command that prints nothing gets an empty String back from
+# systemlist() and not an empty list, and join() refuses a String, so
+# what is not a list is answered as no lines at all.
+# REFERENCE: https://github.com/Galvarcus/GhostCode/issues/46
 def Output(cmd: list<string>): list<string>
+  var out: any
+
   if has(PATCH_ARGV)
-    return systemlist(cmd)
+    out = systemlist(cmd)
+  else
+    out = systemlist(cmd->mapnew((_, a) => shellescape(a))->join(' '))
   endif
 
-  return systemlist(cmd->mapnew((_, a) => shellescape(a))->join(' '))
+  return type(out) == v:t_list ? out : []
 enddef
 
 # FUNCTION: The report the binary printed, or an empty dictionary when

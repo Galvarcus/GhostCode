@@ -12,7 +12,7 @@
 //! License: GNU GPL 3.0
 
 /// Every function Vim defines, in order, so that a lookup is a binary
-/// search of 584 names rather than a walk of them.
+/// search of 589 names rather than a walk of them.
 const NAMES: &[&str] = &[
     "abs",
     "acos",
@@ -114,6 +114,7 @@ const NAMES: &[&str] = &[
     "did_filetype",
     "diff",
     "diff_filler",
+    "diff_hlID",
     "digraph_get",
     "digraph_getlist",
     "digraph_set",
@@ -233,6 +234,7 @@ const NAMES: &[&str] = &[
     "histdel",
     "histget",
     "histnr",
+    "hlID",
     "hlexists",
     "hlget",
     "hlset",
@@ -483,6 +485,9 @@ const NAMES: &[&str] = &[
     "swapfilelist",
     "swapinfo",
     "swapname",
+    "synID",
+    "synIDattr",
+    "synIDtrans",
     "synconcealed",
     "synstack",
     "system",
