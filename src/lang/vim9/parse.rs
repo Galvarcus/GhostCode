@@ -14,6 +14,7 @@ use crate::lang::vim9::excmds;
 use crate::lang::vim9::exists;
 use crate::lang::vim9::lex::Tok;
 use crate::lang::vim9::lex::TokKind;
+use crate::lang::vim9::scopevars;
 use crate::lang::vim9::types;
 use crate::lang::vim9::types::Blocks;
 use crate::lang::vim9::types::Locals;
@@ -767,6 +768,11 @@ const BAR: &str = "|";
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 const SCOPES: &[&str] = &["a", "b", "g", "l", "s", "t", "v", "w"];
 
+// The scopes whose variables outlive a script and are shared by every
+// file that names them: global, buffer, window and tab.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
+const SHARED: &[&str] = &["b", "g", "t", "w"];
+
 // Vim's command modifiers, which are the only words a command may
 // stand behind. Twenty-three are the list at `:help <mods>`, and
 // `legacy` is the Vim9 prefix at `:help :legacy`, which that list
@@ -1100,7 +1106,16 @@ impl Collect<'_> {
 
         let member = i > 0 && stmt[i - 1].text == DOT;
 
+        // A variable the help documents is Vim's, or a plugin's that Vim
+        // ships, whichever side of it the project stands on.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
+        let documented = i >= 2
+            && stmt[i - 1].text == ":"
+            && SHARED.contains(&stmt[i - 2].text.as_str())
+            && scopevars::has(&format!("{}:{word}", stmt[i - 2].text));
+
         let owned = vims
+            || documented
             || (member && word == NEW)
             || (recv.is_none() && set_args(stmt, i, heads))
             || text_args(stmt, i, heads)

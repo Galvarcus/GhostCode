@@ -12,6 +12,7 @@ mod exists;
 pub mod lex;
 pub mod parse;
 pub mod rules;
+mod scopevars;
 pub mod types;
 
 use std::path::Path;
