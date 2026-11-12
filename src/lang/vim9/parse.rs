@@ -195,6 +195,7 @@ fn open_container(
         exported,
         owner: None,
         scope: None,
+        lead: false,
     });
 
     true
@@ -260,6 +261,7 @@ fn function(
         exported,
         owner: scope.owner.clone(),
         scope: None,
+        lead: false,
     });
 
     true
@@ -298,6 +300,7 @@ fn variable(
             exported,
             owner: scope.owner.clone(),
             scope: None,
+            lead: false,
         });
     }
 }
@@ -355,6 +358,7 @@ fn local(file: &Path, stmt: &[Tok], words: &[&str], line: u32, scope: &Scope, ou
             exported: false,
             owner: scope.owner.clone(),
             scope: Some(body.clone()),
+            lead: false,
         });
     }
 }
@@ -374,6 +378,7 @@ fn enum_values(file: &Path, stmt: &[Tok], line: u32, scope: &Scope, out: &mut dy
             exported: false,
             owner: scope.owner.clone(),
             scope: None,
+            lead: false,
         });
     }
 }

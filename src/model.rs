@@ -9,6 +9,9 @@ use std::path::Component;
 use std::path::Path;
 use std::path::PathBuf;
 
+// What opens the id of a symbol that belongs to no file.
+const SHARED: &str = "<shared>::";
+
 /// What a symbol is. The text of each one is a contract: it is the word
 /// the quickfix line carries, which CI and every front end read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
@@ -99,6 +102,21 @@ impl SymbolId {
         Self(format!("{}::<script>", Self::text(file)))
     }
 
+    /// METHOD: The id of a symbol that belongs to no file, because every
+    /// file that names it names the same one. Angle brackets never
+    /// appear in an identifier, so it cannot collide with a
+    /// declaration's id.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
+    pub fn shared(name: &str) -> Self {
+        Self(format!("{SHARED}{name}"))
+    }
+
+    /// METHOD: Whether this is the id of a symbol that belongs to no
+    /// file.
+    pub fn is_shared(&self) -> bool {
+        self.0.starts_with(SHARED)
+    }
+
     /// METHOD: A file's path as an id carries it, with `/` between its
     /// parts whatever the platform separates with. One file can be
     /// named in more than one way, and an id built from the text of a
@@ -138,6 +156,13 @@ pub struct Symbol {
     /// own variable cannot be credited from anywhere else.
     /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
     pub scope: Option<SymbolId>,
+
+    /// Set where this declaration is the one a finding names among
+    /// several of one id. A variable every file shares can be written
+    /// in many places, and the reader is sent to the one that states
+    /// what it is.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
+    pub lead: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -299,6 +324,15 @@ mod tests {
         let file = Path::new("plugin/p.vim");
 
         assert_ne!(SymbolId::script(file), SymbolId::of(file, None, "script"));
+    }
+
+    #[test]
+    fn a_shared_id_names_no_file_and_cannot_collide() {
+        let id = SymbolId::shared("g:x");
+
+        assert_eq!(id.to_string(), "<shared>::g:x");
+        assert!(id.is_shared());
+        assert!(!SymbolId::of(Path::new("plugin/p.vim"), None, "x").is_shared());
     }
 
     /// One file can be named in more than one way: a `ghostcode.toml`

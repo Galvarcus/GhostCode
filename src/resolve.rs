@@ -303,6 +303,7 @@ mod tests {
             exported: false,
             owner: owner.map(str::to_string),
             scope: None,
+            lead: false,
         }
     }
 
@@ -319,6 +320,7 @@ mod tests {
             exported: false,
             owner: None,
             scope: Some(scope),
+            lead: false,
         }
     }
 

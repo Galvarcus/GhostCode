@@ -43,6 +43,14 @@ pub fn walk(a: &Analysis, r: &Resolved) -> HashSet<SymbolId> {
     }
 
     for sym in &a.syms {
+        // A symbol that belongs to no file sources none. Its `file` is
+        // where one of its writes stands, and reading the variable
+        // runs nothing there.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
+        if sym.id.is_shared() {
+            continue;
+        }
+
         add(&mut edges, sym.id.clone(), SymbolId::script(&sym.file));
     }
 
@@ -101,6 +109,7 @@ mod tests {
             exported: false,
             owner: None,
             scope: None,
+            lead: false,
         }
     }
 
@@ -139,6 +148,27 @@ mod tests {
         };
 
         assert!(reached(&a).contains(&"autoload/a.vim::Used".to_string()));
+    }
+
+    /// A variable every file shares is written in one file and read in
+    /// any. Reading it runs nothing of the file that wrote it, so the
+    /// read must not make that file count as sourced.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
+    #[test]
+    fn reaching_a_shared_symbol_does_not_reach_its_file() {
+        let mut shared = sym("autoload/b.vim", "g:x");
+        shared.id = SymbolId::shared("g:x");
+
+        let a = Analysis {
+            syms: vec![shared],
+            refs: vec![re("plugin/a.vim", None, "g:x")],
+            roots: vec![SymbolId::script(Path::new("plugin/a.vim"))],
+            ..Analysis::default()
+        };
+
+        let out = reached(&a);
+        assert!(out.contains(&"<shared>::g:x".to_string()));
+        assert!(!out.contains(&"autoload/b.vim::<script>".to_string()));
     }
 
     #[test]

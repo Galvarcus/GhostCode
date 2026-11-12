@@ -5,6 +5,7 @@
 mod json;
 mod text;
 
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::Path;
 use std::path::PathBuf;
@@ -123,6 +124,7 @@ pub fn analyze(root: &Path, cfg: &Config) -> anyhow::Result<Report> {
         }
     }
 
+    fold(&mut a);
     text_references(&mut a);
 
     let resolved = resolve::all(&a);
@@ -145,6 +147,43 @@ pub fn analyze(root: &Path, cfg: &Config) -> anyhow::Result<Report> {
         .collect();
 
     Ok(report)
+}
+
+/// FUNCTION: Keep one symbol for each id that belongs to no file.
+///
+/// A variable every file shares is declared by each write of it, in
+/// any file, and all of them are one variable. The one kept is the
+/// write a finding names: a lead one where the scan marked one, and
+/// otherwise the first by path and line.
+///
+/// Only such an id is folded. Two declarations of one name in one
+/// file are two symbols, as the two arms of an `if` may each hold a
+/// `def`, and each is reported for itself.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
+fn fold(a: &mut Analysis) {
+    let mut kept: HashMap<SymbolId, usize> = HashMap::new();
+
+    for (at, sym) in a.syms.iter().enumerate() {
+        if !sym.id.is_shared() {
+            continue;
+        }
+
+        let first = |s: &crate::model::Symbol| (!s.lead, s.file.clone(), s.line);
+
+        match kept.get(&sym.id) {
+            Some(&best) if first(&a.syms[best]) <= first(sym) => {}
+            _ => {
+                kept.insert(sym.id.clone(), at);
+            }
+        }
+    }
+
+    let mut at = 0;
+    a.syms.retain(|sym| {
+        let keep = !sym.id.is_shared() || kept.get(&sym.id) == Some(&at);
+        at += 1;
+        keep
+    });
 }
 
 /// FUNCTION: Turn the text a project holds into references, for the
@@ -266,6 +305,12 @@ fn classify(
     blind: &HashSet<(&Path, &str)>,
     cfg: &Config,
 ) -> Option<Class> {
+    // A symbol that belongs to no file is reported by no rule yet.
+    // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
+    if sym.id.is_shared() {
+        return None;
+    }
+
     if let Some(body) = &sym.scope {
         let unread = cfg.findings.locals
             && reached.contains(body)
@@ -316,4 +361,72 @@ fn count(findings: &[Finding], class: Class) -> usize {
 /// that declared it.
 fn is_api(sym: &crate::model::Symbol, cfg: &Config) -> bool {
     lang::for_path(&sym.file).is_some_and(|l| l.is_api(sym, cfg))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::Symbol;
+
+    /// FUNCTION: One write of a variable every file shares.
+    fn write(name: &str, file: &str, line: u32, lead: bool) -> Symbol {
+        Symbol {
+            id: SymbolId::shared(name),
+            kind: Kind::Variable,
+            name: name.to_string(),
+            file: PathBuf::from(file),
+            line,
+            exported: false,
+            owner: None,
+            scope: None,
+            lead,
+        }
+    }
+
+    /// FUNCTION: Where each symbol of an analysis stands after a fold.
+    fn folded(syms: Vec<Symbol>) -> Vec<(String, u32)> {
+        let mut a = Analysis {
+            syms,
+            ..Analysis::default()
+        };
+        fold(&mut a);
+
+        a.syms
+            .iter()
+            .map(|s| (s.file.display().to_string(), s.line))
+            .collect()
+    }
+
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
+    #[test]
+    fn several_writes_of_one_shared_name_fold_to_the_lead_one() {
+        let syms = vec![
+            write("g:x", "autoload/a.vim", 9, false),
+            write("g:x", "plugin/p.vim", 4, true),
+            write("g:x", "plugin/p.vim", 2, false),
+        ];
+
+        assert_eq!(folded(syms), vec![("plugin/p.vim".to_string(), 4)]);
+    }
+
+    #[test]
+    fn with_no_lead_write_the_first_by_path_and_line_is_kept() {
+        let syms = vec![
+            write("g:x", "plugin/p.vim", 4, false),
+            write("g:x", "autoload/a.vim", 9, false),
+            write("g:x", "plugin/p.vim", 2, false),
+        ];
+
+        assert_eq!(folded(syms), vec![("autoload/a.vim".to_string(), 9)]);
+    }
+
+    #[test]
+    fn two_symbols_of_one_file_id_are_both_kept() {
+        let mut one = write("F", "a.vim", 1, false);
+        one.id = SymbolId::of(Path::new("a.vim"), None, "F");
+        let mut two = one.clone();
+        two.line = 5;
+
+        assert_eq!(folded(vec![one, two]).len(), 2);
+    }
 }
