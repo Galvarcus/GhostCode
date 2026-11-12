@@ -260,3 +260,15 @@ fn a_loop_variable_at_script_level_is_not_a_reference() {
     assert_eq!(count(text, "item"), 0);
     assert_eq!(count(text, "ITEMS"), 1);
 }
+
+/// The names in the brackets are declared there, as the one name of a
+/// plain `var` is, so the line that declares them reads none of them.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+#[test]
+fn the_names_an_unpacking_declares_are_not_references_where_declared() {
+    let text = "vim9script\ndef F()\n  var [first, last] = Bounds()\nenddef\n";
+
+    assert_eq!(count(text, "first"), 0);
+    assert_eq!(count(text, "last"), 0);
+    assert_eq!(count(text, "Bounds"), 1);
+}

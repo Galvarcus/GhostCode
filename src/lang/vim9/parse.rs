@@ -144,7 +144,7 @@ pub fn declarations(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
         // a symbol of that body and of nothing wider.
         // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
         if scope.depth() > 0 {
-            local(file, &words, line, &scope, out);
+            local(file, stmt, &words, line, &scope, out);
             continue;
         }
 
@@ -153,7 +153,7 @@ pub fn declarations(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
             continue;
         }
 
-        variable(file, &words, line, &scope, out);
+        variable(file, stmt, &words, line, &scope, out);
     }
 }
 
@@ -266,7 +266,14 @@ fn function(
 
 /// FUNCTION: Record a `var`, `const`, or `final`: a script variable at
 /// module level, or a field inside a class.
-fn variable(file: &Path, words: &[&str], line: u32, scope: &Scope, out: &mut dyn Sink) {
+fn variable(
+    file: &Path,
+    stmt: &[Tok],
+    words: &[&str],
+    line: u32,
+    scope: &Scope,
+    out: &mut dyn Sink,
+) {
     let (exported, rest) = strip_export(words);
     let rest = strip_modifiers(rest);
 
@@ -274,22 +281,38 @@ fn variable(file: &Path, words: &[&str], line: u32, scope: &Scope, out: &mut dyn
         return;
     }
 
-    let Some(name) = rest.get(1) else {
-        return;
-    };
+    for name in declared_names(stmt, rest) {
+        if name == DISCARD {
+            continue;
+        }
 
-    let (kind, exported) = member_kind(scope, Kind::Variable, Kind::Field, name, exported);
+        let (kind, exported) = member_kind(scope, Kind::Variable, Kind::Field, name, exported);
 
-    out.sym(Symbol {
-        id: SymbolId::of(file, scope.owner.as_deref(), name),
-        kind,
-        name: (*name).to_string(),
-        file: file.to_path_buf(),
-        line,
-        exported,
-        owner: scope.owner.clone(),
-        scope: None,
-    });
+        out.sym(Symbol {
+            id: SymbolId::of(file, scope.owner.as_deref(), name),
+            kind,
+            name: name.to_string(),
+            file: file.to_path_buf(),
+            line,
+            exported,
+            owner: scope.owner.clone(),
+            scope: None,
+        });
+    }
+}
+
+/// FUNCTION: The names a `var` or `const` statement declares: every
+/// name in the brackets of one that unpacks a list, and otherwise the
+/// one name after the declaring word.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+fn declared_names<'a>(stmt: &'a [Tok], rest: &[&'a str]) -> Vec<&'a str> {
+    let unpacked = types::unpacked_at(stmt);
+
+    if unpacked.is_empty() {
+        return rest.get(1).copied().into_iter().collect();
+    }
+
+    unpacked.iter().map(|&at| stmt[at].text.as_str()).collect()
 }
 
 /// FUNCTION: Record a `var` or `const` inside a function body, scoped
@@ -299,7 +322,7 @@ fn variable(file: &Path, words: &[&str], line: u32, scope: &Scope, out: &mut dyn
 /// so the same statement is not read differently one scope out. The
 /// discard placeholder declares nothing worth recording.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-fn local(file: &Path, words: &[&str], line: u32, scope: &Scope, out: &mut dyn Sink) {
+fn local(file: &Path, stmt: &[Tok], words: &[&str], line: u32, scope: &Scope, out: &mut dyn Sink) {
     let Some(body) = scope.body() else {
         return;
     };
@@ -311,33 +334,28 @@ fn local(file: &Path, words: &[&str], line: u32, scope: &Scope, out: &mut dyn Si
         return;
     }
 
-    let Some(name) = rest.get(1) else {
-        return;
-    };
+    for name in declared_names(stmt, rest) {
+        // A name the language owns is dropped wherever it stands, so
+        // no read of this variable ever reaches the reference list
+        // and the analyzer cannot know whether it is used. Recording
+        // it would make a finding of `var set = {}` read on the next
+        // line.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/31
+        if name == DISCARD || KEYWORDS.contains(&name) {
+            continue;
+        }
 
-    if *name == DISCARD {
-        return;
+        out.sym(Symbol {
+            id: SymbolId::in_scope(body, name),
+            kind: Kind::Variable,
+            name: name.to_string(),
+            file: file.to_path_buf(),
+            line,
+            exported: false,
+            owner: scope.owner.clone(),
+            scope: Some(body.clone()),
+        });
     }
-
-    // A name the language owns is dropped wherever it stands, so no
-    // read of this variable ever reaches the reference list and the
-    // analyzer cannot know whether it is used. Recording it would
-    // make a finding of `var set = {}` read on the next line.
-    // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/31
-    if KEYWORDS.contains(name) {
-        return;
-    }
-
-    out.sym(Symbol {
-        id: SymbolId::in_scope(body, name),
-        kind: Kind::Variable,
-        name: (*name).to_string(),
-        file: file.to_path_buf(),
-        line,
-        exported: false,
-        owner: scope.owner.clone(),
-        scope: Some(body.clone()),
-    });
 }
 
 /// FUNCTION: Record the values an enum lists, which arrive several to
@@ -817,6 +835,14 @@ pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
         // statement is read from after it: a def's parameter types and
         // defaults, and a var's initialiser, are still references.
         let mut skip: Vec<usize> = declared_name_at(stmt, &words).into_iter().collect();
+
+        // An unpacking declares every name in its brackets, and none
+        // of them is a use of itself either.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+        let unpacked = types::unpacked_at(stmt);
+        if !unpacked.is_empty() {
+            skip = unpacked;
+        }
 
         // A value of an enum states no keyword, so nothing above
         // finds the name its line declares. Several values may share

@@ -156,12 +156,20 @@ impl Locals {
     /// METHOD: Record the type of a variable a statement declares,
     /// whether it states one or builds one with a constructor.
     pub fn declare(&mut self, stmt: &[Tok]) {
-        if let Some((name, ty)) = declared_name(stmt) {
-            let bound = match declaring_word(stmt) {
-                Some("final") => Bound::Final,
-                _ => Bound::Declared,
-            };
+        let bound = match declaring_word(stmt) {
+            Some("final") => Bound::Final,
+            _ => Bound::Declared,
+        };
 
+        // A declaration that unpacks a list declares every name in
+        // its brackets, each with the type it states for itself.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+        for at in unpacked_at(stmt) {
+            let ty = annotated(&stmt[at..]).map(|(_, ty)| ty).unwrap_or_default();
+            self.vars.insert(stmt[at].text.clone(), (bound, ty));
+        }
+
+        if let Some((name, ty)) = declared_name(stmt) {
             self.vars.insert(name, (bound, ty));
         }
     }
@@ -441,6 +449,50 @@ fn declared_name(stmt: &[Tok]) -> Option<(String, String)> {
     }
 
     Some((name.text.clone(), String::new()))
+}
+
+/// FUNCTION: The index of every name a declaration binds by unpacking
+/// a list, as `var [a, b: number; rest] = F()` binds three. Empty for
+/// a declaration of one name and for a statement that declares none.
+///
+/// The first name of each part is the one it declares, and a type may
+/// follow it. A semicolon stands before the name that takes what is
+/// left of the list.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+pub fn unpacked_at(stmt: &[Tok]) -> Vec<usize> {
+    let word = stmt
+        .iter()
+        .take(4)
+        .position(|t| matches!(t.text.as_str(), "var" | "const" | "final"));
+
+    let Some(open) = word.map(|at| at + 1) else {
+        return Vec::new();
+    };
+
+    if stmt.get(open).map(|t| t.text.as_str()) != Some("[") {
+        return Vec::new();
+    }
+
+    let close = closing(stmt, open).unwrap_or(stmt.len());
+    let mut out = Vec::new();
+    let mut depth = 0i32;
+    let mut fresh = true;
+
+    for (i, tok) in stmt.iter().enumerate().take(close).skip(open + 1) {
+        match tok.text.as_str() {
+            "(" | "[" | "{" | "<" => depth += 1,
+            ")" | "]" | "}" | ">" => depth -= 1,
+            ">>" => depth -= 2,
+            "," | ";" if depth == 0 => fresh = true,
+            _ if fresh && tok.kind == TokKind::Ident => {
+                out.push(i);
+                fresh = false;
+            }
+            _ => {}
+        }
+    }
+
+    out
 }
 
 /// FUNCTION: The name and type of an annotated declaration, `x: Foo`,

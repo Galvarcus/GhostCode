@@ -195,3 +195,23 @@ fn a_plain_assignment_is_still_only_a_write() {
         vec!["local variable f"]
     );
 }
+
+/// A name declared by unpacking is a variable of the body, so one that
+/// nothing reads is the same finding a plain `var` gives.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+#[test]
+fn an_unpacked_name_nothing_reads_is_reported() {
+    assert_eq!(
+        found("unpack", "  var [first, last] = [1, 2]\n  echo first\n"),
+        vec!["local variable last"]
+    );
+}
+
+#[test]
+fn an_unpacked_name_something_reads_is_not_reported() {
+    assert!(found(
+        "unpackread",
+        "  var [first, last] = [1, 2]\n  echo first + last\n"
+    )
+    .is_empty());
+}

@@ -202,3 +202,65 @@ fn a_local_is_recorded_as_a_variable() {
         .iter()
         .any(|s| s.name == "row" && s.kind == Kind::Variable));
 }
+
+/// A declaration that unpacks a list declares every name in its
+/// brackets, each a variable of the body like the name of a plain
+/// `var`.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+#[test]
+fn every_name_an_unpacking_declares_is_a_symbol_scoped_to_its_body() {
+    let text = "vim9script\ndef F()\n  var [first, last] = Bounds()\nenddef\n";
+
+    for name in ["first", "last"] {
+        assert_eq!(
+            syms(text, name),
+            vec![(
+                format!("autoload/p.vim::F.{name}"),
+                "autoload/p.vim::F".to_string()
+            )]
+        );
+    }
+}
+
+#[test]
+fn a_typed_name_an_unpacking_declares_is_a_symbol() {
+    let text = "vim9script\ndef F()\n  var [text: string, start: number] = Find()\nenddef\n";
+
+    assert_eq!(syms(text, "text").len(), 1);
+    assert_eq!(syms(text, "start").len(), 1);
+    assert!(syms(text, "string").is_empty());
+    assert!(syms(text, "number").is_empty());
+}
+
+#[test]
+fn the_rest_of_an_unpacking_is_a_symbol() {
+    let text = "vim9script\ndef F()\n  var [first; rest] = Bounds()\nenddef\n";
+
+    assert_eq!(syms(text, "rest").len(), 1);
+}
+
+#[test]
+fn the_discard_placeholder_in_an_unpacking_is_not_a_symbol() {
+    let text = "vim9script\ndef F()\n  var [_, last] = Bounds()\nenddef\n";
+
+    assert!(syms(text, "_").is_empty());
+    assert_eq!(syms(text, "last").len(), 1);
+}
+
+#[test]
+fn a_read_of_an_unpacked_name_resolves_to_it() {
+    let text = "vim9script\ndef F()\n  var [first, last] = [1, 2]\n  echo last\nenddef\n";
+
+    assert_eq!(resolved(text, "last"), vec!["autoload/p.vim::F.last"]);
+    assert_eq!(resolve::all(&scan(text)).unplaced, 0);
+}
+
+#[test]
+fn an_unpacking_at_script_level_declares_script_variables() {
+    let text = "vim9script\nvar [first, last] = [1, 2]\n";
+
+    assert_eq!(
+        syms(text, "last"),
+        vec![("autoload/p.vim::last".to_string(), String::new())]
+    );
+}
