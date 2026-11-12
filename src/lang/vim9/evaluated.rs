@@ -6,6 +6,8 @@
 
 use std::collections::HashSet;
 
+use super::autocmd;
+use super::builtins;
 use super::excmds;
 use super::lex;
 use super::lex::TokKind;
@@ -17,53 +19,129 @@ use super::parse::identifiers;
 /// and no further.
 const GAP: char = '{';
 
+/// What closes the interpolated part of a string.
+const CLOSE: char = '}';
+
+/// What stands before an option, as in `&guifont`.
+const OPTION: &str = "&";
+
+/// What divides a scope from the name behind it, and a receiver from
+/// its key.
+const COLON: &str = ":";
+const DOT: &str = ".";
+
+/// What opens and closes key notation, and what joins its parts, as
+/// in `<C-w>`.
+const KEY_OPEN: &str = "<";
+const KEY_CLOSE: &str = ">";
+const KEY_JOIN: &str = "-";
+
+/// What opens the arguments of a call.
+const CALL: &str = "(";
+
+/// The letters that open a scope, as in `t:session`.
+const SCOPES: &[&str] = &["g", "b", "w", "t", "s", "l", "a", "v"];
+
 /// FUNCTION: Every name the argument holds, in order, each with
 /// whether it is Vim's own word.
 ///
-/// The reading stops at the first gap, because a word after one stands
-/// at a position no one can know: in
+/// The reading by position stops at the first gap, because a word
+/// after one stands at a position no one can know: in
 /// `execute 'silent ' .. mods .. ' edit '`, whether `edit` is a
 /// command depends on what `mods` left behind. The harvest does not
 /// stop there. Three symbols in the corpora are credited only by text
-/// after a gap, so every name still comes back; the ones past the gap
-/// simply come back unmarked.
+/// after a gap, so every name still comes back.
+///
+/// Past the gap a word is marked for one of two reasons. Its own
+/// shape says it is Vim's, wherever it stands: see `loose_words`. Or
+/// the command before the gap takes the rest of its line as text or
+/// as keys, and the word is outside every gap and is not called. A
+/// mark never takes a credit from a symbol, so a wrong mark costs a
+/// count and no finding.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 pub fn names(arg: &str) -> Vec<(String, bool)> {
     let (head, tail) = arg.split_once(GAP).unwrap_or((arg, ""));
-    let vims = vims_words(head);
+    let stmts = parse::statements(&lex::tokens(head));
+    let owns = stmts.last().is_some_and(|stmt| parse::owns_line(stmt));
+
+    let mut vims = vims_words(&stmts);
+    vims.extend(loose_words(head, false));
 
     let mut out: Vec<(String, bool)> = identifiers(head)
         .into_iter()
         .map(|name| (name.clone(), vims.contains(&name)))
         .collect();
 
-    out.extend(identifiers(tail).into_iter().map(|name| (name, false)));
+    // The tail opens inside a gap, and the gaps and the text between
+    // them take turns from there.
+    let mut code = true;
+    let mut rest = tail;
+
+    while !rest.is_empty() {
+        let end = if code { CLOSE } else { GAP };
+        let (part, after) = rest.split_once(end).unwrap_or((rest, ""));
+        let loose = loose_words(part, code);
+
+        // A word that is called is a function, and one the shape
+        // rules did not take is no builtin: it is the project's, as
+        // the function a mapping runs is.
+        let called = called_words(part);
+
+        out.extend(identifiers(part).into_iter().map(|name| {
+            let vims = (!code && owns && !called.contains(&name)) || loose.contains(&name);
+            (name, vims)
+        }));
+
+        code = !code;
+        rest = after;
+    }
+
     out
 }
 
+/// FUNCTION: Every name an expression holds, in order, each with
+/// whether its shape says it is Vim's own word.
+///
+/// `eval()` takes an expression, which has no command and no
+/// position to read, so only the shape of a word marks it.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+pub fn loose(arg: &str) -> Vec<(String, bool)> {
+    let vims = loose_words(arg, false);
+
+    identifiers(arg)
+        .into_iter()
+        .map(|name| (name.clone(), vims.contains(&name)))
+        .collect()
+}
+
 /// FUNCTION: The words of a readable head that Vim reads as its own: a
-/// command at a head position, a modifier before one, and the
-/// arguments of a set-family command and of a command whose
-/// arguments are Vim's own text, such as `:highlight`.
+/// command at a head position, a modifier before one, a user command,
+/// the arguments of a set-family command and of a command whose
+/// arguments are Vim's own text, such as `:highlight`, the keys of a
+/// mapping command, and what an autocommand states before the command
+/// it runs.
 ///
 /// The head is lexed and run through the statement rules, so a
 /// command written short is read as one and a bar starts the next
 /// command, exactly as in code.
-fn vims_words(head: &str) -> HashSet<String> {
+fn vims_words(stmts: &[Vec<lex::Tok>]) -> HashSet<String> {
     let mut out = HashSet::new();
 
-    for stmt in parse::statements(&lex::tokens(head)) {
-        let heads = parse::heads(&stmt);
+    for stmt in stmts {
+        let heads = parse::heads(stmt);
+        let owned = parse::command_at(stmt).and_then(|at| autocmd::owned(stmt, at));
 
         for (i, tok) in stmt.iter().enumerate() {
             if tok.kind != TokKind::Ident {
                 continue;
             }
 
-            let vims = (parse::in_command(&stmt, i, &heads)
-                && excmds::canonical(&tok.text).is_some())
-                || parse::set_args(&stmt, i, &heads)
-                || parse::text_args(&stmt, i, &heads);
+            let vims = (parse::in_command(stmt, i, &heads)
+                && (excmds::canonical(&tok.text).is_some() || parse::user_command(&tok.text)))
+                || parse::set_args(stmt, i, &heads)
+                || parse::text_args(stmt, i, &heads)
+                || parse::map_args(stmt, i)
+                || owned.as_ref().is_some_and(|own| own.contains(&i));
 
             if vims {
                 out.insert(tok.text.clone());
@@ -72,6 +150,85 @@ fn vims_words(head: &str) -> HashSet<String> {
     }
 
     out
+}
+
+/// FUNCTION: The words of a text whose shape says they are Vim's own,
+/// wherever they stand: a word of the language such as `true`, a
+/// builtin that is called, an option behind its sigil, a scope letter
+/// and the name behind it, and the parts of key notation.
+///
+/// `keys` adds the name behind a dot. Inside a gap the text is an
+/// expression, which the lexer has read as code already, and there a
+/// name behind a dot is a member or a key of a dictionary and no
+/// name of its own.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+fn loose_words(text: &str, keys: bool) -> HashSet<String> {
+    let toks = lex::tokens(text);
+
+    // A word of the language goes by its spelling alone, so that one
+    // inside a string of the text is taken as well.
+    let mut out: HashSet<String> = identifiers(text)
+        .into_iter()
+        .filter(|name| parse::KEYWORDS.contains(&name.as_str()))
+        .collect();
+
+    let is = |at: usize, text: &str| toks.get(at).is_some_and(|t| t.text == text);
+    let glued = |at: usize| toks.get(at).is_some_and(|t| t.glued);
+
+    for (i, tok) in toks.iter().enumerate() {
+        if tok.kind != TokKind::Ident {
+            continue;
+        }
+
+        let word = tok.text.as_str();
+        let behind = |text: &str| i > 0 && tok.glued && is(i - 1, text);
+
+        let option = word.starts_with(OPTION) || behind(OPTION);
+        let scope = SCOPES.contains(&word) && is(i + 1, COLON) && glued(i + 1);
+        let scoped =
+            behind(COLON) && i > 1 && glued(i - 1) && SCOPES.contains(&toks[i - 2].text.as_str());
+        let called = is(i + 1, CALL) && builtins::has(word);
+        let key = keys && behind(DOT) && i > 1 && toks[i - 2].kind == TokKind::Ident;
+
+        if option || scope || scoped || called || key || in_notation(&toks, i) {
+            out.insert(word.trim_start_matches(OPTION).to_string());
+        }
+    }
+
+    out
+}
+
+/// FUNCTION: The words of a text that are called.
+fn called_words(text: &str) -> HashSet<String> {
+    let toks = lex::tokens(text);
+
+    toks.iter()
+        .enumerate()
+        .filter(|(i, tok)| {
+            tok.kind == TokKind::Ident && toks.get(i + 1).is_some_and(|next| next.text == CALL)
+        })
+        .map(|(_, tok)| tok.text.clone())
+        .collect()
+}
+
+/// FUNCTION: Whether the word at `i` is a part of key notation: it
+/// stands in an unbroken run of words and joins that opens with `<`
+/// and closes with `>`, as `C` and `w` do in `<C-w>`.
+fn in_notation(toks: &[lex::Tok], i: usize) -> bool {
+    let part = |t: &lex::Tok| {
+        t.glued && (t.kind == TokKind::Ident || t.kind == TokKind::Num || t.text == KEY_JOIN)
+    };
+
+    let open = (0..i)
+        .rev()
+        .find(|k| !part(&toks[*k]))
+        .is_some_and(|k| toks[k].text == KEY_OPEN);
+
+    let close = (i + 1..toks.len())
+        .find(|k| !part(&toks[*k]))
+        .is_some_and(|k| toks[k].glued && toks[k].text == KEY_CLOSE);
+
+    open && toks[i].glued && close
 }
 
 #[cfg(test)]
@@ -138,5 +295,139 @@ mod tests {
     #[test]
     fn a_name_after_a_gap_is_never_vims() {
         assert_eq!(words_of("{x} edit"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_user_command_at_the_head_is_vims() {
+        assert_eq!(words_of("PluginOpen draft"), vec!["PluginOpen"]);
+    }
+
+    #[test]
+    fn a_user_command_behind_a_modifier_is_vims() {
+        assert_eq!(words_of("silent! PluginOpen"), vec!["silent", "PluginOpen"]);
+    }
+
+    #[test]
+    fn the_keys_of_a_mapping_command_are_vims() {
+        assert_eq!(
+            words_of("nnoremap <silent> <C-w>"),
+            vec!["nnoremap", "silent", "C", "w"]
+        );
+    }
+
+    #[test]
+    fn the_event_and_the_flags_of_an_autocommand_are_vims() {
+        assert_eq!(
+            words_of("autocmd WinEnter,CursorMoved <buffer> ++nested Run()"),
+            vec!["autocmd", "WinEnter", "CursorMoved", "buffer", "nested"]
+        );
+    }
+
+    #[test]
+    fn the_event_a_doautocmd_names_is_vims() {
+        assert_eq!(
+            words_of("doautocmd <nomodeline> User "),
+            vec!["doautocmd", "nomodeline", "User"]
+        );
+    }
+
+    #[test]
+    fn an_option_behind_its_sigil_is_vims() {
+        assert_eq!(words_of("&guifont = Font"), vec!["guifont"]);
+    }
+
+    #[test]
+    fn a_literal_of_the_language_is_vims() {
+        assert_eq!(words_of("&fullscreen = true"), vec!["fullscreen", "true"]);
+    }
+
+    #[test]
+    fn a_scope_letter_and_the_name_behind_it_are_vims() {
+        assert_eq!(words_of("echo t:session"), vec!["echo", "t", "session"]);
+    }
+
+    #[test]
+    fn a_builtin_called_past_a_gap_is_vims() {
+        assert_eq!(words_of("{x} {string(c)}"), vec!["string"]);
+    }
+
+    #[test]
+    fn a_function_of_the_project_called_past_a_gap_is_not_vims() {
+        assert_eq!(words_of("{x} {Width(c)}"), Vec::<String>::new());
+    }
+
+    #[test]
+    fn key_notation_past_a_gap_is_vims() {
+        assert_eq!(
+            words_of("{m}noremap <silent> <Plug>({name}) <C-g>"),
+            vec!["silent", "Plug", "C", "g"]
+        );
+    }
+
+    #[test]
+    fn a_key_read_from_a_dictionary_inside_a_gap_is_vims() {
+        assert_eq!(words_of("{x} {saved.font}"), vec!["font"]);
+    }
+
+    /// A command whose arguments are text to the end of the line owns
+    /// the literal words past a gap as well, whatever the gap holds.
+    #[test]
+    fn the_text_past_a_gap_of_a_highlight_command_is_vims() {
+        assert_eq!(
+            words_of("highlight {grp} ctermfg={Color(n)} guisp=bg"),
+            vec!["highlight", "ctermfg", "guisp", "bg"]
+        );
+    }
+
+    #[test]
+    fn the_keys_past_a_gap_of_a_mapping_command_are_vims() {
+        assert_eq!(
+            words_of("inoremap <buffer> {ch} {ch}u"),
+            vec!["inoremap", "buffer", "u"]
+        );
+    }
+
+    #[test]
+    fn the_text_past_a_gap_of_a_menu_command_is_vims() {
+        assert_eq!(
+            words_of("amenu {priority} {path} <Cmd>call Run()<CR>"),
+            vec!["amenu", "Cmd", "call", "CR"]
+        );
+    }
+
+    #[test]
+    fn the_unit_of_a_sleep_command_is_vims() {
+        assert_eq!(words_of("sleep {ms}m"), vec!["sleep", "m"]);
+    }
+
+    #[test]
+    fn the_flags_of_a_vimgrep_command_are_vims() {
+        assert_eq!(
+            words_of("silent! vimgrep /{pat}/j {files}"),
+            vec!["silent", "vimgrep", "j"]
+        );
+    }
+
+    #[test]
+    fn the_text_past_a_gap_of_a_set_command_is_not_vims() {
+        assert_eq!(words_of("setlocal tw={x} Later"), vec!["setlocal", "tw"]);
+    }
+
+    #[test]
+    fn an_expression_keeps_its_names_and_marks_its_option() {
+        assert_eq!(
+            super::loose("&guifont .. Suffix"),
+            vec![("guifont".to_string(), true), ("Suffix".to_string(), false),]
+        );
+    }
+
+    /// A string inside a gap is text of the expression, and a word of
+    /// the language in it can still be no name of the project.
+    #[test]
+    fn a_literal_of_the_language_in_a_string_inside_a_gap_is_vims() {
+        assert_eq!(
+            words_of("&fullscreen = {on ? \"true\" : \"false\"}"),
+            vec!["fullscreen", "true", "false"]
+        );
     }
 }

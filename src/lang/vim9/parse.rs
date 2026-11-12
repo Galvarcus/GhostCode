@@ -679,7 +679,7 @@ fn unquote(text: &str) -> String {
 // because that costs a project a name of its own for nothing.
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/28
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/31
-const KEYWORDS: &[&str] = &[
+pub(super) const KEYWORDS: &[&str] = &[
     "vim9script",
     "def",
     "enddef",
@@ -783,15 +783,25 @@ const SET_FAMILY: &[&str] = &["set", "setlocal", "setglobal"];
 // `canonical` reaches each from an abbreviation, as it does a set
 // command.
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+//
+// `:sleep` takes a count with its unit, and `:vimgrep` a pattern, its
+// flags and file names.
 const TEXT_FAMILY: &[&str] = &[
     "highlight",
     "syntax",
-    "emenu",
     "echohl",
     "colorscheme",
     "language",
     "setfiletype",
+    "sleep",
+    "vimgrep",
 ];
+
+// What the name of every menu command ends with: `amenu`, `emenu`,
+// `nnoremenu`, `aunmenu`. Each takes a priority, a keyword or a path,
+// and the keys the entry runs.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+const MENU: &str = "menu";
 
 // The command that runs its argument as keys. It is apart from the
 // family above because it takes a bar as one of those keys, so
@@ -938,7 +948,12 @@ const NULLS: &[&str] = &[
 // the name inside the string is a call site like any other. These are
 // harvested word by word; the two lists below have a reader of their
 // own, and no word is named twice.
-const BY_NAME: &[&str] = &["call", "function", "funcref", "eval"];
+const BY_NAME: &[&str] = &["call", "function", "funcref", EVAL];
+
+// The builtin whose argument is an expression rather than one name,
+// so that an option or a literal in it is Vim's own word.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+const EVAL: &str = "eval";
 
 // Whose argument is Vim's own syntax rather than a name, read part by
 // part in `exists`. Every script opens with `exists('s:is_loaded')`,
@@ -1383,6 +1398,8 @@ impl Collect<'_> {
             exists::names(&arg)
         } else if EXECUTE.contains(&gate) {
             evaluated::names(&arg)
+        } else if gate == EVAL {
+            evaluated::loose(&arg)
         } else {
             identifiers(&arg).into_iter().map(|n| (n, false)).collect()
         };
@@ -1544,7 +1561,7 @@ fn called(stmt: &[Tok], i: usize) -> bool {
 
 /// FUNCTION: Whether a word can name a user command, which Vim
 /// requires to start with a capital.
-fn user_command(word: &str) -> bool {
+pub(super) fn user_command(word: &str) -> bool {
     word.starts_with(|c: char| c.is_ascii_uppercase())
 }
 
@@ -1849,9 +1866,32 @@ pub(super) fn text_args(stmt: &[Tok], i: usize, heads: &[usize]) -> bool {
         }
 
         name == NORMAL
-            || (TEXT_FAMILY.contains(&name)
+            || (text_family(name)
                 && (at + 1..i).all(|k| stmt[k].text != BAR || stmt[k - 1].text == ESCAPE))
     })
+}
+
+/// FUNCTION: Whether a command keeps its arguments as text of Vim's
+/// own from the command to its end.
+fn text_family(name: &str) -> bool {
+    TEXT_FAMILY.contains(&name) || name.ends_with(MENU)
+}
+
+/// FUNCTION: Whether the last command of a statement takes the rest
+/// of its line as text or as keys: a command of the text family,
+/// `:normal`, or a mapping command.
+///
+/// The reader of a command line asks, because the words past a gap
+/// in such a line are Vim's whatever the gap holds.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+pub(super) fn owns_line(stmt: &[Tok]) -> bool {
+    heads(stmt)
+        .into_iter()
+        .filter(|at| stmt.get(*at).is_some_and(|t| !modifier(&t.text)))
+        .max()
+        .filter(|at| reads_command(stmt, *at))
+        .and_then(|at| excmds::canonical(&stmt[at].text))
+        .is_some_and(|name| name == NORMAL || text_family(name) || name.ends_with(MAP))
 }
 
 /// FUNCTION: Whether the token at `i` is a key of a mapping or an
@@ -1871,7 +1911,7 @@ pub(super) fn text_args(stmt: &[Tok], i: usize, heads: &[usize]) -> bool {
 /// The answer is a mark, so a symbol of the same spelling keeps its
 /// credit either way.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-fn map_args(stmt: &[Tok], i: usize) -> bool {
+pub(super) fn map_args(stmt: &[Tok], i: usize) -> bool {
     let Some(at) = command_at(stmt) else {
         return false;
     };
