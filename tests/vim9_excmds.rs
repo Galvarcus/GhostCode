@@ -229,3 +229,60 @@ fn a_value_behind_the_colon_of_a_conditional_is_not_marked() {
 
     assert!(!one(text, "bwipe").owned);
 }
+
+/// A lambda written as a block holds whole commands, and the lexer
+/// keeps the block in the statement that opens it, so each line of
+/// the block is where Vim reads a command.
+#[test]
+fn a_command_on_the_first_line_of_a_lambda_block_is_dropped() {
+    let text = "vim9script\ndef F()\n  timer_start(0, (_) => {\n    execute Cmd\n  })\nenddef\n";
+
+    assert_eq!(count(text, "execute"), 0);
+}
+
+#[test]
+fn a_command_on_a_later_line_of_a_lambda_block_is_dropped() {
+    let text =
+        "vim9script\ndef F()\n  timer_start(0, (_) => {\n    G()\n    redraw\n  })\nenddef\n";
+
+    assert_eq!(count(text, "redraw"), 0);
+}
+
+#[test]
+fn a_command_behind_a_modifier_in_a_lambda_block_is_dropped() {
+    let text = "vim9script\ndef F()\n  timer_start(0, (_) => {\n    silent! redraw\n  })\nenddef\n";
+
+    assert_eq!(count(text, "redraw"), 0);
+}
+
+#[test]
+fn a_command_in_a_lambda_block_past_a_nested_block_is_dropped() {
+    let text = "vim9script\ndef F()\n  A(() => {\n    B(() => {\n      G()\n    })\n    redraw\n  })\nenddef\n";
+
+    assert_eq!(count(text, "redraw"), 0);
+}
+
+/// A line that continues an expression inside the block opens no
+/// command, so a word there keeps its reference.
+#[test]
+fn a_value_on_a_continued_line_of_a_lambda_block_keeps_its_reference() {
+    let text = "vim9script\ndef F()\n  A(() => {\n    G(1,\n      redraw)\n  })\nenddef\n";
+
+    assert_eq!(count(text, "redraw"), 1);
+}
+
+/// A dictionary a lambda returns is no block, so its first key line
+/// opens no command.
+#[test]
+fn a_value_in_a_dictionary_a_lambda_returns_keeps_its_reference() {
+    let text = "vim9script\ndef F()\n  A(() => ({\n    k: 1,\n    v: [\n      redraw]}))\nenddef\n";
+
+    assert_eq!(count(text, "redraw"), 1);
+}
+
+#[test]
+fn a_value_after_a_command_in_a_lambda_block_keeps_its_reference() {
+    let text = "vim9script\ndef F()\n  A(() => {\n    echo redraw\n  })\nenddef\n";
+
+    assert_eq!(count(text, "redraw"), 1);
+}

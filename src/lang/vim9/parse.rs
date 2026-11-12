@@ -838,6 +838,12 @@ const ESCAPE: &str = "\\";
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 const BAR: &str = "|";
 
+// What a lambda written as a block follows.
+const ARROW: &str = "=>";
+
+// What closes a bracket, which opens no command at the head of a line.
+const CLOSERS: &[&str] = &[")", "]", "}"];
+
 // The colon that opens a command line, which Vim9 script requires
 // before a range.
 const COLON: &str = ":";
@@ -1923,7 +1929,64 @@ pub(super) fn heads(stmt: &[Tok]) -> Vec<usize> {
             .filter(|next| *next < stmt.len()),
     );
 
+    for line in block_lines(stmt) {
+        let word = command_from(stmt, line).unwrap_or(line);
+
+        at.extend(line..=word);
+    }
+
     at
+}
+
+/// FUNCTION: Every index at which a line of a lambda block opens.
+///
+/// A lambda written as a block holds whole commands, and the lexer
+/// keeps the block in the statement that opens it, so the head of
+/// the statement is not the only place Vim reads a command there. A
+/// line opens a command only where nothing but blocks is open: a line
+/// inside a bracket, or inside a dictionary, continues an expression.
+/// A brace opens a block where it follows the arrow and ends its
+/// line, which is how Vim tells a block from a dictionary.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+fn block_lines(stmt: &[Tok]) -> Vec<usize> {
+    let mut lines: Vec<usize> = Vec::new();
+
+    // One entry for each bracket that is open, true for a block.
+    let mut open: Vec<bool> = Vec::new();
+
+    for (i, tok) in stmt.iter().enumerate() {
+        let code = tok.kind != TokKind::Str;
+
+        if code
+            && open.last() == Some(&true)
+            && i > 0
+            && stmt[i - 1].line != tok.line
+            && !CLOSERS.contains(&tok.text.as_str())
+        {
+            lines.push(i);
+        }
+
+        if !code {
+            continue;
+        }
+
+        match tok.text.as_str() {
+            "{" => {
+                let block = i > 0
+                    && stmt[i - 1].text == ARROW
+                    && stmt.get(i + 1).is_some_and(|next| next.line != tok.line);
+
+                open.push(block);
+            }
+            "(" | "[" => open.push(false),
+            ")" | "]" | "}" => {
+                open.pop();
+            }
+            _ => {}
+        }
+    }
+
+    lines
 }
 
 /// FUNCTION: Whether a name stands where Vim reads a command: at the
@@ -1965,9 +2028,17 @@ pub(super) fn reads_command(stmt: &[Tok], at: usize) -> bool {
 /// `:1,$delete` name a command where `%bwipe` alone would not.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 pub(super) fn command_at(stmt: &[Tok]) -> Option<usize> {
-    let at = stmt
-        .iter()
-        .position(|t| t.text != "!" && !modifier(&t.text))?;
+    command_from(stmt, 0)
+}
+
+/// FUNCTION: Where the command word of the command that opens at
+/// `from` stands, past any modifier and past a colon with its range.
+fn command_from(stmt: &[Tok], from: usize) -> Option<usize> {
+    let at = from
+        + stmt
+            .get(from..)?
+            .iter()
+            .position(|t| t.text != "!" && !modifier(&t.text))?;
 
     if stmt[at].text != COLON {
         return Some(at);
