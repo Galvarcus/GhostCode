@@ -95,7 +95,7 @@ fn a_script_guard_credits_the_variable_it_reads() {
 fn a_global_guard_is_marked_as_vims() {
     let text = "vim9script\nif exists('g:loaded_p')\n  finish\nendif\n";
 
-    assert!(one(text, "loaded_p").owned);
+    assert!(one(text, "g:loaded_p").owned);
 }
 
 #[test]

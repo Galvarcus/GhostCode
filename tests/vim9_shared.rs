@@ -188,3 +188,139 @@ fn an_option_behind_a_scope_is_no_variable() {
     assert!(scan(text).syms.iter().all(|s| !s.id.is_shared()));
     assert_eq!(reads(text, "g:textwidth"), 0);
 }
+
+/// FUNCTION: The shared symbol one snippet declares for a name.
+fn symbol(text: &str, name: &str) -> ghostcode::model::Symbol {
+    scan(text)
+        .syms
+        .into_iter()
+        .find(|s| s.id == SymbolId::shared(name))
+        .unwrap_or_else(|| panic!("no symbol for {name}"))
+}
+
+#[test]
+fn get_on_a_scope_reads_the_name() {
+    let text = "vim9script\ndef F()\n  echo get(g:, 'p_width', 80)\nenddef\n";
+
+    assert!(one(text, "g:p_width").owned);
+}
+
+#[test]
+fn has_key_on_a_scope_reads_the_name() {
+    let text = "vim9script\ndef F()\n  echo has_key(b:, 'p_doc')\nenddef\n";
+
+    assert_eq!(reads(text, "b:p_doc"), 1);
+}
+
+#[test]
+fn a_scope_piped_into_get_reads_the_name() {
+    let text = "vim9script\ndef F()\n  echo g:->get('p_width', 80)\nenddef\n";
+
+    assert_eq!(reads(text, "g:p_width"), 1);
+}
+
+#[test]
+fn exists_reads_the_name() {
+    let text = "vim9script\nif exists('g:x')\nendif\n";
+
+    assert!(one(text, "g:x").owned);
+    assert_eq!(reads(text, "g:x"), 1);
+    assert_eq!(reads(text, "x"), 0);
+}
+
+#[test]
+fn getbufvar_reads_a_buffer_variable() {
+    let text = "vim9script\ndef F(nr: number)\n  echo getbufvar(nr, 'p_doc')\nenddef\n";
+
+    assert_eq!(reads(text, "b:p_doc"), 1);
+}
+
+#[test]
+fn a_buffer_piped_into_getbufvar_reads_a_buffer_variable() {
+    let text = "vim9script\ndef F(nr: number)\n  echo nr->getbufvar('p_doc', 0)\nenddef\n";
+
+    assert_eq!(reads(text, "b:p_doc"), 1);
+}
+
+#[test]
+fn getwinvar_and_gettabvar_read_their_own_scopes() {
+    let text = "vim9script\ndef F()\n  echo getwinvar(1, 'p_w') gettabvar(1, 'p_t')\nenddef\n";
+
+    assert_eq!(reads(text, "w:p_w"), 1);
+    assert_eq!(reads(text, "t:p_t"), 1);
+}
+
+#[test]
+fn gettabwinvar_reads_a_window_variable_from_its_third_argument() {
+    let text = "vim9script\ndef F()\n  echo gettabwinvar(1, 2, 'p_w')\nenddef\n";
+
+    assert_eq!(reads(text, "w:p_w"), 1);
+}
+
+#[test]
+fn setbufvar_declares_a_buffer_variable() {
+    let text = "vim9script\ndef F(nr: number)\n  setbufvar(nr, 'p_doc', 1)\nenddef\n";
+
+    assert!(declares(text, "b:p_doc"));
+    assert_eq!(reads(text, "b:p_doc"), 0);
+}
+
+#[test]
+fn settabwinvar_declares_a_window_variable() {
+    let text = "vim9script\ndef F()\n  settabwinvar(1, 2, 'p_w', 0)\nenddef\n";
+
+    assert!(declares(text, "w:p_w"));
+}
+
+#[test]
+fn an_option_name_is_left_alone() {
+    let text = "vim9script\ndef F(nr: number)\n  echo getbufvar(nr, '&modified')\n  setbufvar(nr, '&buftype', 'nofile')\nenddef\n";
+    let a = scan(text);
+
+    assert!(a.syms.iter().all(|s| !s.id.is_shared()));
+    assert!(a.refs.iter().all(|r| !r.name.starts_with("b:")));
+}
+
+#[test]
+fn an_argument_is_counted_at_bracket_depth() {
+    let text = "vim9script\ndef F()\n  echo getbufvar(Nr(1, [2, 3]), 'p_doc')\nenddef\n";
+
+    assert_eq!(reads(text, "b:p_doc"), 1);
+}
+
+#[test]
+fn the_full_spelling_in_a_string_reads_the_name() {
+    let text = "vim9script\ndef F()\n  Run('g:p_no_mappings = true')\nenddef\n";
+
+    assert!(one(text, "g:p_no_mappings").owned);
+}
+
+#[test]
+fn a_word_that_ends_in_a_scope_letter_is_no_spelling() {
+    let text = "vim9script\ndef F()\n  echo 'config:value'\nenddef\n";
+
+    assert!(scan(text).refs.iter().all(|r| !r.name.contains(':')));
+}
+
+#[test]
+fn the_get_on_the_declaring_line_is_no_read() {
+    let text = "vim9script\ng:x = get(g:, 'x', 1)\n";
+
+    assert!(symbol(text, "g:x").lead);
+    assert_eq!(reads(text, "g:x"), 0);
+}
+
+#[test]
+fn a_write_without_the_get_form_is_no_lead() {
+    assert!(!symbol("vim9script\ng:x = 1\n", "g:x").lead);
+}
+
+/// The guard stands in a command of its own, so it is a read like any
+/// other, and a variable that only guards a load is no ghost.
+#[test]
+fn a_guard_and_its_write_on_one_line_still_credits() {
+    let text = "vim9script\nif !exists('g:x') | g:x = 1 | endif\n";
+
+    assert!(declares(text, "g:x"));
+    assert_eq!(reads(text, "g:x"), 1);
+}

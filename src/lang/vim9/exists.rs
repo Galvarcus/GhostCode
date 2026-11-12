@@ -4,6 +4,7 @@
 //! License: GNU GPL 3.0
 
 use super::parse::identifiers;
+use super::shared::SCOPES as SHARED;
 
 /// What opens an option name, as `exists('&relativenumber')`.
 const OPTION: char = '&';
@@ -56,6 +57,11 @@ pub fn names(arg: &str) -> Vec<(String, bool)> {
         FUNCTION | COMMAND => theirs(rest),
         _ => match scope(arg) {
             Some((SCRIPT, name)) => theirs(name),
+            // A variable every file shares is read by its full
+            // spelling, which the scan of the statement finds in the
+            // string. The name behind the scope is no bare name.
+            // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
+            Some((letter, _)) if SHARED.contains(&letter) => Vec::new(),
             Some((_, name)) => vims(name),
             None => theirs(arg),
         },
@@ -98,8 +104,8 @@ mod tests {
     }
 
     #[test]
-    fn a_global_guard_is_vims_own_word() {
-        assert_eq!(names("g:loaded_x"), vec![("loaded_x".to_string(), true)]);
+    fn a_global_guard_holds_no_bare_name() {
+        assert!(names("g:loaded_x").is_empty());
     }
 
     #[test]
