@@ -1656,6 +1656,17 @@ pub(super) fn user_command(word: &str) -> bool {
     word.starts_with(|c: char| c.is_ascii_uppercase())
 }
 
+/// FUNCTION: Whether a word can name a type of the project: a class,
+/// an enum, an interface or a type alias. Vim refuses each of the
+/// four without a capital first, with E1314, E1415, E1343 and E1394.
+///
+/// The rule has the form of the one for a user command and is a
+/// different fact of Vim, so it has a function of its own.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/70
+fn type_name(word: &str) -> bool {
+    word.starts_with(|c: char| c.is_ascii_uppercase())
+}
+
 /// FUNCTION: Whether a word is one of Vim's command modifiers,
 /// written whole or abbreviated. `MODS` holds the 24 full names, and
 /// the generated table carries the prefix each one accepts, so `sil`
@@ -2349,7 +2360,7 @@ fn in_type(stmt: &[Tok], i: usize) -> bool {
         // the token behind the walk says: a value before a comma in a
         // call would otherwise read as one.
         // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-        if (text == DOT || user_command(text)) && class_in_types(stmt, at) {
+        if (text == DOT || type_name(text)) && class_in_types(stmt, at) {
             continue;
         }
 

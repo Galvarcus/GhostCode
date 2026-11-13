@@ -359,6 +359,18 @@ fn a_type_word_behind_a_class_in_a_func_type_is_marked_as_vims() {
         .all(|r| r.owned));
 }
 
+/// Vim refuses a class, an enum, an interface and a type alias whose
+/// name has no capital first, so a word without one in a list of
+/// types is no type of the project, and no type word is read past it.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/70
+#[test]
+fn a_type_word_behind_a_word_with_no_capital_is_not_marked() {
+    let text = "vim9script\ndef F(Visit: func(item, list)): void\nenddef\n";
+    let found = owned(text, "list");
+
+    assert_eq!(found, vec![false]);
+}
+
 /// A value behind a comma in a call is no type, whatever stands
 /// before the comma.
 #[test]
