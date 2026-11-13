@@ -859,11 +859,14 @@ mod tests {
         assert!(toks.iter().any(|t| t.kind == TokKind::Str));
     }
 
-    /// A `def` body is Vim9 in a legacy script too, and a broken list
-    /// there can open a line with a string.
+    /// Legacy script continues a line with a backslash alone, so this
+    /// script is not valid. The rule is for a bracket that a fault of
+    /// the script or of the lexer leaves open: the line stays a string
+    /// there, which can hide a finding and cannot make a false one.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/78
     #[test]
     fn a_line_that_opens_with_a_quote_inside_brackets_is_a_string() {
-        let toks = tokens("def F()\n  var l = [\n    \"a\",\n  ]\nenddef\n");
+        let toks = tokens("let l = [\n\"a\",\n]\n");
 
         assert!(toks.iter().any(|t| t.kind == TokKind::Str));
     }
