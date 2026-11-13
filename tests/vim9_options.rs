@@ -53,6 +53,16 @@ fn a_filetype_the_plugin_invents_is_marked_as_vims() {
     assert!(one(text, "bartleby").owned);
 }
 
+/// A bar behind a backslash is part of the value of the option and
+/// ends no command.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/63
+#[test]
+fn a_value_behind_an_escaped_bar_of_a_set_command_is_marked_as_vims() {
+    let text = "vim9script\ndef F()\n  set titlestring=left\\|right\nenddef\n";
+
+    assert!(one(text, "right").owned);
+}
+
 #[test]
 fn an_abbreviated_set_command_claims_its_arguments() {
     let text = "vim9script\ndef F()\n  setl winfixwidth\nenddef\n";

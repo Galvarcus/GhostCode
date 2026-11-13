@@ -1958,7 +1958,14 @@ pub(super) fn set_args(stmt: &[Tok], i: usize, heads: &[usize]) -> bool {
         return false;
     }
 
-    stmt[at..i].iter().all(|tok| tok.text != BAR)
+    (at + 1..i).all(|k| !ends_command(stmt, k))
+}
+
+/// FUNCTION: Whether the token at a position is a bar that ends a
+/// command. A bar behind a backslash is part of an argument.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/63
+fn ends_command(stmt: &[Tok], k: usize) -> bool {
+    stmt[k].text == BAR && (k == 0 || stmt[k - 1].text != ESCAPE)
 }
 
 /// FUNCTION: Whether the token at `i` is an argument of a command
@@ -1988,9 +1995,7 @@ pub(super) fn text_args(stmt: &[Tok], i: usize, heads: &[usize]) -> bool {
             return false;
         }
 
-        name == NORMAL
-            || (text_family(name)
-                && (at + 1..i).all(|k| stmt[k].text != BAR || stmt[k - 1].text == ESCAPE))
+        name == NORMAL || (text_family(name) && (at + 1..i).all(|k| !ends_command(stmt, k)))
     })
 }
 
@@ -2140,10 +2145,9 @@ pub(super) fn heads(stmt: &[Tok]) -> Vec<usize> {
     // keeps in the statement it opened: `if x | echo 1 | endif` is
     // three commands on one line.
     at.extend(
-        stmt.iter()
-            .enumerate()
-            .filter(|(_, tok)| tok.text == BAR)
-            .map(|(i, _)| i + 1)
+        (0..stmt.len())
+            .filter(|i| ends_command(stmt, *i))
+            .map(|i| i + 1)
             .filter(|next| *next < stmt.len()),
     );
 
