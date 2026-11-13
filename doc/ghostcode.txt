@@ -7,10 +7,8 @@
 
 Usage ........................................................ |ghostcode-usage|
   In Vim .................................................... |ghostcode-in-vim|
-  In CI ...................................................... |ghostcode-in-ci|
 Settings .................................................. |ghostcode-settings|
   ghostcode.toml .................................... |ghostcode-ghostcode.toml|
-  Command line ........................................ |ghostcode-command-line|
   Vim .......................................................... |ghostcode-vim|
 What Ghostcode scans .......................... |ghostcode-what-ghostcode-scans|
 What Ghostcode detects ...................... |ghostcode-what-ghostcode-detects|
@@ -26,43 +24,14 @@ in the project ever calls or reads.
 The analyzer is a command line program. The Vim plugin runs it and puts the
 findings in the quickfix list.
 
+The plugin looks for the binary at `g:ghostcode_bin`, then on `$PATH`, then in
+a `bin/` directory of its own. Create that directory and put a release asset
+in it, named `ghostcode`, or `ghostcode.exe` on Windows, to keep the binary
+beside the plugin. When the plugin finds no binary, it says so through Logger
+and names each place it looked.
+
 ==============================================================================
 Usage                                                          *ghostcode-usage*
-
->bash
-    ghostcode [path]
-<
-`path` is the root of the project to scan. It defaults to the working
-directory. The report goes to standard output as JSON:
-
->json
-    {
-      "schema": 1,
-      "root": "/path/to/project",
-      "summary": { "symbols": 412, "ghost": 1, "local": 0, "unplaced_names": 7 },
-      "findings": [
-        {
-          "class": "ghost",
-          "kind": "function",
-          "name": "AddSeparator",
-          "file": "autoload/util.vim",
-          "line": 15,
-          "col": 1,
-          "lang": "vim9"
-        }
-      ]
-    }
-<
-`--format=text` prints one line per finding instead:
-
->text
-    autoload/util.vim:15:1:[ghost] function AddSeparator
-<
-`schema` states the shape of the JSON. It rises when a change would break a
-reader, so a front end that meets a number it does not know can say so rather
-than guess. The counts in `summary` are diagnostics rather than contract:
-nothing is derived from them, and one may be renamed without the schema
-rising.
 
 ------------------------------------------------------------------------------
 In Vim                                                        *ghostcode-in-vim*
@@ -72,6 +41,9 @@ Ghostcode adds one command:
 >vim
     :GhostCode [path]
 <
+`path` is the root of the project to scan. It defaults to the working
+directory of Vim.
+
 It puts the findings in the quickfix list, opens the list when it finds any,
 and shows a summary through Logger:
 
@@ -87,16 +59,6 @@ Each entry names the kind of symbol, its name, its file, and its line:
 <
 Logger reads its options for Ghostcode from variables named
 `g:logger_ghostcode_<option>`. See the Logger README for each option.
-
-------------------------------------------------------------------------------
-In CI                                                          *ghostcode-in-ci*
-
-Run the binary and fail the build on any finding:
-
->bash
-    ghostcode --format=text . | tee findings.txt
-    test ! -s findings.txt
-<
 
 ==============================================================================
 Settings                                                    *ghostcode-settings*
@@ -190,36 +152,6 @@ plugin to read. Give the full spelling. A `*` stands for any run of
 characters. Ghostcode never reports a variable listed there.
 
 ------------------------------------------------------------------------------
-Command line                                            *ghostcode-command-line*
-
-A flag overrides the file:
-
-    Flag                               Effect ~
-
-    `--format=json`, `--format=text`   The output form. JSON is the
-                                       default.
-
-    `--exports-are-api true`,          Override `exports_are_api`.
-    `--exports-are-api false`          
-
-    `--no-ignore`                      Read every file, including the
-                                       ones git ignores.
-
-    `--locals true`, `--locals false`  Override `findings.locals`.
-
-    `--globals true`,                  Override `findings.globals`.
-    `--globals false`                  
-
-    `--buffer-vars true`,              Override `findings.buffer_vars`.
-    `--buffer-vars false`              
-
-    `--window-vars true`,              Override `findings.window_vars`.
-    `--window-vars false`              
-
-    `--tab-vars true`,                 Override `findings.tab_vars`.
-    `--tab-vars false`                 
-
-------------------------------------------------------------------------------
 Vim                                                              *ghostcode-vim*
 
     Variable                           Effect ~
@@ -252,12 +184,11 @@ Vim                                                              *ghostcode-vim*
 ==============================================================================
 What Ghostcode scans                            *ghostcode-what-ghostcode-scans*
 
-Ghostcode reads the files git does not ignore, whether git tracks them or not,
-and `--no-ignore` turns the exclusions off. Outside a repository nothing is
-ignored and every file is read. It stops at the project root and follows no
-symlink out of it, because a finding outside the root is one you cannot act
-on. It skips hidden directories, as Vim's own `globpath` does; name a file in
-`entry` to scan one anyway.
+Ghostcode reads the files git does not ignore, whether git tracks them or not.
+Outside a repository nothing is ignored and every file is read. It stops at
+the project root and follows no symlink out of it, because a finding outside
+the root is one you cannot act on. It skips hidden directories, as Vim's own
+`globpath` does; name a file in `entry` to scan one anyway.
 
 ==============================================================================
 What Ghostcode detects                        *ghostcode-what-ghostcode-detects*
