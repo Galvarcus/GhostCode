@@ -274,3 +274,17 @@ fn a_write_from_a_nested_def_does_not_credit_the_variable_around_it() {
         vec!["local variable total"]
     );
 }
+
+/// A key read from a dictionary is no read of a variable of the same
+/// spelling.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/53
+#[test]
+fn a_key_read_behind_a_dot_does_not_hide_a_local_of_its_spelling() {
+    assert_eq!(
+        found(
+            "key",
+            "  var root = 1\n  var fx = Make()\n  echo fx.root\nenddef\ndef Make(): any\n  return {root: 1}\n"
+        ),
+        vec!["local variable root"]
+    );
+}

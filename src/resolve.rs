@@ -131,6 +131,16 @@ impl<'a> Index<'a> {
             return self.dotted(r, recv);
         }
 
+        // A name behind a dot whose receiver has no type is a member
+        // of some class or a key of a dictionary. It is never a bare
+        // name, so it credits no variable, no function and no import
+        // of that spelling. The class is unknown, so every member of
+        // the name still counts as used.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/53
+        if r.member {
+            return self.cloned(self.members.get(r.name.as_str()));
+        }
+
         // A variable of the body making the reference wins over
         // everything, because nothing else can be meant: Vim9 resolves
         // a bare name to the innermost declaration of it.
@@ -947,5 +957,66 @@ mod tests {
         };
 
         assert_eq!(all(&a).unplaced, 1);
+    }
+
+    /// FUNCTION: A reference behind a dot whose receiver has no type.
+    fn key(file: &str, body: &str, name: &str) -> Reference {
+        Reference {
+            member: true,
+            ..re_in(file, body, name)
+        }
+    }
+
+    /// A name behind a dot is a member or a key. A variable of the
+    /// body is never read through a dot, so a key of that spelling
+    /// gives it no credit.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/53
+    #[test]
+    fn a_name_behind_a_dot_does_not_credit_a_variable_of_the_body() {
+        let a = Analysis {
+            syms: vec![local_sym("autoload/a.vim", "F", "root")],
+            ..Analysis::default()
+        };
+
+        assert!(ids(&a, &key("autoload/a.vim", "F", "root")).is_empty());
+    }
+
+    #[test]
+    fn a_name_behind_a_dot_does_not_credit_a_function_of_the_file() {
+        let a = Analysis {
+            syms: vec![sym("autoload/a.vim", None, "Helper", Kind::Function)],
+            ..Analysis::default()
+        };
+
+        assert!(ids(&a, &key("autoload/a.vim", "F", "Helper")).is_empty());
+    }
+
+    #[test]
+    fn a_name_behind_a_dot_does_not_credit_a_script_variable() {
+        let a = Analysis {
+            syms: vec![sym("autoload/a.vim", None, "count", Kind::Variable)],
+            ..Analysis::default()
+        };
+
+        assert!(ids(&a, &key("autoload/a.vim", "F", "count")).is_empty());
+    }
+
+    /// The type of the receiver is unknown, so every class member of
+    /// the name still takes the credit.
+    #[test]
+    fn a_name_behind_a_dot_still_credits_every_member_of_the_name() {
+        let a = Analysis {
+            syms: vec![
+                sym("autoload/m.vim", Some("Menu"), "Open", Kind::Method),
+                sym("autoload/p.vim", Some("Popup"), "Open", Kind::Method),
+                sym("autoload/a.vim", None, "Open", Kind::Function),
+            ],
+            ..Analysis::default()
+        };
+
+        assert_eq!(
+            ids(&a, &key("autoload/a.vim", "F", "Open")),
+            vec!["autoload/m.vim::Menu.Open", "autoload/p.vim::Popup.Open"]
+        );
     }
 }
