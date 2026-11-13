@@ -4,6 +4,7 @@
 
 use serde::Serialize;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fmt;
 use std::path::Component;
 use std::path::Path;
@@ -232,6 +233,11 @@ pub struct Fit {
     /// Set where no part of the name itself is fixed, so that the read
     /// names everything the start alone admits.
     pub whole: bool,
+    /// A name the project must use somewhere for the read to hold. The
+    /// read is of a value that only this name gives, so without a use
+    /// of the name the read is of something else.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/61
+    pub needs: Option<String>,
     pub file: PathBuf,
     pub line: u32,
     pub origin: Option<SymbolId>,
@@ -246,6 +252,7 @@ pub trait Sink {
     fn root(&mut self, id: SymbolId);
     fn text(&mut self, t: Text);
     fn fit(&mut self, f: Fit);
+    fn give(&mut self, name: &str);
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -262,6 +269,10 @@ pub struct Analysis {
     pub outside: Vec<Import>,
     pub texts: Vec<Text>,
     pub fits: Vec<Fit>,
+    /// The names a `Fit` can need that the project uses. A use of the
+    /// language's own name is no reference, so it is recorded here.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/61
+    pub given: HashSet<String>,
 }
 
 impl Analysis {
@@ -295,6 +306,10 @@ impl Sink for Analysis {
 
     fn fit(&mut self, f: Fit) {
         self.fits.push(f);
+    }
+
+    fn give(&mut self, name: &str) {
+        self.given.insert(name.to_string());
     }
 }
 

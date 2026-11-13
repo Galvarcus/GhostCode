@@ -187,10 +187,16 @@ pub fn heredocs(file: &Path, toks: &[Tok], out: &mut dyn Sink) {
                     owned: true,
                     member: false,
                 }),
-                shared::Spelling::Fit { head, tail, whole } => out.fit(Fit {
+                shared::Spelling::Fit {
                     head,
                     tail,
                     whole,
+                    needs,
+                } => out.fit(Fit {
+                    head,
+                    tail,
+                    whole,
+                    needs: needs.map(str::to_string),
                     file: file.to_path_buf(),
                     line: tok.line,
                     origin: Some(origin.clone()),
@@ -1097,10 +1103,16 @@ pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
                     owned: true,
                     member: false,
                 }),
-                shared::Spelling::Fit { head, tail, whole } => out.fit(Fit {
+                shared::Spelling::Fit {
                     head,
                     tail,
                     whole,
+                    needs,
+                } => out.fit(Fit {
+                    head,
+                    tail,
+                    whole,
+                    needs: needs.map(str::to_string),
                     file: file.to_path_buf(),
                     line,
                     origin: Some(origin.clone()),
@@ -1262,6 +1274,16 @@ impl Collect<'_> {
             && written(stmt, i)
         {
             return;
+        }
+
+        // A call of a function that gives a whole scope is no
+        // reference, and a read of what it gives holds only in a
+        // project that names the function, so the name is recorded.
+        // Any use of the name counts, called or not, because the
+        // function can be passed as a value and called elsewhere.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/61
+        if shared::gives_scope(word) {
+            self.out.give(word);
         }
 
         // A called lowercase name is Vim's own, because Vim refuses a

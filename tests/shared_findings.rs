@@ -281,3 +281,61 @@ fn a_scope_read_whole_in_dead_code_makes_no_note() {
     assert!(r.notes.is_empty(), "{:?}", r.notes);
     assert!(lines(&r).contains(&GHOST.to_string()));
 }
+
+/// FUNCTION: The classes of the buffer and of the window on.
+fn held() -> FindingFlags {
+    FindingFlags {
+        buffer_vars: true,
+        window_vars: true,
+        ..FindingFlags::default()
+    }
+}
+
+/// The key `variables` holds a scope only on what an info function
+/// gives, so in a project that calls none of them the key is a key of
+/// a dictionary of the project.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/61
+#[test]
+fn a_variables_key_reads_no_scope_in_a_project_that_calls_no_info_function() {
+    let dir = project(
+        "key-alone",
+        &[(
+            "plugin/p.vim",
+            "vim9script\nb:p_x = 1\nvar d = {variables: 1}\necho d.variables\n",
+        )],
+    );
+    let r = run(&dir, held());
+
+    assert_eq!(lines(&r), vec!["plugin/p.vim:2:1:[ghost] variable b:p_x"]);
+    assert!(r.notes.is_empty());
+}
+
+/// The call can stand in another file than the key, because the
+/// dictionary travels.
+#[test]
+fn a_variables_key_reads_the_scope_of_the_info_function_the_project_calls() {
+    let dir = project(
+        "key-info",
+        &[
+            (
+                "plugin/p.vim",
+                "vim9script\nimport autoload 'a.vim' as A\nb:p_x = 1\nw:p_y = 1\necho A.Info().variables\n",
+            ),
+            (
+                "autoload/a.vim",
+                "vim9script\nexport def Info(): dict<any>\n  return getbufinfo(1)[0]\nenddef\n",
+            ),
+        ],
+    );
+    let r = run(&dir, held());
+
+    assert_eq!(lines(&r), vec!["plugin/p.vim:4:1:[ghost] variable w:p_y"]);
+    assert_eq!(
+        r.notes,
+        vec![report::Note {
+            file: PathBuf::from("plugin/p.vim"),
+            line: 5,
+            scope: "b:".to_string(),
+        }]
+    );
+}

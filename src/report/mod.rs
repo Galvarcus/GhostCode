@@ -146,6 +146,7 @@ pub fn analyze(root: &Path, cfg: &Config) -> anyhow::Result<Report> {
 
     fold(&mut a);
     text_references(&mut a);
+    drop_unmet(&mut a);
     fit_references(&mut a);
 
     let resolved = resolve::all(&a);
@@ -267,6 +268,19 @@ fn text_references(a: &mut Analysis) {
     }
 
     a.refs.extend(found);
+}
+
+/// FUNCTION: Drop each name with a gap whose read holds only where the
+/// project uses a name, in a project that uses that name nowhere.
+///
+/// The use can stand in another file than the read, because the value
+/// travels, so the question is asked of the whole project.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/61
+fn drop_unmet(a: &mut Analysis) {
+    let given = &a.given;
+
+    a.fits
+        .retain(|f| f.needs.as_ref().is_none_or(|name| given.contains(name)));
 }
 
 /// FUNCTION: Turn each name with a gap into a reference to every
@@ -542,6 +556,7 @@ mod tests {
             head: head.to_string(),
             tail: tail.to_string(),
             whole: tail.is_empty() && head.len() == 2,
+            needs: None,
             file: PathBuf::from("autoload/a.vim"),
             line: 3,
             origin: None,
