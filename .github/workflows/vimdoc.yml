@@ -42,20 +42,36 @@ jobs:
         with:
           ref: ${{ github.ref_name }}
 
+      # The options are in a file of their own, which the test of the
+      # help tags builds with too.
       - name: Generate Vimdoc
         uses: docker://pandoc/core:latest
         with:
           args: >-
-            README.md
-            --from=markdown
-            --to=vimdoc
-            --standalone
-            --columns=78
-            --toc=true
-            --shift-heading-level-by=-1
-            --metadata-file=doc/pandoc.yaml
-            --lua-filter=doc/vimdoc-filter.lua
+            --defaults=doc/vimdoc.yaml
             --output=doc/ghostcode.txt
+
+      # A tag that stands twice makes :helptags fail for the user, with
+      # every tag of the file lost. The front-end suite proves the same
+      # where pandoc is installed, which a runner of CI does not have,
+      # so this step is the one that holds the file that is committed.
+      # The tags file is made by the user and is not committed.
+      # REFERENCE: https://github.com/Galvarcus/GhostCode/issues/76
+      - name: Vim can make the help tags
+        run: |
+          set -euo pipefail
+
+          if ! command -v vim > /dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends vim
+          fi
+
+          tmp=$(mktemp -d)
+          cp doc/ghostcode.txt "$tmp"
+          vim -es -u NONE -N \
+            -c "try | helptags $tmp | catch | cquit 1 | endtry" \
+            -c 'quit'
+          test -s "$tmp/tags"
 
       - name: Commit generated Vimdoc
         run: |

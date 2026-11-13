@@ -39,7 +39,11 @@ build.
   reaches no help file. A marker stands alone on its line, with a
   blank line on each side, because the filter reads it as an HTML
   block of its own. A start marker with no end marker drops the rest
-  of the README.
+  of the README. The filter also writes the help tag of a user
+  command that starts a block of Vim code, and of each variable in a
+  table whose rows start with one, so a new command or variable in
+  the README needs no change there. The options of the build are in
+  `doc/vimdoc.yaml`.
 - Do not edit `src/lang/vim9/builtins.rs`, `src/lang/vim9/excmds.rs`,
   `src/lang/vim9/events.rs` or `src/lang/vim9/scopevars.rs`. They
   hold the names of Vim's own functions, of its own commands with the
