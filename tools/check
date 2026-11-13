@@ -72,7 +72,7 @@ check 'front end (vim)' vim_tests
 check 'self scan' self_scan
 # A release is tagged once and its notes are written as it is built, so
 # the script that writes them is proved here rather than there.
-check 'release notes' tools/release-notes
+check 'release notes' tools/notes-check
 
 if command -v actionlint > /dev/null; then
   check 'actionlint' actionlint .github/workflows/*.yml

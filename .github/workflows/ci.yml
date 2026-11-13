@@ -44,10 +44,13 @@ jobs:
     name: Analyzer
     runs-on: ubuntu-latest
     steps:
+      # The whole history, because the proof of the release notes reads
+      # a range between two tags.
       - name: Checkout
         uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.event.inputs.tag || github.sha }}
+          fetch-depth: 0
 
       - name: Cache the build
         uses: actions/cache@v6.1.0
@@ -102,6 +105,13 @@ jobs:
           fi
 
           echo "No ghost code found."
+
+      # The release job is the one other place that runs the tool, and
+      # a fault there shows first on a tag. No token is given, so the
+      # tool is proved on the path that has no title from gh.
+      # REFERENCE: https://github.com/Galvarcus/GhostCode/issues/73
+      - name: Release notes
+        run: tools/notes-check
 
   # The release matrix builds Windows, and it runs for a tag alone, so
   # nothing would compile that target until the release itself. This
@@ -604,6 +614,13 @@ jobs:
 
           notes="$RUNNER_TEMP/notes.md"
           tools/release-notes > "$notes"
+
+          # Notes can be edited after the release, so notes with no
+          # section are a warning and do not stop the release.
+          if ! grep -q '^### ' "$notes"; then
+            echo "::warning::The release notes have no section."
+          fi
+
           shopt -s nullglob
           paths=(dist/bin/*-linux-gnu)
 
