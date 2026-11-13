@@ -547,7 +547,7 @@ fn annotated(toks: &[Tok]) -> Option<(String, String)> {
 }
 
 /// FUNCTION: The index of the bracket closing the one at a position.
-fn closing(stmt: &[Tok], open: usize) -> Option<usize> {
+pub(super) fn closing(stmt: &[Tok], open: usize) -> Option<usize> {
     let mut depth = 0i32;
 
     for (i, tok) in stmt.iter().enumerate().skip(open) {

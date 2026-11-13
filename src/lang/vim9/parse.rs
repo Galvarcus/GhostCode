@@ -1858,16 +1858,56 @@ fn in_command_def(stmt: &[Tok], i: usize) -> bool {
 /// FUNCTION: Whether the name at a position is being written without
 /// being read.
 ///
-/// Only a name opening the statement, because that is where Vim reads
-/// an assignment target. A destructuring assignment is not caught,
-/// which leaves its write crediting the variable: that misses a
-/// finding rather than inventing one.
+/// Only a name opening the statement, or one in a list that opens it,
+/// because that is where Vim reads an assignment target.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 fn written(stmt: &[Tok], i: usize) -> bool {
-    i == 0
-        && stmt
-            .get(1)
-            .is_some_and(|t| WRITES.contains(&t.text.as_str()))
+    if i == 0 {
+        return assigns(stmt, 1);
+    }
+
+    unpack_target(stmt, i)
+}
+
+/// FUNCTION: Whether the token at a position is an assignment that
+/// writes and does not read.
+fn assigns(stmt: &[Tok], at: usize) -> bool {
+    stmt.get(at)
+        .is_some_and(|t| WRITES.contains(&t.text.as_str()))
+}
+
+/// FUNCTION: Whether the name at a position is a whole part of a list
+/// that opens the statement and that an assignment follows, as `a`
+/// and `b` are in `[a, b] = F()`.
+///
+/// A part that is more than a name, such as `d.key` or `l[0]`, reads
+/// the variable that holds the item, so only a name that stands alone
+/// between the separators of the list is written.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/62
+fn unpack_target(stmt: &[Tok], i: usize) -> bool {
+    if stmt.first().map(|t| t.text.as_str()) != Some("[") {
+        return false;
+    }
+
+    let Some(close) = types::closing(stmt, 0) else {
+        return false;
+    };
+
+    if i >= close || !assigns(stmt, close + 1) {
+        return false;
+    }
+
+    let inner = stmt[1..i]
+        .iter()
+        .fold(0i32, |depth, tok| match tok.text.as_str() {
+            "(" | "[" | "{" => depth + 1,
+            ")" | "]" | "}" => depth - 1,
+            _ => depth,
+        });
+
+    inner == 0
+        && matches!(stmt[i - 1].text.as_str(), "[" | "," | ";")
+        && matches!(stmt[i + 1].text.as_str(), "," | ";" | "]")
 }
 
 /// FUNCTION: The name a word states for the reader of a string, with
