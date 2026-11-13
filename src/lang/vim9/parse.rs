@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use crate::lang::vim9::autocmd;
 use crate::lang::vim9::builtins;
 use crate::lang::vim9::evaluated;
+use crate::lang::vim9::evaluated::Word;
 use crate::lang::vim9::excmds;
 use crate::lang::vim9::exists;
 use crate::lang::vim9::lex::Tok;
@@ -1443,17 +1444,19 @@ impl Collect<'_> {
         // The reader answers which of its words a project symbol could
         // carry, and only those are left unmarked.
         // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-        let names: Vec<(String, bool)> = if EXISTS.contains(&gate) {
-            exists::names(&arg)
+        let bare = |names: Vec<(String, bool)>| names.into_iter().map(Word::bare).collect();
+
+        let names: Vec<Word> = if EXISTS.contains(&gate) {
+            bare(exists::names(&arg))
         } else if EXECUTE.contains(&gate) {
             evaluated::names(&arg)
         } else if gate == EVAL {
-            evaluated::loose(&arg)
+            bare(evaluated::loose(&arg))
         } else {
-            identifiers(&arg).into_iter().map(|n| (n, false)).collect()
+            bare(identifiers(&arg).into_iter().map(|n| (n, false)).collect())
         };
 
-        for (name, owned) in names {
+        for Word { name, vims, recv } in names {
             // An interpolation is lexed as code as well, so its names
             // have been through `ident` already, and a variable of
             // the code around the string is dropped there. This is
@@ -1465,15 +1468,20 @@ impl Collect<'_> {
                 continue;
             }
 
+            // A word with a receiver stands behind a dot, so it is a
+            // member, as the scan of the code reads it.
+            // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/71
+            let member = recv.is_some();
+
             self.out.re(Reference {
                 name,
-                recv: None,
+                recv,
                 file: self.file.to_path_buf(),
                 line: tok.line,
                 origin: Some(self.origin.clone()),
                 target: None,
-                owned,
-                member: false,
+                owned: vims,
+                member,
             });
         }
     }

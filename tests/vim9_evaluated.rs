@@ -99,3 +99,47 @@ fn a_variable_named_like_an_abbreviation_does_not_open_the_gate() {
 
     assert_eq!(count(text, "p#table#Hidden"), 0);
 }
+
+/// A gap is read twice, as code and as text. The reading as text
+/// must not make a bare name of a key, or a function of that
+/// spelling is credited by a dictionary that happens to share it.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/71
+#[test]
+fn a_name_behind_a_dot_in_an_executed_gap_is_a_member() {
+    let text = "vim9script\ndef F()\n  var item = {Enabled: 1}\n  execute $'echo {item.Enabled}'\nenddef\n";
+    let found: Vec<Reference> = refs(text)
+        .into_iter()
+        .filter(|r| r.name == "Enabled")
+        .collect();
+
+    assert!(!found.is_empty());
+    assert!(found.iter().all(|r| r.member), "{found:?}");
+}
+
+/// The receiver goes with the name, so that a constant reached
+/// through the alias of an import keeps its credit.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/71
+#[test]
+fn a_name_behind_a_dot_in_an_executed_gap_keeps_its_receiver() {
+    let text = "vim9script\nimport autoload 'p/c.vim' as CO\ndef F()\n  execute $'doautocmd User {CO.EVENT}'\nenddef\n";
+    let found: Vec<Reference> = refs(text)
+        .into_iter()
+        .filter(|r| r.name == "EVENT")
+        .collect();
+
+    assert!(!found.is_empty());
+    assert!(
+        found.iter().all(|r| r.recv.as_deref() == Some("CO")),
+        "{found:?}"
+    );
+}
+
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/71
+#[test]
+fn a_called_name_in_the_text_beside_a_key_of_its_spelling_stays_bare() {
+    let text = "vim9script\ndef F()\n  var item = {Enabled: 1}\n  execute $'call Enabled() | echo {item.Enabled}'\nenddef\n";
+
+    assert!(refs(text)
+        .iter()
+        .any(|r| r.name == "Enabled" && !r.member && r.recv.is_none()));
+}
