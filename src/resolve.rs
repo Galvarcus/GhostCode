@@ -202,9 +202,23 @@ impl<'a> Index<'a> {
             }
         }
 
+        // The alias of an import the scan does not hold is a namespace
+        // of another plugin, so the name behind it is no member of a
+        // class of the project.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/59
+        if self.bound_outside(&r.file, recv) {
+            return Vec::new();
+        }
+
         // The receiver's type is unknown, so any member of that name
         // may be the target, and every one of them counts as used.
         self.cloned(self.members.get(r.name.as_str()))
+    }
+
+    /// METHOD: Whether an import of a file the scan does not hold
+    /// binds this name in this file.
+    fn bound_outside(&self, file: &Path, name: &str) -> bool {
+        self.outside.get(file).is_some_and(|o| o.contains(name))
     }
 
     /// METHOD: Whether a reference names something the analyzer itself
@@ -227,7 +241,7 @@ impl<'a> Index<'a> {
 
         r.recv.is_none()
             && (self.aliases.get(file).is_some_and(|a| a.contains_key(name))
-                || self.outside.get(file).is_some_and(|o| o.contains(name)))
+                || self.bound_outside(file, name))
     }
 
     /// METHOD: Whether a reference stood behind a dot of a receiver
@@ -1017,6 +1031,55 @@ mod tests {
         assert_eq!(
             ids(&a, &key("autoload/a.vim", "F", "Open")),
             vec!["autoload/m.vim::Menu.Open", "autoload/p.vim::Popup.Open"]
+        );
+    }
+
+    /// The alias of an import the scan does not hold is a namespace
+    /// of another plugin, so a call through it names no member of a
+    /// class of the project.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/59
+    #[test]
+    fn a_call_through_the_alias_of_an_import_outside_the_scan_credits_nothing() {
+        let a = Analysis {
+            syms: vec![sym("autoload/m.vim", Some("Menu"), "Open", Kind::Method)],
+            outside: vec![outside("autoload/a.vim", Some("DV"), &[])],
+            ..Analysis::default()
+        };
+
+        assert!(ids(&a, &member("autoload/a.vim", Some("DV"), "Open")).is_empty());
+    }
+
+    /// The import binds the alias in its own file alone, so the same
+    /// receiver in another file still has no type.
+    #[test]
+    fn a_receiver_spelled_as_an_outside_alias_of_another_file_keeps_the_credit() {
+        let a = Analysis {
+            syms: vec![sym("autoload/m.vim", Some("Menu"), "Open", Kind::Method)],
+            outside: vec![outside("autoload/a.vim", Some("DV"), &[])],
+            ..Analysis::default()
+        };
+
+        assert_eq!(
+            ids(&a, &member("autoload/b.vim", Some("DV"), "Open")),
+            vec!["autoload/m.vim::Menu.Open"]
+        );
+    }
+
+    /// A class of the file wins over an import alias of its spelling.
+    #[test]
+    fn a_class_of_the_file_spelled_as_an_outside_alias_keeps_its_member() {
+        let a = Analysis {
+            syms: vec![
+                sym("autoload/a.vim", None, "DV", Kind::Class),
+                sym("autoload/a.vim", Some("DV"), "Open", Kind::Method),
+            ],
+            outside: vec![outside("autoload/a.vim", Some("DV"), &[])],
+            ..Analysis::default()
+        };
+
+        assert_eq!(
+            ids(&a, &member("autoload/a.vim", Some("DV"), "Open")),
+            vec!["autoload/a.vim::DV.Open"]
         );
     }
 }
