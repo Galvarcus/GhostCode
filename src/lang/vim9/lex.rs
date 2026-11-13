@@ -39,11 +39,18 @@ pub struct Tok {
 
 // The operators of more than one character, longest first, so that `..`
 // never reads as two member dots and `==#` never as `==` and `#`.
+// The command that makes the rest of a script Vim9. The lines before
+// it are legacy script.
+const VIM9: &str = "vim9script";
+
+// The marker of a comment in legacy script.
+const LEGACY_COMMENT: char = '"';
+
 // The words that open or close a block. A bracket left unclosed by a
 // broken line must not swallow the file, so one of these at the start
 // of a line ends the statement before it, whatever the bracket depth.
 const RESYNC: &[&str] = &[
-    "vim9script",
+    VIM9,
     "def",
     "enddef",
     "class",
@@ -99,6 +106,8 @@ pub fn tokens(text: &str) -> Vec<Tok> {
     // Whether the line before ended inside the keys of a mapping, which
     // a line that opens with a backslash carries on.
     let mut keys = false;
+    // Whether no `vim9script` line stands above the line being read.
+    let mut legacy = true;
 
     for (i, raw) in text.lines().enumerate() {
         let line = i as u32 + 1;
@@ -119,6 +128,25 @@ pub fn tokens(text: &str) -> Vec<Tok> {
         }
 
         let mut rest = raw.trim_start();
+
+        legacy = legacy && !opens_with(rest, VIM9);
+
+        // A legacy script marks a comment with a double quote, so a
+        // line that opens with one is no string, and a name in it is
+        // no use of the name. Inside brackets the line belongs to a
+        // `def` body, which is Vim9 in a legacy script too, and there
+        // a broken list can open a line with a string.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/60
+        if legacy && depth == 0 && rest.starts_with(LEGACY_COMMENT) {
+            toks.push(Tok {
+                kind: TokKind::Comment,
+                text: rest.to_string(),
+                line,
+                glued: false,
+            });
+            push_newline(&mut toks, line);
+            continue;
+        }
 
         let carried = keys && rest.starts_with('\\');
 
@@ -170,11 +198,16 @@ pub fn tokens(text: &str) -> Vec<Tok> {
 /// FUNCTION: True when a line opens or closes a block, which ends any
 /// statement a broken line left open.
 fn opens_block(line: &str) -> bool {
-    let word: String = line
+    RESYNC.iter().any(|word| opens_with(line, word))
+}
+
+/// FUNCTION: Whether the first word of a line is this one.
+fn opens_with(line: &str, word: &str) -> bool {
+    let len = line
         .chars()
         .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
-        .collect();
-    RESYNC.contains(&word.as_str())
+        .count();
+    &line[..len] == word
 }
 
 /// FUNCTION: Add one token of the line, recording whether a space
@@ -726,5 +759,39 @@ mod tests {
                 .expect("Recover")
                 .glued
         );
+    }
+
+    /// A legacy script marks a comment with a double quote, so the
+    /// line is no string and a name in it is no use of the name.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/60
+    #[test]
+    fn a_line_that_opens_with_a_quote_in_a_legacy_script_is_a_comment() {
+        let toks = tokens("\" reads g:dead never\nlet g:dead = 1\n");
+
+        assert_eq!(toks[0].kind, TokKind::Comment);
+        assert!(toks.iter().all(|t| t.kind != TokKind::Str));
+    }
+
+    #[test]
+    fn a_line_that_opens_with_a_quote_in_a_vim9_script_is_a_string() {
+        let toks = tokens("vim9script\nvar l = [\n  \"a\",\n]\n");
+
+        assert!(toks.iter().any(|t| t.kind == TokKind::Str));
+    }
+
+    /// A `def` body is Vim9 in a legacy script too, and a broken list
+    /// there can open a line with a string.
+    #[test]
+    fn a_line_that_opens_with_a_quote_inside_brackets_is_a_string() {
+        let toks = tokens("def F()\n  var l = [\n    \"a\",\n  ]\nenddef\n");
+
+        assert!(toks.iter().any(|t| t.kind == TokKind::Str));
+    }
+
+    #[test]
+    fn a_line_that_opens_with_a_quote_behind_vim9script_is_no_comment() {
+        let toks = tokens("\" legacy\nvim9script\n\"a\"->F()\n");
+
+        assert_eq!(toks.iter().filter(|t| t.kind == TokKind::Str).count(), 1);
     }
 }
