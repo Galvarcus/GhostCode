@@ -1,0 +1,19 @@
+# doc/vimdoc.yaml: how pandoc builds the help file from the readme. The
+# Vimdoc workflow and the test of the help tags both build with this
+# file, so that the test proves the build that is committed. Each one
+# names its own output. The paths are relative to the root of the
+# repository, which is where pandoc runs.
+#
+#   pandoc --defaults=doc/vimdoc.yaml --output=doc/ghostcode.txt
+
+from: markdown
+to: vimdoc
+standalone: true
+columns: 78
+table-of-contents: true
+shift-heading-level-by: -1
+metadata-file: doc/pandoc.yaml
+filters:
+  - doc/vimdoc-filter.lua
+input-files:
+  - README.md

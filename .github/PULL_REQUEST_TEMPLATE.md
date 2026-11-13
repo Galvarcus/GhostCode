@@ -84,8 +84,8 @@ them. A change to one needs a reason in the commit message.
 
 <!--
 `doc/ghostcode.txt` is generated from `README.md` by
-`.github/workflows/ci.yml` on a push to `main`, so it is never edited
-by hand.
+`.github/workflows/vimdoc.yml` on a push to `Development`, so it is
+never edited by hand.
 -->
 
 - [ ] `README.md` was updated

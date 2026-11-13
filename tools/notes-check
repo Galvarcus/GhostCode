@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+#
+# tools/notes-check: proof that tools/release-notes writes the notes of
+# a release. Run it from the root of the repository, with the whole
+# history and its tags.
+#
+# The tool exits with 0 when git fails and when a range holds no
+# commit, and it then prints nothing, so its exit status proves only
+# that the script ran. The proof is therefore in the output, for a
+# range between two tags, which never changes.
+# REFERENCE: https://github.com/Galvarcus/GhostCode/issues/73
+#
+# License: GNU GPL 3.0
+
+set -uo pipefail
+
+FROM=v0.4.0
+TO=v0.5.0
+
+# A section of the notes, and a line that names an issue. The first
+# shows that the tool read commits, and the second that it read their
+# trailers.
+SECTION='^### '
+ISSUE='\(#[0-9]+\)'
+
+# A checkout with a depth of 1 has no tags, and the tool would print
+# nothing for the same reason a broken tool would.
+for tag in "$FROM" "$TO"; do
+  if ! git rev-parse --quiet --verify "refs/tags/$tag" > /dev/null; then
+    printf 'the tag %s is not here: fetch the whole history\n' "$tag"
+    exit 1
+  fi
+done
+
+notes=$(tools/release-notes "$FROM..$TO") || exit 1
+
+for pat in "$SECTION" "$ISSUE"; do
+  if ! printf '%s\n' "$notes" | grep -Eq -- "$pat"; then
+    printf 'the notes of %s have no line that matches %s\n' \
+      "$FROM..$TO" "$pat"
+    exit 1
+  fi
+done

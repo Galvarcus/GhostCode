@@ -1,0 +1,86 @@
+name: Vimdoc
+
+# The help file a Vim user reads is generated from the readme. It is
+# rebuilt on every push to the branch that work happens on, and
+# committed there only when it differs, so that it reaches main in the
+# pull request, with the change to the readme that caused it. A job on
+# main would add a commit that the work branch does not have, which
+# the work branch must then take back.
+# REFERENCE: https://github.com/Galvarcus/GhostCode/issues/74
+#
+# No path filter decides whether a source of the file changed, because
+# a filter would leave a hand edit of the generated file standing.
+#
+# A commit made with the token of the run starts no workflow, so the
+# commit of this job starts neither this workflow again nor CI. A pull
+# request opened after it runs CI on it.
+on:
+  push:
+    branches:
+      - Development
+  workflow_dispatch:
+permissions:
+  contents: read
+# Two pushes close together run one after the other, so that the
+# second run builds on what the first one pushed. A push that is not
+# a fast-forward is refused.
+concurrency:
+  group: vimdoc-${{ github.ref_name }}
+  cancel-in-progress: false
+jobs:
+  vimdoc:
+    name: Vimdoc
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # The head of the branch and not the commit of the event, because
+      # a run that waited for another must build on what that one
+      # pushed.
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.ref_name }}
+
+      # The options are in a file of their own, which the test of the
+      # help tags builds with too.
+      - name: Generate Vimdoc
+        uses: docker://pandoc/core:latest
+        with:
+          args: >-
+            --defaults=doc/vimdoc.yaml
+            --output=doc/ghostcode.txt
+
+      # A tag that stands twice makes :helptags fail for the user, with
+      # every tag of the file lost. The front-end suite proves the same
+      # where pandoc is installed, which a runner of CI does not have,
+      # so this step is the one that holds the file that is committed.
+      # The tags file is made by the user and is not committed.
+      # REFERENCE: https://github.com/Galvarcus/GhostCode/issues/76
+      - name: Vim can make the help tags
+        run: |
+          set -euo pipefail
+
+          if ! command -v vim > /dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends vim
+          fi
+
+          tmp=$(mktemp -d)
+          cp doc/ghostcode.txt "$tmp"
+          vim -es -u NONE -N \
+            -c "try | helptags $tmp | catch | cquit 1 | endtry" \
+            -c 'quit'
+          test -s "$tmp/tags"
+
+      - name: Commit generated Vimdoc
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add doc/ghostcode.txt
+          if git diff --cached --quiet; then
+            echo "doc/ghostcode.txt is current."
+            exit 0
+          fi
+          git commit -m "docs: regenerate Vimdoc"
+          git push origin HEAD:${{ github.ref_name }}

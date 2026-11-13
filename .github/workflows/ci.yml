@@ -4,7 +4,7 @@ name: CI
 # events that concern it:
 #
 #   pull request     the four checks
-#   push to main     the four checks, then Vimdoc
+#   push to main     the four checks
 #   version tag      the four checks, then the release jobs
 #
 # The four checks are the Analyzer, the Analyzer on Windows, the Front
@@ -44,10 +44,13 @@ jobs:
     name: Analyzer
     runs-on: ubuntu-latest
     steps:
+      # The whole history, because the proof of the release notes reads
+      # a range between two tags.
       - name: Checkout
         uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.event.inputs.tag || github.sha }}
+          fetch-depth: 0
 
       - name: Cache the build
         uses: actions/cache@v6.1.0
@@ -102,6 +105,13 @@ jobs:
           fi
 
           echo "No ghost code found."
+
+      # The release job is the one other place that runs the tool, and
+      # a fault there shows first on a tag. No token is given, so the
+      # tool is proved on the path that has no title from gh.
+      # REFERENCE: https://github.com/Galvarcus/GhostCode/issues/73
+      - name: Release notes
+        run: tools/notes-check
 
   # The release matrix builds Windows, and it runs for a tag alone, so
   # nothing would compile that target until the release itself. This
@@ -372,55 +382,6 @@ jobs:
           cat tests/results.txt
           grep -qx 'All tests passed' tests/results.txt
 
-  # The help file a Vim user reads is generated from the readme, so it
-  # is rebuilt on every push to main and committed only when it
-  # differs. Deciding first whether a source of it changed cannot be
-  # done from a push event alone, and would leave a hand edit of the
-  # generated file standing.
-  vimdoc:
-    name: Vimdoc
-    if: >-
-      github.ref == 'refs/heads/main'
-      && (github.event_name == 'push'
-      || (github.event_name == 'workflow_dispatch'
-      && github.event.inputs.tag == ''))
-    needs:
-      - rust
-      - front-end
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7.0.1
-
-      - name: Generate Vimdoc
-        uses: docker://pandoc/core:latest
-        with:
-          args: >-
-            README.md
-            --from=markdown
-            --to=vimdoc
-            --standalone
-            --columns=78
-            --toc=true
-            --shift-heading-level-by=-1
-            --metadata-file=doc/pandoc.yaml
-            --lua-filter=doc/vimdoc-filter.lua
-            --output=doc/ghostcode.txt
-
-      - name: Commit generated Vimdoc
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add doc/ghostcode.txt
-          if git diff --cached --quiet; then
-            echo "doc/ghostcode.txt is current."
-            exit 0
-          fi
-          git commit -m "docs: regenerate Vimdoc"
-          git push origin HEAD:${{ github.ref_name }}
-
   # SECTION: Everything below releases, and runs for a release tag or
   # for a run started by hand with one. The condition is on this job
   # alone: the jobs after it wait for it, so a skip here skips them
@@ -604,6 +565,13 @@ jobs:
 
           notes="$RUNNER_TEMP/notes.md"
           tools/release-notes > "$notes"
+
+          # Notes can be edited after the release, so notes with no
+          # section are a warning and do not stop the release.
+          if ! grep -q '^### ' "$notes"; then
+            echo "::warning::The release notes have no section."
+          fi
+
           shopt -s nullglob
           paths=(dist/bin/*-linux-gnu)
 
