@@ -60,6 +60,48 @@ fn a_local_written_and_then_read_is_not_reported() {
     assert!(found("rw", "  var f = false\n  f = true\n  echo f\n").is_empty());
 }
 
+/// A name in the list on the left of an assignment is written, as a
+/// name that opens an assignment is.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/62
+#[test]
+fn a_local_only_written_by_a_list_assignment_is_reported() {
+    assert_eq!(
+        found(
+            "unpack",
+            "  var a: number\n  var b: number\n  [a, b] = [1, 2]\n"
+        ),
+        vec!["local variable a", "local variable b"]
+    );
+}
+
+#[test]
+fn a_local_written_by_a_list_assignment_and_then_read_is_not_reported() {
+    assert_eq!(
+        found(
+            "unpackrw",
+            "  var a: number\n  var b: number\n  [a, b] = [1, 2]\n  echo a\n"
+        ),
+        vec!["local variable b"]
+    );
+}
+
+/// An item or a key on the left reads the variable that holds it.
+#[test]
+fn a_local_indexed_on_the_left_of_a_list_assignment_is_not_reported() {
+    assert!(found(
+        "unpackidx",
+        "  var d = {}\n  var l = [0]\n  [d.x, l[0]] = [1, 2]\n"
+    )
+    .is_empty());
+}
+
+/// A list that opens a statement and that no assignment follows is a
+/// value, and each name in it is read.
+#[test]
+fn a_local_in_a_list_that_opens_a_call_is_not_reported() {
+    assert!(found("listcall", "  var a = 1\n  var b = 2\n  [a, b]->len()\n").is_empty());
+}
+
 /// A parameter may be unused inside the plugin and still be part of
 /// the signature its caller requires, and that caller may be Vim.
 #[test]

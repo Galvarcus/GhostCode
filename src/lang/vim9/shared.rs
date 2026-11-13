@@ -71,12 +71,19 @@ const BODY_END: &[&str] = &["enddef", "endfunction"];
 
 // The key under which `getbufinfo()`, `getwininfo()` and
 // `gettabinfo()` give every variable of a buffer, a window or a tab,
-// and the scopes it can therefore hold. The key does not say which
-// function it came from, and the functions are called far more often
-// for something else, so the key is what credits, and it credits all
-// three.
+// and each scope it can therefore hold, with the function that gives
+// it. The key does not say which function it came from, and the
+// functions are called far more often for something else, so the key
+// is what credits. It credits a scope only in a project that names
+// the function of that scope, because without the function the key is
+// one of a dictionary of the project.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/61
 const VARIABLES: &str = "variables";
-const HELD: &[char] = &['b', 'w', 't'];
+const HELD: &[(char, &str)] = &[
+    ('b', "getbufinfo"),
+    ('w', "getwininfo"),
+    ('t', "gettabinfo"),
+];
 
 // What stands before a key: the dot of a member and the bracket of an
 // index.
@@ -123,6 +130,8 @@ pub(super) enum Spelling {
         head: String,
         tail: String,
         whole: bool,
+        /// The function the project must name for the read to hold.
+        needs: Option<&'static str>,
     },
 }
 
@@ -141,8 +150,38 @@ impl Spelling {
             head: format!("{scope}{COLON}"),
             tail: String::new(),
             whole: true,
+            needs: None,
         }
     }
+
+    /// METHOD: Every variable of one scope, read from what a function
+    /// gives, so only where the project names that function.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/61
+    fn held(scope: char, by: &'static str) -> Self {
+        Self::Fit {
+            head: format!("{scope}{COLON}"),
+            tail: String::new(),
+            whole: true,
+            needs: Some(by),
+        }
+    }
+}
+
+/// FUNCTION: Whether a function gives every variable of a scope under
+/// the key `variables`.
+pub(super) fn gives_scope(name: &str) -> bool {
+    HELD.iter().any(|(_, by)| *by == name)
+}
+
+/// FUNCTION: Each function that gives a whole scope and that a text
+/// names. A string and a heredoc name one where they hold its name,
+/// which is enough: a wrong answer credits a scope and reports
+/// nothing.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/66
+pub(super) fn scope_givers(text: &str) -> impl Iterator<Item = &'static str> + '_ {
+    HELD.iter()
+        .map(|(_, by)| *by)
+        .filter(move |by| text.contains(by))
 }
 
 /// One use of a scoped variable.
@@ -338,6 +377,7 @@ pub(super) fn spellings(text: &str) -> Vec<Spelling> {
             head: full,
             tail: if again { String::new() } else { tail },
             whole: false,
+            needs: None,
         });
     }
 
@@ -444,8 +484,8 @@ fn called(stmt: &[Tok], run: Range<usize>, consts: &Consts, found: &mut Vec<Use>
         };
 
         if key {
-            found.extend(HELD.iter().map(|scope| Use {
-                spelling: Spelling::whole(*scope),
+            found.extend(HELD.iter().map(|(scope, by)| Use {
+                spelling: Spelling::held(*scope, by),
                 at: i,
                 write: false,
                 lead: false,
@@ -515,6 +555,7 @@ fn quoted(stmt: &[Tok], run: Range<usize>, found: &mut Vec<Use>) {
                         head,
                         tail: String::new(),
                         whole: false,
+                        needs: None,
                     });
                 }
             }
@@ -642,6 +683,7 @@ fn name_of(stmt: &[Tok], arg: Range<usize>, scope: char, consts: &Consts) -> Opt
             head: format!("{scope}{COLON}{head}"),
             tail: tail.to_string(),
             whole: head.is_empty() && tail.is_empty(),
+            needs: None,
         });
     }
 
@@ -725,6 +767,7 @@ fn named(stmt: &[Tok], run: Range<usize>, taken: &mut Vec<usize>) -> Vec<Use> {
                     head: name,
                     tail: String::new(),
                     whole: false,
+                    needs: None,
                 },
                 at,
                 write: false,

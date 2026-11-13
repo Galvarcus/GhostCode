@@ -146,6 +146,7 @@ pub fn analyze(root: &Path, cfg: &Config) -> anyhow::Result<Report> {
 
     fold(&mut a);
     text_references(&mut a);
+    drop_unmet(&mut a);
     fit_references(&mut a);
 
     let resolved = resolve::all(&a);
@@ -269,6 +270,19 @@ fn text_references(a: &mut Analysis) {
     a.refs.extend(found);
 }
 
+/// FUNCTION: Drop each name with a gap whose read holds only where the
+/// project uses a name, in a project that uses that name nowhere.
+///
+/// The use can stand in another file than the read, because the value
+/// travels, so the question is asked of the whole project.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/61
+fn drop_unmet(a: &mut Analysis) {
+    let given = &a.given;
+
+    a.fits
+        .retain(|f| f.needs.as_ref().is_none_or(|name| given.contains(name)));
+}
+
 /// FUNCTION: Turn each name with a gap into a reference to every
 /// symbol its fixed parts fit.
 ///
@@ -288,7 +302,18 @@ fn fit_references(a: &mut Analysis) {
 
     let mut found: Vec<crate::model::Reference> = Vec::new();
 
+    // The same spelling read again from the same code credits the
+    // same names for the same walk, so only the first read makes
+    // references. Without this the references number the reads times
+    // the names: 2,000 reads of a scope of 2,000 names took 48 s.
+    // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/68
+    let mut seen = HashSet::new();
+
     for fit in &a.fits {
+        if !seen.insert((&fit.head, &fit.tail, &fit.origin, &fit.file)) {
+            continue;
+        }
+
         let from = names.partition_point(|(name, _)| *name < fit.head.as_str());
         let least = fit.head.len() + fit.tail.len();
 
@@ -542,6 +567,7 @@ mod tests {
             head: head.to_string(),
             tail: tail.to_string(),
             whole: tail.is_empty() && head.len() == 2,
+            needs: None,
             file: PathBuf::from("autoload/a.vim"),
             line: 3,
             origin: None,
@@ -565,6 +591,38 @@ mod tests {
         let mut out: Vec<String> = a.refs.into_iter().map(|r| r.name).collect();
         out.sort();
         out
+    }
+
+    /// A second read of the same names from the same code adds
+    /// nothing, and one reference for each of them would make the
+    /// scan cost the reads times the names.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/68
+    #[test]
+    fn a_second_read_of_a_scope_from_the_same_code_credits_nothing_more() {
+        let again = crate::model::Fit {
+            line: 9,
+            ..gap("g:", "")
+        };
+
+        assert_eq!(
+            credited(&["g:p_a", "g:p_b"], vec![gap("g:", ""), again]),
+            vec!["g:p_a", "g:p_b"]
+        );
+    }
+
+    /// The walk credits a name from the code it reached, so a read
+    /// from other code is a credit of its own.
+    #[test]
+    fn a_read_of_a_scope_from_other_code_keeps_its_credit() {
+        let other = crate::model::Fit {
+            origin: Some(SymbolId::of(Path::new("autoload/a.vim"), None, "F")),
+            ..gap("g:", "")
+        };
+
+        assert_eq!(
+            credited(&["g:p_a"], vec![gap("g:", ""), other]),
+            vec!["g:p_a", "g:p_a"]
+        );
     }
 
     #[test]

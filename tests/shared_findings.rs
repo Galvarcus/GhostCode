@@ -281,3 +281,105 @@ fn a_scope_read_whole_in_dead_code_makes_no_note() {
     assert!(r.notes.is_empty(), "{:?}", r.notes);
     assert!(lines(&r).contains(&GHOST.to_string()));
 }
+
+/// FUNCTION: The classes of the buffer and of the window on.
+fn held() -> FindingFlags {
+    FindingFlags {
+        buffer_vars: true,
+        window_vars: true,
+        ..FindingFlags::default()
+    }
+}
+
+/// The key `variables` holds a scope only on what an info function
+/// gives, so in a project that calls none of them the key is a key of
+/// a dictionary of the project.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/61
+#[test]
+fn a_variables_key_reads_no_scope_in_a_project_that_calls_no_info_function() {
+    let dir = project(
+        "key-alone",
+        &[(
+            "plugin/p.vim",
+            "vim9script\nb:p_x = 1\nvar d = {variables: 1}\necho d.variables\n",
+        )],
+    );
+    let r = run(&dir, held());
+
+    assert_eq!(lines(&r), vec!["plugin/p.vim:2:1:[ghost] variable b:p_x"]);
+    assert!(r.notes.is_empty());
+}
+
+/// The call can stand in another file than the key, because the
+/// dictionary travels.
+#[test]
+fn a_variables_key_reads_the_scope_of_the_info_function_the_project_calls() {
+    let dir = project(
+        "key-info",
+        &[
+            (
+                "plugin/p.vim",
+                "vim9script\nimport autoload 'a.vim' as A\nb:p_x = 1\nw:p_y = 1\necho A.Info().variables\n",
+            ),
+            (
+                "autoload/a.vim",
+                "vim9script\nexport def Info(): dict<any>\n  return getbufinfo(1)[0]\nenddef\n",
+            ),
+        ],
+    );
+    let r = run(&dir, held());
+
+    assert_eq!(lines(&r), vec!["plugin/p.vim:4:1:[ghost] variable w:p_y"]);
+    assert_eq!(
+        r.notes,
+        vec![report::Note {
+            file: PathBuf::from("plugin/p.vim"),
+            line: 5,
+            scope: "b:".to_string(),
+        }]
+    );
+}
+
+/// FUNCTION: The findings and the scopes of the notes of one script,
+/// with the buffer and window classes on.
+fn key_scan(tag: &str, text: &str) -> (Vec<String>, Vec<String>) {
+    let dir = project(tag, &[("plugin/p.vim", text)]);
+    let r = run(&dir, held());
+
+    (lines(&r), r.notes.into_iter().map(|n| n.scope).collect())
+}
+
+/// A function can be named as text and called through a value, so a
+/// name of an info function in a string is a use of it.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/66
+#[test]
+fn an_info_function_named_as_a_funcref_string_gives_the_key_its_scope() {
+    let text =
+        "vim9script\nb:p_x = 1\nvar Info = function('getbufinfo')\necho Info(1)[0].variables\n";
+
+    assert_eq!(
+        key_scan("key-funcref", text),
+        (vec![], vec!["b:".to_string()])
+    );
+}
+
+#[test]
+fn an_info_function_named_in_a_plain_string_gives_the_key_its_scope() {
+    let text =
+        "vim9script\nb:p_x = 1\nvar name = 'getbufinfo'\necho call(name, [1])[0].variables\n";
+
+    assert_eq!(
+        key_scan("key-string", text),
+        (vec![], vec!["b:".to_string()])
+    );
+}
+
+#[test]
+fn an_info_function_named_in_a_heredoc_gives_the_key_its_scope() {
+    let text = "vim9script\nb:p_x = 1\nvar lines =<< trim END\n  g:p_info = getbufinfo(1)[0]\nEND\nexecute lines\necho g:p_info.variables\n";
+
+    assert_eq!(
+        key_scan("key-heredoc", text),
+        (vec![], vec!["b:".to_string()])
+    );
+}

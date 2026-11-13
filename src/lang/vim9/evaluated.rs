@@ -39,6 +39,30 @@ const KEY_JOIN: &str = "-";
 /// What opens the arguments of a call.
 const CALL: &str = "(";
 
+/// One name of an executed text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Word {
+    pub name: String,
+    /// Whether the word is Vim's own.
+    pub vims: bool,
+    /// The name before the dot, where the word stands behind one
+    /// inside a gap. Such a word is a member or a key, and no bare
+    /// name of the project.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/71
+    pub recv: Option<String>,
+}
+
+impl Word {
+    /// METHOD: A word that stands behind no dot.
+    pub fn bare((name, vims): (String, bool)) -> Self {
+        Self {
+            name,
+            vims,
+            recv: None,
+        }
+    }
+}
+
 /// FUNCTION: Every name the argument holds, in order, each with
 /// whether it is Vim's own word.
 ///
@@ -55,8 +79,14 @@ const CALL: &str = "(";
 /// as keys, and the word is outside every gap and is not called, or
 /// stands in a string inside a gap. A mark never takes a credit from
 /// a symbol, so a wrong mark costs a count and no finding.
+///
+/// A word behind a dot inside a gap comes back with its receiver. The
+/// gap is code, and the scan of the code has read the same word as a
+/// member, so a bare name here would credit a function or a variable
+/// of that spelling.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-pub fn names(arg: &str) -> Vec<(String, bool)> {
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/71
+pub fn names(arg: &str) -> Vec<Word> {
     let (head, tail) = arg.split_once(GAP).unwrap_or((arg, ""));
     let stmts = parse::statements(&lex::tokens(head));
     let mut owns = stmts.last().is_some_and(|stmt| parse::owns_line(stmt));
@@ -64,9 +94,9 @@ pub fn names(arg: &str) -> Vec<(String, bool)> {
     let mut vims = vims_words(&stmts);
     vims.extend(loose_words(head, false));
 
-    let mut out: Vec<(String, bool)> = identifiers(head)
+    let mut out: Vec<Word> = identifiers(head)
         .into_iter()
-        .map(|name| (name.clone(), vims.contains(&name)))
+        .map(|name| Word::bare((name.clone(), vims.contains(&name))))
         .collect();
 
     // The tail opens inside a gap, and the gaps and the text between
@@ -107,9 +137,18 @@ pub fn names(arg: &str) -> Vec<(String, bool)> {
         // the function a mapping runs is.
         let called = called_words(part);
 
+        // The receivers are taken in order, one for each word the
+        // tokens show behind a dot.
+        let mut keys = if code { keyed(part) } else { Vec::new() };
+
         out.extend(identifiers(part).into_iter().map(|name| {
             let vims = (!code && owns && !called.contains(&name)) || loose.contains(&name);
-            (name, vims)
+            let recv = keys
+                .iter()
+                .position(|(key, _)| *key == name)
+                .map(|at| keys.remove(at).1);
+
+            Word { name, vims, recv }
         }));
 
         code = !code;
@@ -210,7 +249,7 @@ fn loose_words(text: &str, keys: bool) -> HashSet<String> {
             && glued(i - 1)
             && parse::SCOPES.contains(&toks[i - 2].text.as_str());
         let called = is(i + 1, CALL) && builtins::has(word);
-        let key = keys && behind(DOT) && i > 1 && toks[i - 2].kind == TokKind::Ident;
+        let key = keys && is_key(&toks, i);
 
         if option || scope || scoped || called || key || in_notation(&toks, i) {
             out.insert(word.trim_start_matches(OPTION).to_string());
@@ -218,6 +257,24 @@ fn loose_words(text: &str, keys: bool) -> HashSet<String> {
     }
 
     out
+}
+
+/// FUNCTION: Each word of a gap that stands behind a dot and a name,
+/// with that name, as `Enabled` and `item` in `item.Enabled`.
+fn keyed(text: &str) -> Vec<(String, String)> {
+    let toks = lex::tokens(text);
+
+    toks.iter()
+        .enumerate()
+        .filter(|(i, tok)| is_key(&toks, *i) && tok.kind == TokKind::Ident)
+        .map(|(i, tok)| (tok.text.clone(), toks[i - 2].text.clone()))
+        .collect()
+}
+
+/// FUNCTION: Whether the token at `i` is glued behind a dot that
+/// follows a name.
+fn is_key(toks: &[lex::Tok], i: usize) -> bool {
+    i > 1 && toks[i].glued && toks[i - 1].text == DOT && toks[i - 2].kind == TokKind::Ident
 }
 
 /// FUNCTION: The words inside the strings of an expression.
@@ -265,13 +322,14 @@ fn in_notation(toks: &[lex::Tok], i: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::names;
+    use super::Word;
 
     /// FUNCTION: The names of an argument that are Vim's own word.
     fn words_of(arg: &str) -> Vec<String> {
         names(arg)
             .into_iter()
-            .filter(|(_, vims)| *vims)
-            .map(|(name, _)| name)
+            .filter(|word| word.vims)
+            .map(|word| word.name)
             .collect()
     }
 
@@ -290,9 +348,9 @@ mod tests {
         assert_eq!(
             names("silent file x"),
             vec![
-                ("silent".to_string(), true),
-                ("file".to_string(), true),
-                ("x".to_string(), false),
+                Word::bare(("silent".to_string(), true)),
+                Word::bare(("file".to_string(), true)),
+                Word::bare(("x".to_string(), false)),
             ]
         );
     }

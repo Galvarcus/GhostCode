@@ -17,6 +17,7 @@ mod shared;
 pub mod types;
 
 use std::path::Path;
+use std::path::PathBuf;
 
 use crate::config::Config;
 use crate::lang::Lang;
@@ -33,7 +34,7 @@ impl Lang for Vim9 {
     }
 
     fn extensions(&self) -> &[&'static str] {
-        &["vim"]
+        &[rules::SCRIPT_EXT]
     }
 
     fn is_entry(&self, _root: &Path, file: &Path) -> bool {
@@ -56,5 +57,9 @@ impl Lang for Vim9 {
 
     fn shared_on(&self, name: &str, cfg: &Config) -> bool {
         rules::shared_on(name, cfg)
+    }
+
+    fn stated<'n>(&self, name: &'n str) -> Option<(PathBuf, &'n str)> {
+        rules::autoload_parts(name)
     }
 }

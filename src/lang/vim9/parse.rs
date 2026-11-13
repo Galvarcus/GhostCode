@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use crate::lang::vim9::autocmd;
 use crate::lang::vim9::builtins;
 use crate::lang::vim9::evaluated;
+use crate::lang::vim9::evaluated::Word;
 use crate::lang::vim9::excmds;
 use crate::lang::vim9::exists;
 use crate::lang::vim9::lex::Tok;
@@ -175,6 +176,10 @@ pub fn heredocs(file: &Path, toks: &[Tok], out: &mut dyn Sink) {
     let origin = SymbolId::script(file);
 
     for tok in toks.iter().filter(|t| t.kind == TokKind::Heredoc) {
+        for name in shared::scope_givers(&tok.text) {
+            out.give(name);
+        }
+
         for spelling in shared::spellings(&tok.text) {
             match spelling {
                 shared::Spelling::Exact(name) => out.re(Reference {
@@ -187,10 +192,16 @@ pub fn heredocs(file: &Path, toks: &[Tok], out: &mut dyn Sink) {
                     owned: true,
                     member: false,
                 }),
-                shared::Spelling::Fit { head, tail, whole } => out.fit(Fit {
+                shared::Spelling::Fit {
                     head,
                     tail,
                     whole,
+                    needs,
+                } => out.fit(Fit {
+                    head,
+                    tail,
+                    whole,
+                    needs: needs.map(str::to_string),
                     file: file.to_path_buf(),
                     line: tok.line,
                     origin: Some(origin.clone()),
@@ -1097,10 +1108,16 @@ pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
                     owned: true,
                     member: false,
                 }),
-                shared::Spelling::Fit { head, tail, whole } => out.fit(Fit {
+                shared::Spelling::Fit {
                     head,
                     tail,
                     whole,
+                    needs,
+                } => out.fit(Fit {
+                    head,
+                    tail,
+                    whole,
+                    needs: needs.map(str::to_string),
                     file: file.to_path_buf(),
                     line,
                     origin: Some(origin.clone()),
@@ -1264,6 +1281,16 @@ impl Collect<'_> {
             return;
         }
 
+        // A call of a function that gives a whole scope is no
+        // reference, and a read of what it gives holds only in a
+        // project that names the function, so the name is recorded.
+        // Any use of the name counts, called or not, because the
+        // function can be passed as a value and called elsewhere.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/61
+        if shared::gives_scope(word) {
+            self.out.give(word);
+        }
+
         // A called lowercase name is Vim's own, because Vim refuses a
         // `def` and a funcref variable whose name does not start with
         // a capital. It is dropped for the same reason a local is: a
@@ -1382,6 +1409,14 @@ impl Collect<'_> {
     /// project's own names once they are all known: Vim evaluates text
     /// in places no parser sees, and a name used only there is used.
     fn text(&mut self, stmt: &[Tok], i: usize, tok: &Tok) {
+        // A function that gives a whole scope can be named as text
+        // and called through a value, so its name in a string is a
+        // use of it.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/66
+        for name in shared::scope_givers(&tok.text) {
+            self.out.give(name);
+        }
+
         // The word before the string names what reads it, as a command
         // in `execute 'x'` or as a call in `exists('x')`, where a
         // bracket stands between.
@@ -1409,17 +1444,19 @@ impl Collect<'_> {
         // The reader answers which of its words a project symbol could
         // carry, and only those are left unmarked.
         // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-        let names: Vec<(String, bool)> = if EXISTS.contains(&gate) {
-            exists::names(&arg)
+        let bare = |names: Vec<(String, bool)>| names.into_iter().map(Word::bare).collect();
+
+        let names: Vec<Word> = if EXISTS.contains(&gate) {
+            bare(exists::names(&arg))
         } else if EXECUTE.contains(&gate) {
             evaluated::names(&arg)
         } else if gate == EVAL {
-            evaluated::loose(&arg)
+            bare(evaluated::loose(&arg))
         } else {
-            identifiers(&arg).into_iter().map(|n| (n, false)).collect()
+            bare(identifiers(&arg).into_iter().map(|n| (n, false)).collect())
         };
 
-        for (name, owned) in names {
+        for Word { name, vims, recv } in names {
             // An interpolation is lexed as code as well, so its names
             // have been through `ident` already, and a variable of
             // the code around the string is dropped there. This is
@@ -1431,15 +1468,20 @@ impl Collect<'_> {
                 continue;
             }
 
+            // A word with a receiver stands behind a dot, so it is a
+            // member, as the scan of the code reads it.
+            // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/71
+            let member = recv.is_some();
+
             self.out.re(Reference {
                 name,
-                recv: None,
+                recv,
                 file: self.file.to_path_buf(),
                 line: tok.line,
                 origin: Some(self.origin.clone()),
                 target: None,
-                owned,
-                member: false,
+                owned: vims,
+                member,
             });
         }
     }
@@ -1611,6 +1653,17 @@ fn called(stmt: &[Tok], i: usize) -> bool {
 /// FUNCTION: Whether a word can name a user command, which Vim
 /// requires to start with a capital.
 pub(super) fn user_command(word: &str) -> bool {
+    word.starts_with(|c: char| c.is_ascii_uppercase())
+}
+
+/// FUNCTION: Whether a word can name a type of the project: a class,
+/// an enum, an interface or a type alias. Vim refuses each of the
+/// four without a capital first, with E1314, E1415, E1343 and E1394.
+///
+/// The rule has the form of the one for a user command and is a
+/// different fact of Vim, so it has a function of its own.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/70
+fn type_name(word: &str) -> bool {
     word.starts_with(|c: char| c.is_ascii_uppercase())
 }
 
@@ -1858,16 +1911,56 @@ fn in_command_def(stmt: &[Tok], i: usize) -> bool {
 /// FUNCTION: Whether the name at a position is being written without
 /// being read.
 ///
-/// Only a name opening the statement, because that is where Vim reads
-/// an assignment target. A destructuring assignment is not caught,
-/// which leaves its write crediting the variable: that misses a
-/// finding rather than inventing one.
+/// Only a name opening the statement, or one in a list that opens it,
+/// because that is where Vim reads an assignment target.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 fn written(stmt: &[Tok], i: usize) -> bool {
-    i == 0
-        && stmt
-            .get(1)
-            .is_some_and(|t| WRITES.contains(&t.text.as_str()))
+    if i == 0 {
+        return assigns(stmt, 1);
+    }
+
+    unpack_target(stmt, i)
+}
+
+/// FUNCTION: Whether the token at a position is an assignment that
+/// writes and does not read.
+fn assigns(stmt: &[Tok], at: usize) -> bool {
+    stmt.get(at)
+        .is_some_and(|t| WRITES.contains(&t.text.as_str()))
+}
+
+/// FUNCTION: Whether the name at a position is a whole part of a list
+/// that opens the statement and that an assignment follows, as `a`
+/// and `b` are in `[a, b] = F()`.
+///
+/// A part that is more than a name, such as `d.key` or `l[0]`, reads
+/// the variable that holds the item, so only a name that stands alone
+/// between the separators of the list is written.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/62
+fn unpack_target(stmt: &[Tok], i: usize) -> bool {
+    if stmt.first().map(|t| t.text.as_str()) != Some("[") {
+        return false;
+    }
+
+    let Some(close) = types::closing(stmt, 0) else {
+        return false;
+    };
+
+    if i >= close || !assigns(stmt, close + 1) {
+        return false;
+    }
+
+    let inner = stmt[1..i]
+        .iter()
+        .fold(0i32, |depth, tok| match tok.text.as_str() {
+            "(" | "[" | "{" => depth + 1,
+            ")" | "]" | "}" => depth - 1,
+            _ => depth,
+        });
+
+    inner == 0
+        && matches!(stmt[i - 1].text.as_str(), "[" | "," | ";")
+        && matches!(stmt[i + 1].text.as_str(), "," | ";" | "]")
 }
 
 /// FUNCTION: The name a word states for the reader of a string, with
@@ -1918,7 +2011,14 @@ pub(super) fn set_args(stmt: &[Tok], i: usize, heads: &[usize]) -> bool {
         return false;
     }
 
-    stmt[at..i].iter().all(|tok| tok.text != BAR)
+    (at + 1..i).all(|k| !ends_command(stmt, k))
+}
+
+/// FUNCTION: Whether the token at a position is a bar that ends a
+/// command. A bar behind a backslash is part of an argument.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/63
+fn ends_command(stmt: &[Tok], k: usize) -> bool {
+    stmt[k].text == BAR && (k == 0 || stmt[k - 1].text != ESCAPE)
 }
 
 /// FUNCTION: Whether the token at `i` is an argument of a command
@@ -1948,9 +2048,7 @@ pub(super) fn text_args(stmt: &[Tok], i: usize, heads: &[usize]) -> bool {
             return false;
         }
 
-        name == NORMAL
-            || (text_family(name)
-                && (at + 1..i).all(|k| stmt[k].text != BAR || stmt[k - 1].text == ESCAPE))
+        name == NORMAL || (text_family(name) && (at + 1..i).all(|k| !ends_command(stmt, k)))
     })
 }
 
@@ -2100,10 +2198,9 @@ pub(super) fn heads(stmt: &[Tok]) -> Vec<usize> {
     // keeps in the statement it opened: `if x | echo 1 | endif` is
     // three commands on one line.
     at.extend(
-        stmt.iter()
-            .enumerate()
-            .filter(|(_, tok)| tok.text == BAR)
-            .map(|(i, _)| i + 1)
+        (0..stmt.len())
+            .filter(|i| ends_command(stmt, *i))
+            .map(|i| i + 1)
             .filter(|next| *next < stmt.len()),
     );
 
@@ -2263,7 +2360,7 @@ fn in_type(stmt: &[Tok], i: usize) -> bool {
         // the token behind the walk says: a value before a comma in a
         // call would otherwise read as one.
         // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-        if (text == DOT || user_command(text)) && class_in_types(stmt, at) {
+        if (text == DOT || type_name(text)) && class_in_types(stmt, at) {
             continue;
         }
 

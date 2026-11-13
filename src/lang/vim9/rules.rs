@@ -1,9 +1,10 @@
-//! Vim9's own rules: which files a host sources, and what counts as
-//! public API.
+//! Vim9's own rules: which files a host sources, what counts as
+//! public API, and which file an autoload name states.
 //!
 //! License: GNU GPL 3.0
 
 use std::path::Path;
+use std::path::PathBuf;
 
 use crate::config::Config;
 use crate::model::Symbol;
@@ -15,6 +16,14 @@ const ENTRY_DIRS: &[&str] = &[
     "plugin", "ftplugin", "ftdetect", "syntax", "indent", "compiler", "colors", "keymap", "lang",
     "tests",
 ];
+
+// What ends the name of a script.
+pub const SCRIPT_EXT: &str = "vim";
+
+// What divides the parts of a classic autoload name, and the directory
+// those parts are a path under.
+const AUTOLOAD_SEP: char = '#';
+const AUTOLOAD_DIR: &str = "autoload";
 
 /// FUNCTION: True when Vim, or a test runner, sources this file
 /// directly. The rule is relative to the scanned root, so a vendored
@@ -102,6 +111,17 @@ pub fn fits(pat: &str, name: &str) -> bool {
     }
 }
 
+/// FUNCTION: The file and the function a classic autoload name
+/// states, as `foo#bar#Func` states `autoload/foo/bar.vim` and `Func`.
+pub fn autoload_parts(name: &str) -> Option<(PathBuf, &str)> {
+    let (prefix, func) = name.rsplit_once(AUTOLOAD_SEP)?;
+    let path = PathBuf::from(AUTOLOAD_DIR)
+        .join(prefix.replace(AUTOLOAD_SEP, "/"))
+        .with_extension(SCRIPT_EXT);
+
+    Some((path, func))
+}
+
 #[cfg(test)]
 mod shared_tests {
     use super::fits;
@@ -122,5 +142,26 @@ mod shared_tests {
         assert!(fits("g:colors", "g:colors"));
         assert!(!fits("g:colors", "g:colors_name"));
         assert!(!fits("g:colors_name", "g:colors"));
+    }
+}
+
+#[cfg(test)]
+mod autoload_tests {
+    use std::path::PathBuf;
+
+    use super::autoload_parts;
+
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/65
+    #[test]
+    fn an_autoload_name_states_its_file_and_its_function() {
+        assert_eq!(
+            autoload_parts("foo#bar#Func"),
+            Some((PathBuf::from("autoload/foo/bar.vim"), "Func"))
+        );
+    }
+
+    #[test]
+    fn a_name_with_no_separator_states_no_file() {
+        assert_eq!(autoload_parts("Func"), None);
     }
 }

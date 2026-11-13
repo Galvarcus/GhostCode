@@ -4,6 +4,7 @@
 //! License: GNU GPL 3.0
 
 use std::path::Path;
+use std::path::PathBuf;
 
 pub mod vim9;
 
@@ -43,6 +44,14 @@ pub trait Lang: Sync {
     /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
     fn shared_on(&self, _name: &str, _cfg: &Config) -> bool {
         false
+    }
+
+    /// METHOD: The file and the symbol a name states by its spelling
+    /// alone, with no import, relative to the root. A language with
+    /// no such name answers nothing.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/65
+    fn stated<'n>(&self, _name: &'n str) -> Option<(PathBuf, &'n str)> {
+        None
     }
 }
 

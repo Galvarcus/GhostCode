@@ -430,6 +430,22 @@ def Test_a_note_does_not_reach_the_quickfix_list(): void
   assert_equal([], getqflist())
 enddef
 
+# REFERENCE: https://github.com/Galvarcus/GhostCode/issues/64
+def Test_a_note_is_logged_with_its_file_line_and_scope(): void
+  LM.Clear()
+  Scan(join([
+    '{"schema": 1, "root": "/project",',
+    '"summary": {"symbols": 1, "ghost": 0, "unplaced_names": 0},',
+    '"findings": [], "skipped": [],',
+    '"notes": [{"file": "plugin/p.vim", "line": 3, "scope": "g:"}]}',
+  ], "\n"))
+
+  assert_equal(
+    ['Ghostcode - ghostcode.vim - Report: [WARN] plugin/p.vim:3 reads every g: variable, so none is reported'],
+    LM.History()->mapnew((_, m) => join(m.lines, ' '))->filter((_, l) => l =~# 'reads every')
+  )
+enddef
+
 export def RunAll(): void
   Test_the_quickfix_text_matches_the_old_format()
   Test_the_column_is_one_and_the_line_is_the_reported_one()
@@ -461,4 +477,5 @@ export def RunAll(): void
   Test_each_scope_setting_is_passed_when_the_user_set_it()
   Test_the_plugin_script_defines_no_default_for_a_scope_setting()
   Test_a_note_does_not_reach_the_quickfix_list()
+  Test_a_note_is_logged_with_its_file_line_and_scope()
 enddef

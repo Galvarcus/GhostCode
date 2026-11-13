@@ -2,6 +2,7 @@
 //!
 //! License: GNU GPL 3.0
 
+use crate::lang::vim9::excmds;
 use crate::lang::vim9::parse;
 
 /// What a token is. There is no keyword kind: a word is a word, and the
@@ -37,15 +38,35 @@ pub struct Tok {
     pub glued: bool,
 }
 
-// The operators of more than one character, longest first, so that `..`
-// never reads as two member dots and `==#` never as `==` and `#`.
+// The command that makes the rest of a script Vim9. The lines before
+// it are legacy script.
+const VIM9: &str = "vim9script";
+
+// The words that open and close a body. A `def` body is Vim9 and a
+// `function` body is legacy script, whatever the script around it is.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/67
+const DEF: &str = "def";
+const ENDDEF: &str = "enddef";
+const FUNCTION: &str = "function";
+const ENDFUNCTION: &str = "endfunction";
+
+// What can stand between `function` and the name it defines, and
+// what opens the parameters behind the name.
+const BANG: char = '!';
+const PARAMS: char = '(';
+
+// The marker of a comment in legacy script, and the marker of one
+// that stands between the lines of a continued command.
+const LEGACY_COMMENT: char = '"';
+const LEGACY_CARRIED: &str = "\"\\ ";
+
 // The words that open or close a block. A bracket left unclosed by a
 // broken line must not swallow the file, so one of these at the start
 // of a line ends the statement before it, whatever the bracket depth.
 const RESYNC: &[&str] = &[
-    "vim9script",
-    "def",
-    "enddef",
+    VIM9,
+    DEF,
+    ENDDEF,
     "class",
     "endclass",
     "enum",
@@ -69,8 +90,8 @@ const RESYNC: &[&str] = &[
     "finally",
     "endtry",
     "return",
-    "function",
-    "endfunction",
+    FUNCTION,
+    ENDFUNCTION,
     "import",
     "augroup",
     "command",
@@ -83,6 +104,8 @@ const RESYNC: &[&str] = &[
 const BAR: char = '|';
 const ESCAPE: char = '\\';
 
+// The operators of more than one character, longest first, so that `..`
+// never reads as two member dots and `==#` never as `==` and `#`.
 const OPS: &[&str] = &[
     "=<<", "...", "->>", "==#", "==?", "!=#", "!=?", "=~#", "=~?", "!~#", "!~?", "<=#", ">=#",
     "..=", "<<=", ">>=", "->", "=>", "..", "==", "!=", "<=", ">=", "&&", "||", "+=", "-=", "*=",
@@ -99,6 +122,10 @@ pub fn tokens(text: &str) -> Vec<Tok> {
     // Whether the line before ended inside the keys of a mapping, which
     // a line that opens with a backslash carries on.
     let mut keys = false;
+    // Whether no `vim9script` line stands above the line being read,
+    // and the body the line stands in, where it stands in one.
+    let mut script_legacy = true;
+    let mut body: Option<Body> = None;
 
     for (i, raw) in text.lines().enumerate() {
         let line = i as u32 + 1;
@@ -119,6 +146,41 @@ pub fn tokens(text: &str) -> Vec<Tok> {
         }
 
         let mut rest = raw.trim_start();
+
+        script_legacy = script_legacy && !opens_with(rest, VIM9);
+        body = body_at(body, rest);
+
+        let legacy = match body {
+            Some(Body::Legacy) => true,
+            Some(Body::Vim9) => false,
+            None => script_legacy,
+        };
+
+        // A comment between the lines of a continued command leaves
+        // nothing behind, so the line after it carries the command on
+        // as if the comment were not there. The marker opens no string
+        // a script would write, so it holds inside brackets as well.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/67
+        if legacy && rest.starts_with(LEGACY_CARRIED) {
+            continue;
+        }
+
+        // Legacy script marks a comment with a double quote, so a
+        // line that opens with one is no string, and a name in it is
+        // no use of the name. Inside brackets the line is read as
+        // before, because a bracket left open by a broken line must
+        // not turn a string into a comment.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/60
+        if legacy && depth == 0 && rest.starts_with(LEGACY_COMMENT) {
+            toks.push(Tok {
+                kind: TokKind::Comment,
+                text: rest.to_string(),
+                line,
+                glued: false,
+            });
+            push_newline(&mut toks, line);
+            continue;
+        }
 
         let carried = keys && rest.starts_with('\\');
 
@@ -170,11 +232,62 @@ pub fn tokens(text: &str) -> Vec<Tok> {
 /// FUNCTION: True when a line opens or closes a block, which ends any
 /// statement a broken line left open.
 fn opens_block(line: &str) -> bool {
-    let word: String = line
+    RESYNC.iter().any(|word| opens_with(line, word))
+}
+
+/// The kind of body a line stands in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Body {
+    Vim9,
+    Legacy,
+}
+
+/// FUNCTION: The body a line stands in, from the body of the line
+/// before it.
+///
+/// A body is closed only by the word that closes its own kind, so a
+/// word of the other kind inside it changes nothing. `function` is
+/// read with its abbreviations, and only where a name and its
+/// parameters follow, because `fu` is a name a script can give a
+/// variable.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/67
+fn body_at(body: Option<Body>, line: &str) -> Option<Body> {
+    let word = first_word(line);
+    let command = excmds::canonical(word);
+
+    match body {
+        None if word == DEF => Some(Body::Vim9),
+        None if command == Some(FUNCTION) && defines(&line[word.len()..]) => Some(Body::Legacy),
+        Some(Body::Vim9) if word == ENDDEF => None,
+        Some(Body::Legacy) if command == Some(ENDFUNCTION) => None,
+        _ => body,
+    }
+}
+
+/// FUNCTION: Whether what stands behind `function` defines one: a
+/// name, with or without a bang before it, and its parameters.
+fn defines(rest: &str) -> bool {
+    let rest = rest.strip_prefix(BANG).unwrap_or(rest);
+    let name = rest.trim_start();
+
+    name.len() < rest.len()
+        && name.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_' || c == '<')
+        && name.contains(PARAMS)
+}
+
+/// FUNCTION: The first word of a line.
+fn first_word(line: &str) -> &str {
+    let len = line
         .chars()
         .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
-        .collect();
-    RESYNC.contains(&word.as_str())
+        .count();
+
+    &line[..len]
+}
+
+/// FUNCTION: Whether the first word of a line is this one.
+fn opens_with(line: &str, word: &str) -> bool {
+    first_word(line) == word
 }
 
 /// FUNCTION: Add one token of the line, recording whether a space
@@ -726,5 +839,111 @@ mod tests {
                 .expect("Recover")
                 .glued
         );
+    }
+
+    /// A legacy script marks a comment with a double quote, so the
+    /// line is no string and a name in it is no use of the name.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/60
+    #[test]
+    fn a_line_that_opens_with_a_quote_in_a_legacy_script_is_a_comment() {
+        let toks = tokens("\" reads g:dead never\nlet g:dead = 1\n");
+
+        assert_eq!(toks[0].kind, TokKind::Comment);
+        assert!(toks.iter().all(|t| t.kind != TokKind::Str));
+    }
+
+    #[test]
+    fn a_line_that_opens_with_a_quote_in_a_vim9_script_is_a_string() {
+        let toks = tokens("vim9script\nvar l = [\n  \"a\",\n]\n");
+
+        assert!(toks.iter().any(|t| t.kind == TokKind::Str));
+    }
+
+    /// A `def` body is Vim9 in a legacy script too, and a broken list
+    /// there can open a line with a string.
+    #[test]
+    fn a_line_that_opens_with_a_quote_inside_brackets_is_a_string() {
+        let toks = tokens("def F()\n  var l = [\n    \"a\",\n  ]\nenddef\n");
+
+        assert!(toks.iter().any(|t| t.kind == TokKind::Str));
+    }
+
+    #[test]
+    fn a_line_that_opens_with_a_quote_behind_vim9script_is_no_comment() {
+        let toks = tokens("\" legacy\nvim9script\n\"a\"->F()\n");
+
+        assert_eq!(toks.iter().filter(|t| t.kind == TokKind::Str).count(), 1);
+    }
+
+    /// FUNCTION: How many statements a snippet holds, and whether any
+    /// token of it is a string.
+    fn shape(text: &str) -> (usize, bool) {
+        let toks = tokens(text);
+
+        (
+            toks.iter().filter(|t| t.kind == TokKind::Newline).count(),
+            toks.iter().any(|t| t.kind == TokKind::Str),
+        )
+    }
+
+    /// A legacy script writes a comment between the lines of a
+    /// continued command as `"\ text`. The comment is no string, and
+    /// the command goes on behind it.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/67
+    #[test]
+    fn a_legacy_comment_between_continued_lines_does_not_end_the_command() {
+        assert_eq!(shape("echo 1\n  \"\\ g:dead\n  \\ + 2\n"), (1, false));
+    }
+
+    #[test]
+    fn a_legacy_comment_between_continued_lines_inside_brackets_is_no_string() {
+        assert_eq!(shape("let x = [1,\n  \"\\ g:dead\n  \\ 2]\n"), (1, false));
+    }
+
+    /// The keys of a mapping are read in a mode of their own, which
+    /// the comment must leave as it found it.
+    #[test]
+    fn a_legacy_comment_between_the_lines_of_a_mapping_changes_no_token() {
+        let read = |text: &str| -> Vec<(TokKind, String)> {
+            tokens(text).into_iter().map(|t| (t.kind, t.text)).collect()
+        };
+
+        assert_eq!(
+            read("nnoremap x\n  \"\\ g:dead\n  \\ :call F()<CR>\n"),
+            read("nnoremap x\n  \\ :call F()<CR>\n")
+        );
+    }
+
+    /// A `function` body is legacy script in a Vim9 script too.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/67
+    #[test]
+    fn a_line_that_opens_with_a_quote_in_a_function_of_a_vim9_script_is_a_comment() {
+        let text = "vim9script\nfunction F()\n  \" reads g:dead\n  let g:dead = 1\nendfunction\n";
+
+        assert!(!shape(text).1);
+    }
+
+    #[test]
+    fn a_line_that_opens_with_a_quote_behind_a_function_of_a_vim9_script_is_a_string() {
+        let text = "vim9script\nfunction F()\nendfunction\n\"a\"->G()\n";
+
+        assert!(shape(text).1);
+    }
+
+    /// A `def` body is Vim9 in a legacy script.
+    #[test]
+    fn a_line_that_opens_with_a_quote_in_a_def_of_a_legacy_script_is_a_string() {
+        let text = "def F()\n  \"a\"->G()\nenddef\n";
+
+        assert!(shape(text).1);
+    }
+
+    /// `fu` abbreviates `function`, and it is a name a script can give
+    /// a variable.
+    #[test]
+    fn a_variable_named_as_an_abbreviation_of_function_opens_no_body() {
+        let text = "vim9script\nvar fu = 0\nfu = 1\n\"a\"->G()\n";
+
+        assert!(shape(text).1);
     }
 }
