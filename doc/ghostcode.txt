@@ -304,9 +304,13 @@ What Ghostcode doesn't detect           *ghostcode-what-ghostcode-doesnt-detect*
 - dynamic dispatch built from string concatenation, computed indices, or
   anything else that isn't a literal identifier or string
 - method calls on a variable with no declared or inferable type. When a
-  variable's type can't be determined, Ghostcode falls back to finding a
-  same-name match across the project. When several symbols share the name, it
-  counts every one of them as used
+  variable's type can't be determined, Ghostcode falls back to the class
+  members of that name across the project. When several classes declare the
+  name, it counts every one of them as used. A name behind a dot never counts
+  as a use of a function or a variable of that name
+- calls into a file outside the project root. An import that names another
+  plugin, or a copy of one under a directory such as `deps/`, is not followed,
+  so nothing in that file is counted as used through it
 - a script variable or a field that the code only writes and never reads. A
   write counts as a use there. Inside a function body it does not, so a local
   the code only assigns to is reported with the other locals
