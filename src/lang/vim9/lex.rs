@@ -37,8 +37,6 @@ pub struct Tok {
     pub glued: bool,
 }
 
-// The operators of more than one character, longest first, so that `..`
-// never reads as two member dots and `==#` never as `==` and `#`.
 // The command that makes the rest of a script Vim9. The lines before
 // it are legacy script.
 const VIM9: &str = "vim9script";
@@ -90,6 +88,8 @@ const RESYNC: &[&str] = &[
 const BAR: char = '|';
 const ESCAPE: char = '\\';
 
+// The operators of more than one character, longest first, so that `..`
+// never reads as two member dots and `==#` never as `==` and `#`.
 const OPS: &[&str] = &[
     "=<<", "...", "->>", "==#", "==?", "!=#", "!=?", "=~#", "=~?", "!~#", "!~?", "<=#", ">=#",
     "..=", "<<=", ">>=", "->", "=>", "..", "==", "!=", "<=", ">=", "&&", "||", "+=", "-=", "*=",

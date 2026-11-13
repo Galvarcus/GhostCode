@@ -34,7 +34,7 @@ impl Lang for Vim9 {
     }
 
     fn extensions(&self) -> &[&'static str] {
-        &["vim"]
+        &[rules::SCRIPT_EXT]
     }
 
     fn is_entry(&self, _root: &Path, file: &Path) -> bool {

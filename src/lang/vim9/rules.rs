@@ -17,11 +17,13 @@ const ENTRY_DIRS: &[&str] = &[
     "tests",
 ];
 
-// What divides the parts of a classic autoload name, the directory
-// those parts are a path under, and what ends the name of a script.
+// What ends the name of a script.
+pub const SCRIPT_EXT: &str = "vim";
+
+// What divides the parts of a classic autoload name, and the directory
+// those parts are a path under.
 const AUTOLOAD_SEP: char = '#';
 const AUTOLOAD_DIR: &str = "autoload";
-const SCRIPT_EXT: &str = "vim";
 
 /// FUNCTION: True when Vim, or a test runner, sources this file
 /// directly. The rule is relative to the scanned root, so a vendored

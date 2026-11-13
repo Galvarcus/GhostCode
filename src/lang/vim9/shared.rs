@@ -74,9 +74,9 @@ const BODY_END: &[&str] = &["enddef", "endfunction"];
 // and each scope it can therefore hold, with the function that gives
 // it. The key does not say which function it came from, and the
 // functions are called far more often for something else, so the key
-// is what credits. It credits a scope only in a project that calls
-// the function of that scope, because without the call the key is one
-// of a dictionary of the project.
+// is what credits. It credits a scope only in a project that names
+// the function of that scope, because without the function the key is
+// one of a dictionary of the project.
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/61
 const VARIABLES: &str = "variables";
 const HELD: &[(char, &str)] = &[
@@ -130,7 +130,7 @@ pub(super) enum Spelling {
         head: String,
         tail: String,
         whole: bool,
-        /// The function the project must call for the read to hold.
+        /// The function the project must name for the read to hold.
         needs: Option<&'static str>,
     },
 }
@@ -155,7 +155,7 @@ impl Spelling {
     }
 
     /// METHOD: Every variable of one scope, read from what a function
-    /// gives, so only where the project calls that function.
+    /// gives, so only where the project names that function.
     /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/61
     fn held(scope: char, by: &'static str) -> Self {
         Self::Fit {
