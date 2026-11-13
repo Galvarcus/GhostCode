@@ -13,6 +13,7 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::path::PathBuf;
 
+use crate::lang;
 use crate::model::Analysis;
 use crate::model::Kind;
 use crate::model::Reference;
@@ -25,11 +26,6 @@ pub struct Resolved {
     pub targets: HashMap<usize, Vec<SymbolId>>,
     pub unplaced: usize,
 }
-
-/// What divides the parts of a classic autoload name, and the
-/// directory those parts are a path under.
-const AUTOLOAD_SEP: char = '#';
-const AUTOLOAD_DIR: &str = "autoload";
 
 /// Every way a reference can be looked up, each built once.
 #[derive(Debug, Default)]
@@ -155,7 +151,7 @@ impl<'a> Index<'a> {
             return vec![here];
         }
 
-        if let Some(id) = self.autoload(&r.name) {
+        if let Some(id) = self.stated(r) {
             return vec![id];
         }
 
@@ -276,16 +272,17 @@ impl<'a> Index<'a> {
             .map(|id| (*id).clone())
     }
 
-    /// METHOD: The symbol a classic autoload name states, as
-    /// `foo#bar#Func` states `autoload/foo/bar.vim::Func`.
-    fn autoload(&self, name: &str) -> Option<SymbolId> {
-        let (path, func) = autoload_parts(name)?;
+    /// METHOD: The symbol a name states by its spelling alone, where
+    /// the language of the file has such names. The rule belongs to
+    /// the language, as the autoload names of Vim do.
+    fn stated(&self, r: &Reference) -> Option<SymbolId> {
+        let (path, func) = stated_parts(r)?;
         let id = SymbolId::of(&path, None, func);
 
         self.by_id.contains_key(&id).then_some(id)
     }
 
-    /// METHOD: Whether a reference is an autoload name of a file the
+    /// METHOD: Whether a reference is a name that states a file the
     /// project declares nothing in, which is no unplaced name.
     ///
     /// The name states its file. A file with no symbol of the project
@@ -296,7 +293,7 @@ impl<'a> Index<'a> {
     /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
     fn foreign(&self, r: &Reference) -> bool {
         r.recv.is_none()
-            && autoload_parts(&r.name).is_some_and(|(path, _)| !self.files.contains(path.as_path()))
+            && stated_parts(r).is_some_and(|(path, _)| !self.files.contains(path.as_path()))
     }
 
     /// METHOD: The symbol a named import binds, under the name this
@@ -325,14 +322,10 @@ impl<'a> Index<'a> {
     }
 }
 
-/// FUNCTION: The file and the function a classic autoload name
-/// states, as `foo#bar#Func` states `autoload/foo/bar.vim` and `Func`.
-fn autoload_parts(name: &str) -> Option<(PathBuf, &str)> {
-    let (prefix, func) = name.rsplit_once(AUTOLOAD_SEP)?;
-    let path =
-        PathBuf::from(AUTOLOAD_DIR).join(format!("{}.vim", prefix.replace(AUTOLOAD_SEP, "/")));
-
-    Some((path, func))
+/// FUNCTION: The file and the symbol the name of a reference states,
+/// asked of the language of the file that makes the reference.
+fn stated_parts(r: &Reference) -> Option<(PathBuf, &str)> {
+    lang::for_path(&r.file)?.stated(&r.name)
 }
 
 /// FUNCTION: Resolve every reference of an analysis.
