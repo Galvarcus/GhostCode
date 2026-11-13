@@ -86,15 +86,17 @@ git clone https://github.com/Galvarcus/GhostCode.git \
   ~/.vim/pack/vendor/start/GhostCode
 ```
 
+<!-- vimdoc-ignore-end -->
+
 The plugin looks for the binary at `g:ghostcode_bin`, then on `$PATH`,
 then in a `bin/` directory of its own. Create that directory and put a
 release asset in it, named `ghostcode`, or `ghostcode.exe` on Windows,
 to keep the binary beside the plugin. When the plugin finds no binary,
 it says so through Logger and names each place it looked.
 
-<!-- vimdoc-ignore-end -->
-
 ## Usage
+
+<!-- vimdoc-ignore-start -->
 
 ```bash
 ghostcode [path]
@@ -134,6 +136,8 @@ say so rather than guess. The counts in `summary` are diagnostics
 rather than contract: nothing is derived from them, and one may be
 renamed without the schema rising.
 
+<!-- vimdoc-ignore-end -->
+
 ### In Vim
 
 Ghostcode adds one command:
@@ -141,6 +145,9 @@ Ghostcode adds one command:
 ```vim
 :GhostCode [path]
 ```
+
+`path` is the root of the project to scan. It defaults to the working
+directory of Vim.
 
 It puts the findings in the quickfix list, opens the list when it finds
 any, and shows a summary through Logger:
@@ -160,6 +167,8 @@ autoload/util.vim|58 col 1| [ghost] variable g_never_read
 Logger reads its options for Ghostcode from variables named
 `g:logger_ghostcode_<option>`. See the Logger README for each option.
 
+<!-- vimdoc-ignore-start -->
+
 ### In CI
 
 Run the binary and fail the build on any finding:
@@ -168,6 +177,8 @@ Run the binary and fail the build on any finding:
 ghostcode --format=text . | tee findings.txt
 test ! -s findings.txt
 ```
+
+<!-- vimdoc-ignore-end -->
 
 ## Settings
 
@@ -263,6 +274,8 @@ In Vim the same message goes to the log and not to the quickfix list.
 another plugin to read. Give the full spelling. A `*` stands for any
 run of characters. Ghostcode never reports a variable listed there.
 
+<!-- vimdoc-ignore-start -->
+
 ### Command line
 
 A flag overrides the file:
@@ -277,6 +290,8 @@ A flag overrides the file:
 | `--buffer-vars true`, `--buffer-vars false` | Override `findings.buffer_vars`. |
 | `--window-vars true`, `--window-vars false` | Override `findings.window_vars`. |
 | `--tab-vars true`, `--tab-vars false` | Override `findings.tab_vars`. |
+
+<!-- vimdoc-ignore-end -->
 
 ### Vim
 
@@ -293,12 +308,11 @@ A flag overrides the file:
 ## What Ghostcode scans
 
 Ghostcode reads the files git does not ignore, whether git tracks them
-or not, and `--no-ignore` turns the exclusions off. Outside a
-repository nothing is ignored and every file is read. It stops at the
-project root and follows no symlink out of it, because a finding
-outside the root is one you cannot act on. It skips hidden
-directories, as Vim's own `globpath` does; name a file in `entry` to
-scan one anyway.
+or not. Outside a repository nothing is ignored and every file is
+read. It stops at the project root and follows no symlink out of it,
+because a finding outside the root is one you cannot act on. It skips
+hidden directories, as Vim's own `globpath` does; name a file in
+`entry` to scan one anyway.
 
 ## What Ghostcode detects
 
