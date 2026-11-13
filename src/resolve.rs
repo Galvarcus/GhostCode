@@ -9,6 +9,7 @@
 //! License: GNU GPL 3.0
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -24,6 +25,11 @@ pub struct Resolved {
     pub targets: HashMap<usize, Vec<SymbolId>>,
     pub unplaced: usize,
 }
+
+/// What divides the parts of a classic autoload name, and the
+/// directory those parts are a path under.
+const AUTOLOAD_SEP: char = '#';
+const AUTOLOAD_DIR: &str = "autoload";
 
 /// Every way a reference can be looked up, each built once.
 #[derive(Debug, Default)]
@@ -42,6 +48,14 @@ pub struct Index<'a> {
     /// a reference elsewhere in the project from crediting it.
     /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
     scoped: HashMap<&'a SymbolId, HashMap<&'a str, &'a SymbolId>>,
+    /// Every file that declares a symbol, which is how an autoload
+    /// name is told from one of another plugin.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+    files: HashSet<&'a Path>,
+    /// Per file, the names an import binds to a file the scan does
+    /// not hold: its alias, and each name it imports.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+    outside: HashMap<&'a Path, HashSet<&'a str>>,
 }
 
 impl<'a> Index<'a> {
@@ -52,6 +66,7 @@ impl<'a> Index<'a> {
 
         for sym in &a.syms {
             idx.by_id.insert(&sym.id, sym);
+            idx.files.insert(sym.file.as_path());
 
             // A scoped symbol enters no index keyed by name alone.
             if let Some(scope) = &sym.scope {
@@ -71,6 +86,13 @@ impl<'a> Index<'a> {
             if matches!(sym.kind, Kind::Class | Kind::Enum | Kind::Interface) {
                 idx.containers.entry(&sym.name).or_default().push(&sym.id);
             }
+        }
+
+        for imp in &a.outside {
+            let names = idx.outside.entry(&imp.from).or_default();
+
+            names.extend(imp.alias.as_deref());
+            names.extend(imp.names.iter().map(|(local, _)| local.as_str()));
         }
 
         for imp in &a.imports {
@@ -107,6 +129,16 @@ impl<'a> Index<'a> {
 
         if let Some(recv) = &r.recv {
             return self.dotted(r, recv);
+        }
+
+        // A name behind a dot whose receiver has no type is a member
+        // of some class or a key of a dictionary. It is never a bare
+        // name, so it credits no variable, no function and no import
+        // of that spelling. The class is unknown, so every member of
+        // the name still counts as used.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/53
+        if r.member {
+            return self.cloned(self.members.get(r.name.as_str()));
         }
 
         // A variable of the body making the reference wins over
@@ -184,12 +216,18 @@ impl<'a> Index<'a> {
     /// nothing declares. Counting it is counting the analyzer's own
     /// data twice.
     /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+    ///
+    /// A name an import binds to a file the scan does not hold is the
+    /// same case. The plugin it names is outside the root, so no
+    /// symbol can take the credit, and the importing file did declare
+    /// the name.
     fn knows(&self, r: &Reference) -> bool {
+        let file = r.file.as_path();
+        let name = r.name.as_str();
+
         r.recv.is_none()
-            && self
-                .aliases
-                .get(r.file.as_path())
-                .is_some_and(|a| a.contains_key(r.name.as_str()))
+            && (self.aliases.get(file).is_some_and(|a| a.contains_key(name))
+                || self.outside.get(file).is_some_and(|o| o.contains(name)))
     }
 
     /// METHOD: Whether a reference stood behind a dot of a receiver
@@ -227,11 +265,24 @@ impl<'a> Index<'a> {
     /// METHOD: The symbol a classic autoload name states, as
     /// `foo#bar#Func` states `autoload/foo/bar.vim::Func`.
     fn autoload(&self, name: &str) -> Option<SymbolId> {
-        let (prefix, func) = name.rsplit_once('#')?;
-        let path = PathBuf::from("autoload").join(format!("{}.vim", prefix.replace('#', "/")));
+        let (path, func) = autoload_parts(name)?;
         let id = SymbolId::of(&path, None, func);
 
         self.by_id.contains_key(&id).then_some(id)
+    }
+
+    /// METHOD: Whether a reference is an autoload name of a file the
+    /// project declares nothing in, which is no unplaced name.
+    ///
+    /// The name states its file. A file with no symbol of the project
+    /// is another plugin's, or a legacy script the scan does not read,
+    /// and no rule could place the function. Where the project does
+    /// declare symbols in the file, a function it lacks may be one
+    /// the scan missed, so that one stays counted.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+    fn foreign(&self, r: &Reference) -> bool {
+        r.recv.is_none()
+            && autoload_parts(&r.name).is_some_and(|(path, _)| !self.files.contains(path.as_path()))
     }
 
     /// METHOD: The symbol a named import binds, under the name this
@@ -260,6 +311,16 @@ impl<'a> Index<'a> {
     }
 }
 
+/// FUNCTION: The file and the function a classic autoload name
+/// states, as `foo#bar#Func` states `autoload/foo/bar.vim` and `Func`.
+fn autoload_parts(name: &str) -> Option<(PathBuf, &str)> {
+    let (prefix, func) = name.rsplit_once(AUTOLOAD_SEP)?;
+    let path =
+        PathBuf::from(AUTOLOAD_DIR).join(format!("{}.vim", prefix.replace(AUTOLOAD_SEP, "/")));
+
+    Some((path, func))
+}
+
 /// FUNCTION: Resolve every reference of an analysis.
 pub fn all(a: &Analysis) -> Resolved {
     let idx = Index::build(a);
@@ -272,8 +333,9 @@ pub fn all(a: &Analysis) -> Resolved {
             // A name the language owns, and a name the analyzer
             // recorded itself, are both names it placed: neither is a
             // gap, and neither credits a symbol. A key behind a dot is
-            // no name the project could declare.
-            if !r.owned && !idx.knows(r) && !idx.keyed(r) {
+            // no name the project could declare, and neither is an
+            // autoload function of a file the project does not hold.
+            if !r.owned && !idx.knows(r) && !idx.keyed(r) && !idx.foreign(r) {
                 out.unplaced += 1;
             }
 
@@ -372,9 +434,10 @@ mod tests {
     /// A body sees its own variables and no other body's, which is
     /// what Vim9 compiles. A def nested inside a body does read that
     /// body's variables, and the inner body's id does not name the
-    /// outer one, so such a read is left unplaced rather than
-    /// credited to a guess: `unplaced_names_by_file` then keeps the
-    /// variable off the report.
+    /// outer one, so the scan states the variable as the target of
+    /// such a read. A read with no target is left unplaced rather
+    /// than credited to a guess: `unplaced_names_by_file` then keeps
+    /// the variable off the report.
     /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
     #[test]
     fn a_scoped_symbol_is_invisible_from_another_scope() {
@@ -814,6 +877,146 @@ mod tests {
         assert!(
             spent < std::time::Duration::from_secs(2),
             "resolution took {spent:?}, which is not an index lookup"
+        );
+    }
+
+    /// An autoload name states its file. Where the project holds no
+    /// symbol of that file, the function is another plugin's, and no
+    /// rule could place it.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+    #[test]
+    fn an_autoload_function_of_a_file_outside_the_project_is_not_an_unplaced_name() {
+        let a = Analysis {
+            syms: vec![sym("autoload/a.vim", None, "Helper", Kind::Function)],
+            refs: vec![re("autoload/a.vim", None, "other#plugin#Enable")],
+            ..Analysis::default()
+        };
+
+        assert_eq!(all(&a).unplaced, 0);
+    }
+
+    /// Where the project does hold the file, a function it lacks may
+    /// be one the scan missed, so that one stays counted.
+    #[test]
+    fn an_autoload_function_missing_from_a_file_of_the_project_is_an_unplaced_name() {
+        let a = Analysis {
+            syms: vec![sym("autoload/a.vim", None, "Helper", Kind::Function)],
+            refs: vec![re("plugin/p.vim", None, "a#Missing")],
+            ..Analysis::default()
+        };
+
+        assert_eq!(all(&a).unplaced, 1);
+    }
+
+    /// FUNCTION: An import of a file the scan does not hold.
+    fn outside(from: &str, alias: Option<&str>, names: &[(&str, &str)]) -> Import {
+        Import {
+            from: PathBuf::from(from),
+            to: PathBuf::from("import/Other/lib.vim"),
+            alias: alias.map(str::to_string),
+            names: names
+                .iter()
+                .map(|(local, orig)| (local.to_string(), orig.to_string()))
+                .collect(),
+        }
+    }
+
+    /// An import of a file outside the root of the scan names a
+    /// plugin the scan does not hold. Its alias is a name the file
+    /// declares all the same, and no rule could place it.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+    #[test]
+    fn the_alias_of_an_import_outside_the_scan_is_not_an_unplaced_name() {
+        let a = Analysis {
+            outside: vec![outside("tests/t.vim", Some("LM"), &[])],
+            refs: vec![re("tests/t.vim", None, "LM")],
+            ..Analysis::default()
+        };
+
+        assert_eq!(all(&a).unplaced, 0);
+    }
+
+    #[test]
+    fn a_name_imported_from_outside_the_scan_is_not_an_unplaced_name() {
+        let a = Analysis {
+            outside: vec![outside("tests/t.vim", None, &[("Log", "Logger")])],
+            refs: vec![re("tests/t.vim", None, "Log")],
+            ..Analysis::default()
+        };
+
+        assert_eq!(all(&a).unplaced, 0);
+    }
+
+    /// The import binds the alias in its own file and in no other.
+    #[test]
+    fn the_alias_of_an_import_outside_the_scan_is_unplaced_in_another_file() {
+        let a = Analysis {
+            outside: vec![outside("tests/t.vim", Some("LM"), &[])],
+            refs: vec![re("plugin/p.vim", None, "LM")],
+            ..Analysis::default()
+        };
+
+        assert_eq!(all(&a).unplaced, 1);
+    }
+
+    /// FUNCTION: A reference behind a dot whose receiver has no type.
+    fn key(file: &str, body: &str, name: &str) -> Reference {
+        Reference {
+            member: true,
+            ..re_in(file, body, name)
+        }
+    }
+
+    /// A name behind a dot is a member or a key. A variable of the
+    /// body is never read through a dot, so a key of that spelling
+    /// gives it no credit.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/53
+    #[test]
+    fn a_name_behind_a_dot_does_not_credit_a_variable_of_the_body() {
+        let a = Analysis {
+            syms: vec![local_sym("autoload/a.vim", "F", "root")],
+            ..Analysis::default()
+        };
+
+        assert!(ids(&a, &key("autoload/a.vim", "F", "root")).is_empty());
+    }
+
+    #[test]
+    fn a_name_behind_a_dot_does_not_credit_a_function_of_the_file() {
+        let a = Analysis {
+            syms: vec![sym("autoload/a.vim", None, "Helper", Kind::Function)],
+            ..Analysis::default()
+        };
+
+        assert!(ids(&a, &key("autoload/a.vim", "F", "Helper")).is_empty());
+    }
+
+    #[test]
+    fn a_name_behind_a_dot_does_not_credit_a_script_variable() {
+        let a = Analysis {
+            syms: vec![sym("autoload/a.vim", None, "count", Kind::Variable)],
+            ..Analysis::default()
+        };
+
+        assert!(ids(&a, &key("autoload/a.vim", "F", "count")).is_empty());
+    }
+
+    /// The type of the receiver is unknown, so every class member of
+    /// the name still takes the credit.
+    #[test]
+    fn a_name_behind_a_dot_still_credits_every_member_of_the_name() {
+        let a = Analysis {
+            syms: vec![
+                sym("autoload/m.vim", Some("Menu"), "Open", Kind::Method),
+                sym("autoload/p.vim", Some("Popup"), "Open", Kind::Method),
+                sym("autoload/a.vim", None, "Open", Kind::Function),
+            ],
+            ..Analysis::default()
+        };
+
+        assert_eq!(
+            ids(&a, &key("autoload/a.vim", "F", "Open")),
+            vec!["autoload/m.vim::Menu.Open", "autoload/p.vim::Popup.Open"]
         );
     }
 }

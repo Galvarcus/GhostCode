@@ -346,3 +346,27 @@ fn the_word_before_a_class_another_extends_is_not_a_reference() {
     assert_eq!(count(text, "extends"), 0);
     assert_eq!(count(text, "Base"), 1);
 }
+
+/// A class stands in a list of types as a builtin type does, so a
+/// type word behind one is still a type.
+#[test]
+fn a_type_word_behind_a_class_in_a_func_type_is_marked_as_vims() {
+    let text = "vim9script\ndef F(Visit: func(BI.Item, list<BI.Item>)): void\nenddef\n";
+
+    assert!(refs(text)
+        .iter()
+        .filter(|r| r.name == "list")
+        .all(|r| r.owned));
+}
+
+/// A value behind a comma in a call is no type, whatever stands
+/// before the comma.
+#[test]
+fn a_value_behind_a_class_in_a_call_is_not_marked() {
+    let text = "vim9script\ndef F()\n  Run(Item, list)\nenddef\n";
+
+    assert!(refs(text)
+        .iter()
+        .filter(|r| r.name == "list")
+        .all(|r| !r.owned));
+}

@@ -121,8 +121,14 @@ pub fn analyze(root: &Path, cfg: &Config) -> anyhow::Result<Report> {
 
     // An import to a file the scan never discovered names nothing: it
     // is outside the root, or git ignores it, which is the same answer
-    // discovery gave for the file itself.
-    a.imports.retain(|i| files.contains(&i.to));
+    // discovery gave for the file itself. It is kept apart, because
+    // the names it binds are no gap of the analyzer.
+    // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+    let (inside, outside) = std::mem::take(&mut a.imports)
+        .into_iter()
+        .partition(|i| files.contains(&i.to));
+    a.imports = inside;
+    a.outside = outside;
 
     // An exported symbol is public API, so it is a root as well as
     // being unreportable: what its body calls is used.
@@ -426,12 +432,12 @@ fn classify(
 /// FUNCTION: The names a file holds a reference to that resolution
 /// could not place.
 ///
-/// A def inside a def reads the enclosing body's variables, and the
-/// inner body's id does not name the outer one, so such a read is
-/// placed only where the file declares the name once. Where it is not
+/// A read of a variable that no body around it declares is placed
+/// only where the file declares the name once. Where it is not
 /// placed, the analyzer has seen a read of that name and cannot say
 /// which variable it meant, so it must not claim any variable of that
-/// name is unread.
+/// name is unread. A def inside a def that reads a variable of the
+/// body around it is not this case: the scan names that variable.
 ///
 /// A reference the language owns is not such a read. The analyzer
 /// placed it: the name is the language's there, and no variable was

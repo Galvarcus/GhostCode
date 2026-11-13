@@ -254,6 +254,12 @@ pub struct Analysis {
     pub refs: Vec<Reference>,
     pub roots: Vec<SymbolId>,
     pub imports: Vec<Import>,
+    /// The imports that name a file the scan does not hold: a plugin
+    /// outside the root, or a file git ignores. Such an import
+    /// resolves to nothing, and the names it binds are still names
+    /// the importing file declares.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+    pub outside: Vec<Import>,
     pub texts: Vec<Text>,
     pub fits: Vec<Fit>,
 }

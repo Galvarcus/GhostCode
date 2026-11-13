@@ -182,3 +182,265 @@ fn a_call_after_a_bar_keeps_its_reference() {
 
     assert_eq!(count(text, "Fn"), 1);
 }
+
+/// A range stands between the colon and the command, so the command
+/// behind it is where Vim reads one, as it is with no range. `bwipe`
+/// abbreviates `bwipeout`, so it is marked rather than dropped.
+#[test]
+fn an_abbreviated_command_behind_a_range_is_marked_as_vims() {
+    let text = "vim9script\ndef F()\n  silent! :%bwipe!\nenddef\n";
+
+    assert!(one(text, "bwipe").owned);
+}
+
+#[test]
+fn a_command_written_whole_behind_a_range_is_dropped() {
+    let text = "vim9script\ndef F()\n  :%bwipeout!\nenddef\n";
+
+    assert_eq!(count(text, "bwipeout"), 0);
+}
+
+#[test]
+fn a_command_behind_a_colon_alone_is_dropped() {
+    let text = "vim9script\ndef F()\n  :bwipeout!\nenddef\n";
+
+    assert_eq!(count(text, "bwipeout"), 0);
+}
+
+#[test]
+fn a_command_behind_a_range_of_lines_is_marked_as_vims() {
+    let text = "vim9script\ndef F()\n  :1,$ bwipe\nenddef\n";
+
+    assert!(one(text, "bwipe").owned);
+}
+
+#[test]
+fn a_command_behind_an_offset_from_the_current_line_is_marked_as_vims() {
+    let text = "vim9script\ndef F()\n  :.;.+2 bwipe\nenddef\n";
+
+    assert!(one(text, "bwipe").owned);
+}
+
+/// A colon inside an expression opens no command: the word behind
+/// the colon of a conditional is a value.
+#[test]
+fn a_value_behind_the_colon_of_a_conditional_is_not_marked() {
+    let text = "vim9script\ndef F()\n  echo ok ? 1 : bwipe\nenddef\n";
+
+    assert!(!one(text, "bwipe").owned);
+}
+
+/// A lambda written as a block holds whole commands, and the lexer
+/// keeps the block in the statement that opens it, so each line of
+/// the block is where Vim reads a command.
+#[test]
+fn a_command_on_the_first_line_of_a_lambda_block_is_dropped() {
+    let text = "vim9script\ndef F()\n  timer_start(0, (_) => {\n    execute Cmd\n  })\nenddef\n";
+
+    assert_eq!(count(text, "execute"), 0);
+}
+
+#[test]
+fn a_command_on_a_later_line_of_a_lambda_block_is_dropped() {
+    let text =
+        "vim9script\ndef F()\n  timer_start(0, (_) => {\n    G()\n    redraw\n  })\nenddef\n";
+
+    assert_eq!(count(text, "redraw"), 0);
+}
+
+#[test]
+fn a_command_behind_a_modifier_in_a_lambda_block_is_dropped() {
+    let text = "vim9script\ndef F()\n  timer_start(0, (_) => {\n    silent! redraw\n  })\nenddef\n";
+
+    assert_eq!(count(text, "redraw"), 0);
+}
+
+#[test]
+fn a_command_in_a_lambda_block_past_a_nested_block_is_dropped() {
+    let text = "vim9script\ndef F()\n  A(() => {\n    B(() => {\n      G()\n    })\n    redraw\n  })\nenddef\n";
+
+    assert_eq!(count(text, "redraw"), 0);
+}
+
+/// A line that continues an expression inside the block opens no
+/// command, so a word there keeps its reference.
+#[test]
+fn a_value_on_a_continued_line_of_a_lambda_block_keeps_its_reference() {
+    let text = "vim9script\ndef F()\n  A(() => {\n    G(1,\n      redraw)\n  })\nenddef\n";
+
+    assert_eq!(count(text, "redraw"), 1);
+}
+
+/// A dictionary a lambda returns is no block, so its first key line
+/// opens no command.
+#[test]
+fn a_value_in_a_dictionary_a_lambda_returns_keeps_its_reference() {
+    let text = "vim9script\ndef F()\n  A(() => ({\n    k: 1,\n    v: [\n      redraw]}))\nenddef\n";
+
+    assert_eq!(count(text, "redraw"), 1);
+}
+
+#[test]
+fn a_value_after_a_command_in_a_lambda_block_keeps_its_reference() {
+    let text = "vim9script\ndef F()\n  A(() => {\n    echo redraw\n  })\nenddef\n";
+
+    assert_eq!(count(text, "redraw"), 1);
+}
+
+/// The argument of a command that names something Vim keeps: a
+/// highlight group, a color scheme, a locale, a filetype. The
+/// project declares nothing one of them could mean.
+#[test]
+fn the_group_an_echohl_command_names_is_marked_as_vims() {
+    let text = "vim9script\ndef F()\n  echohl ErrorMsg\nenddef\n";
+
+    assert!(one(text, "ErrorMsg").owned);
+}
+
+#[test]
+fn the_scheme_a_colorscheme_command_names_is_marked_as_vims() {
+    let text = "vim9script\ndef F()\n  colorscheme default\nenddef\n";
+
+    assert!(one(text, "default").owned);
+}
+
+#[test]
+fn the_category_a_language_command_names_is_marked_as_vims() {
+    let text = "vim9script\ndef F()\n  language messages de_DE.UTF-8\nenddef\n";
+
+    assert!(one(text, "messages").owned);
+}
+
+#[test]
+fn the_locale_a_language_command_names_is_marked_as_vims() {
+    let text = "vim9script\ndef F()\n  language messages de_DE.UTF-8\nenddef\n";
+
+    assert!(one(text, "de_DE").owned);
+}
+
+#[test]
+fn the_filetype_a_setfiletype_command_names_is_marked_as_vims() {
+    let text = "vim9script\nautocmd BufRead,BufNewFile *.fountain setfiletype fountain\n";
+
+    assert!(refs(text)
+        .iter()
+        .filter(|r| r.name == "fountain")
+        .all(|r| r.owned));
+}
+
+/// A command ends at a bar, and the word behind the bar is no
+/// argument of it.
+#[test]
+fn a_value_behind_the_bar_of_an_echohl_command_is_not_marked() {
+    let text = "vim9script\ndef F()\n  echohl None | echo Later\nenddef\n";
+
+    assert!(!one(text, "Later").owned);
+}
+
+/// A word with a capital at the head of a statement is a user
+/// command: Vim9 script reads nothing else there unless the word is
+/// called, reached into or assigned to.
+#[test]
+fn a_user_command_with_a_bang_is_marked_as_vims() {
+    let text = "vim9script\ndef F()\n  PluginOpen!\nenddef\n";
+
+    assert!(one(text, "PluginOpen").owned);
+}
+
+#[test]
+fn a_user_command_with_an_argument_is_marked_as_vims() {
+    let text = "vim9script\ndef F()\n  PluginOpen draft\nenddef\n";
+
+    assert!(one(text, "PluginOpen").owned);
+}
+
+#[test]
+fn a_function_called_at_the_head_of_a_statement_is_not_marked() {
+    let text = "vim9script\ndef F()\n  PluginOpen()\nenddef\n";
+
+    assert!(!one(text, "PluginOpen").owned);
+}
+
+#[test]
+fn a_class_reached_into_at_the_head_of_a_statement_is_not_marked() {
+    let text = "vim9script\ndef F()\n  Menu.Open()\nenddef\n";
+
+    assert!(!one(text, "Menu").owned);
+}
+
+#[test]
+fn a_word_with_a_capital_behind_a_command_is_not_marked() {
+    let text = "vim9script\ndef F()\n  echo PluginOpen\nenddef\n";
+
+    assert!(!one(text, "PluginOpen").owned);
+}
+
+/// `:messages` takes a keyword or a count, and nothing of the project.
+#[test]
+fn the_keyword_a_messages_command_takes_is_marked_as_vims() {
+    let text = "vim9script\ndef F()\n  messages clear\nenddef\n";
+
+    assert!(one(text, "clear").owned);
+}
+
+#[test]
+fn the_file_a_source_command_names_is_marked_as_vims() {
+    let text = "vim9script\nsource plugin/logger.vim\n";
+
+    assert!(one(text, "logger").owned);
+}
+
+/// A legacy `:function` line states parameters and flags, and none
+/// of them is a name the project could declare.
+#[test]
+fn a_flag_behind_a_legacy_function_signature_is_marked_as_vims() {
+    let text = "function! plug#ext#init(ext) abort\nendfunction\n";
+
+    assert!(one(text, "abort").owned);
+}
+
+#[test]
+fn a_parameter_of_a_legacy_function_is_marked_as_vims() {
+    let text = "function! plug#ext#init(ext) abort\nendfunction\n";
+
+    assert!(one(text, "ext").owned);
+}
+
+/// `a:` holds the arguments of a legacy function and `l:` its
+/// variables, so the name behind either is no symbol of the project.
+#[test]
+fn a_name_behind_the_argument_scope_is_marked_as_vims() {
+    let text = "function! F(ext)\n  call a:ext.add('x')\nendfunction\n";
+
+    assert!(refs(text)
+        .iter()
+        .filter(|r| r.name == "ext")
+        .all(|r| r.owned));
+}
+
+#[test]
+fn a_name_behind_the_local_scope_is_marked_as_vims() {
+    let text = "function! F()\n  let l:space = g:sep . l:space\nendfunction\n";
+
+    assert!(refs(text)
+        .iter()
+        .filter(|r| r.name == "space")
+        .all(|r| r.owned));
+}
+
+/// The colon of a conditional stands apart from the names around it,
+/// so the name behind it is a value.
+#[test]
+fn a_value_behind_the_colon_of_a_conditional_named_like_a_scope_is_not_marked() {
+    let text = "vim9script\ndef F(a: bool, l: number)\n  echo a ? l : Width\nenddef\n";
+
+    assert!(!one(text, "Width").owned);
+}
+
+/// `function()` is a builtin, and what it is called with is a value.
+#[test]
+fn an_argument_of_the_function_builtin_is_not_marked() {
+    let text = "vim9script\ndef F()\n  var R = function(Width)\nenddef\n";
+
+    assert!(!one(text, "Width").owned);
+}

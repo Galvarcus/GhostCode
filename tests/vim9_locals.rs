@@ -272,3 +272,78 @@ fn the_names_an_unpacking_declares_are_not_references_where_declared() {
     assert_eq!(count(text, "last"), 0);
     assert_eq!(count(text, "Bounds"), 1);
 }
+
+/// FUNCTION: The reference one snippet emits for a name.
+fn one(text: &str, name: &str) -> Reference {
+    refs(text)
+        .into_iter()
+        .find(|r| r.name == name)
+        .unwrap_or_else(|| panic!("no reference named {name}"))
+}
+
+/// A def inside a def reads the variables of the body around it. The
+/// inner body's id does not name the outer one, so the scan states
+/// the variable the read means.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+#[test]
+fn a_read_in_a_nested_def_names_the_variable_of_the_body_around_it() {
+    let text =
+        "vim9script\ndef F()\n  var total = 0\n  def Walk()\n    echo total\n  enddef\nenddef\n";
+
+    assert_eq!(
+        one(text, "total").target.map(|id| id.to_string()),
+        Some("autoload/p.vim::F.total".to_string())
+    );
+}
+
+#[test]
+fn a_read_two_defs_deep_names_the_variable_of_the_outermost_body() {
+    let text = "vim9script\ndef F()\n  var total = 0\n  def A()\n    def B()\n      echo total\n    enddef\n  enddef\nenddef\n";
+
+    assert_eq!(
+        one(text, "total").target.map(|id| id.to_string()),
+        Some("autoload/p.vim::F.total".to_string())
+    );
+}
+
+#[test]
+fn a_parameter_of_the_body_around_a_nested_def_is_not_a_reference() {
+    let text = "vim9script\ndef F(root: string)\n  def Walk()\n    echo root\n  enddef\nenddef\n";
+
+    assert_eq!(count(text, "root"), 0);
+}
+
+#[test]
+fn a_parameter_read_after_a_nested_def_closes_is_not_a_reference() {
+    let text = "vim9script\ndef F(root: string)\n  def Walk()\n  enddef\n  echo root\nenddef\n";
+
+    assert_eq!(count(text, "root"), 0);
+}
+
+/// A parameter of the nested def hides the variable around it, so
+/// the read is of the parameter and names no variable.
+#[test]
+fn a_parameter_of_a_nested_def_hides_the_variable_around_it() {
+    let text = "vim9script\ndef F()\n  var total = 0\n  def Walk(total: number)\n    echo total\n  enddef\nenddef\n";
+
+    assert_eq!(count(text, "total"), 0);
+}
+
+/// A variable the body declares after the nested def is not one the
+/// def can read, so a read of that spelling names no variable.
+#[test]
+fn a_variable_declared_after_a_nested_def_is_not_named_by_it() {
+    let text =
+        "vim9script\ndef F()\n  def Walk()\n    echo total\n  enddef\n  var total = 0\nenddef\n";
+
+    assert_eq!(one(text, "total").target, None);
+}
+
+/// A variable of one body is no variable of the next, so a def that
+/// follows names none of it.
+#[test]
+fn a_variable_of_a_closed_body_is_not_named_by_the_next_body() {
+    let text = "vim9script\ndef F()\n  var total = 0\nenddef\ndef G()\n  def Walk()\n    echo total\n  enddef\nenddef\n";
+
+    assert_eq!(one(text, "total").target, None);
+}

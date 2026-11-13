@@ -11,6 +11,7 @@ use std::collections::HashMap;
 
 use crate::lang::vim9::lex::Tok;
 use crate::lang::vim9::lex::TokKind;
+use crate::model::SymbolId;
 
 /// The types a file states: its class fields, by class, and its
 /// module-level variables.
@@ -125,6 +126,11 @@ pub enum Bound {
 #[derive(Debug, Clone, Default)]
 pub struct Locals {
     vars: HashMap<String, (Bound, String)>,
+    /// For each variable this body takes from a body around it, the
+    /// body that declares it. A def inside a def reads those
+    /// variables, and its own id does not name the outer body.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+    around: HashMap<String, SymbolId>,
 }
 
 impl Locals {
@@ -153,6 +159,37 @@ impl Locals {
         locals
     }
 
+    /// METHOD: What a def inside this body sees: the variables of this
+    /// body, with the parameters of the def laid over them.
+    ///
+    /// Only a `var` or a `const` is a symbol, so only those are
+    /// recorded with the body that declares them. A parameter of the
+    /// def hides a variable of that name.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+    pub fn inside(&self, body: &SymbolId, signature: Self) -> Self {
+        let mut inner = self.clone();
+
+        for (name, (bound, _)) in &self.vars {
+            if *bound == Bound::Declared && !self.around.contains_key(name) {
+                inner.around.insert(name.clone(), body.clone());
+            }
+        }
+
+        for name in signature.vars.keys() {
+            inner.around.remove(name);
+        }
+
+        inner.vars.extend(signature.vars);
+
+        inner
+    }
+
+    /// METHOD: The body around this one that declares a variable this
+    /// body reads, or none where the variable is its own.
+    pub fn around(&self, name: &str) -> Option<&SymbolId> {
+        self.around.get(name)
+    }
+
     /// METHOD: Record the type of a variable a statement declares,
     /// whether it states one or builds one with a constructor.
     pub fn declare(&mut self, stmt: &[Tok]) {
@@ -166,10 +203,12 @@ impl Locals {
         // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
         for at in unpacked_at(stmt) {
             let ty = annotated(&stmt[at..]).map(|(_, ty)| ty).unwrap_or_default();
+            self.around.remove(&stmt[at].text);
             self.vars.insert(stmt[at].text.clone(), (bound, ty));
         }
 
         if let Some((name, ty)) = declared_name(stmt) {
+            self.around.remove(&name);
             self.vars.insert(name, (bound, ty));
         }
     }
