@@ -175,6 +175,10 @@ pub fn heredocs(file: &Path, toks: &[Tok], out: &mut dyn Sink) {
     let origin = SymbolId::script(file);
 
     for tok in toks.iter().filter(|t| t.kind == TokKind::Heredoc) {
+        for name in shared::scope_givers(&tok.text) {
+            out.give(name);
+        }
+
         for spelling in shared::spellings(&tok.text) {
             match spelling {
                 shared::Spelling::Exact(name) => out.re(Reference {
@@ -1404,6 +1408,14 @@ impl Collect<'_> {
     /// project's own names once they are all known: Vim evaluates text
     /// in places no parser sees, and a name used only there is used.
     fn text(&mut self, stmt: &[Tok], i: usize, tok: &Tok) {
+        // A function that gives a whole scope can be named as text
+        // and called through a value, so its name in a string is a
+        // use of it.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/66
+        for name in shared::scope_givers(&tok.text) {
+            self.out.give(name);
+        }
+
         // The word before the string names what reads it, as a command
         // in `execute 'x'` or as a call in `exists('x')`, where a
         // bracket stands between.

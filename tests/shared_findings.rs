@@ -339,3 +339,47 @@ fn a_variables_key_reads_the_scope_of_the_info_function_the_project_calls() {
         }]
     );
 }
+
+/// FUNCTION: The findings and the scopes of the notes of one script,
+/// with the buffer and window classes on.
+fn key_scan(tag: &str, text: &str) -> (Vec<String>, Vec<String>) {
+    let dir = project(tag, &[("plugin/p.vim", text)]);
+    let r = run(&dir, held());
+
+    (lines(&r), r.notes.into_iter().map(|n| n.scope).collect())
+}
+
+/// A function can be named as text and called through a value, so a
+/// name of an info function in a string is a use of it.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/66
+#[test]
+fn an_info_function_named_as_a_funcref_string_gives_the_key_its_scope() {
+    let text =
+        "vim9script\nb:p_x = 1\nvar Info = function('getbufinfo')\necho Info(1)[0].variables\n";
+
+    assert_eq!(
+        key_scan("key-funcref", text),
+        (vec![], vec!["b:".to_string()])
+    );
+}
+
+#[test]
+fn an_info_function_named_in_a_plain_string_gives_the_key_its_scope() {
+    let text =
+        "vim9script\nb:p_x = 1\nvar name = 'getbufinfo'\necho call(name, [1])[0].variables\n";
+
+    assert_eq!(
+        key_scan("key-string", text),
+        (vec![], vec!["b:".to_string()])
+    );
+}
+
+#[test]
+fn an_info_function_named_in_a_heredoc_gives_the_key_its_scope() {
+    let text = "vim9script\nb:p_x = 1\nvar lines =<< trim END\n  g:p_info = getbufinfo(1)[0]\nEND\nexecute lines\necho g:p_info.variables\n";
+
+    assert_eq!(
+        key_scan("key-heredoc", text),
+        (vec![], vec!["b:".to_string()])
+    );
+}

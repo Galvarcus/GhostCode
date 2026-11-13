@@ -173,6 +173,17 @@ pub(super) fn gives_scope(name: &str) -> bool {
     HELD.iter().any(|(_, by)| *by == name)
 }
 
+/// FUNCTION: Each function that gives a whole scope and that a text
+/// names. A string and a heredoc name one where they hold its name,
+/// which is enough: a wrong answer credits a scope and reports
+/// nothing.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/66
+pub(super) fn scope_givers(text: &str) -> impl Iterator<Item = &'static str> + '_ {
+    HELD.iter()
+        .map(|(_, by)| *by)
+        .filter(move |by| text.contains(by))
+}
+
 /// One use of a scoped variable.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Use {
