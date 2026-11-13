@@ -27,7 +27,10 @@ build.
   `autoload/ghostcode/log.vim`; in Rust it comes from `NAME` in
   `src/lib.rs`.
 - Do not edit `doc/ghostcode.txt`. It is generated from `README.md` by
-  `.github/workflows/ci.yml` on a push to `main`. The job runs
+  `.github/workflows/vimdoc.yml` on a push to `Development`, and it
+  reaches `main` in the pull request. The job commits the file to
+  `Development` when it differs, so pull after a push that changes
+  the README. The job runs
   `doc/vimdoc-filter.lua`, which drops every image and everything
   between a `<!-- vimdoc-ignore-start -->` marker and the matching
   `<!-- vimdoc-ignore-end -->`. Content that suits the project page

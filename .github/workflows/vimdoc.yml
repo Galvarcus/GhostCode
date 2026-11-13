@@ -1,0 +1,70 @@
+name: Vimdoc
+
+# The help file a Vim user reads is generated from the readme. It is
+# rebuilt on every push to the branch that work happens on, and
+# committed there only when it differs, so that it reaches main in the
+# pull request, with the change to the readme that caused it. A job on
+# main would add a commit that the work branch does not have, which
+# the work branch must then take back.
+# REFERENCE: https://github.com/Galvarcus/GhostCode/issues/74
+#
+# No path filter decides whether a source of the file changed, because
+# a filter would leave a hand edit of the generated file standing.
+#
+# A commit made with the token of the run starts no workflow, so the
+# commit of this job starts neither this workflow again nor CI. A pull
+# request opened after it runs CI on it.
+on:
+  push:
+    branches:
+      - Development
+  workflow_dispatch:
+permissions:
+  contents: read
+# Two pushes close together run one after the other, so that the
+# second run builds on what the first one pushed. A push that is not
+# a fast-forward is refused.
+concurrency:
+  group: vimdoc-${{ github.ref_name }}
+  cancel-in-progress: false
+jobs:
+  vimdoc:
+    name: Vimdoc
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # The head of the branch and not the commit of the event, because
+      # a run that waited for another must build on what that one
+      # pushed.
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Generate Vimdoc
+        uses: docker://pandoc/core:latest
+        with:
+          args: >-
+            README.md
+            --from=markdown
+            --to=vimdoc
+            --standalone
+            --columns=78
+            --toc=true
+            --shift-heading-level-by=-1
+            --metadata-file=doc/pandoc.yaml
+            --lua-filter=doc/vimdoc-filter.lua
+            --output=doc/ghostcode.txt
+
+      - name: Commit generated Vimdoc
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add doc/ghostcode.txt
+          if git diff --cached --quiet; then
+            echo "doc/ghostcode.txt is current."
+            exit 0
+          fi
+          git commit -m "docs: regenerate Vimdoc"
+          git push origin HEAD:${{ github.ref_name }}

@@ -402,7 +402,7 @@ skipped rather than failed, and the file counts and names each skip
 above the verdict. Read those names: a skip is a test that did not run.
 
 `doc/ghostcode.txt` is generated from this README by
-`.github/workflows/ci.yml`. Edit the README, not the help file.
+`.github/workflows/vimdoc.yml`. Edit the README, not the help file.
 
 <!-- vimdoc-ignore-end -->
 

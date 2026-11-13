@@ -4,7 +4,7 @@ name: CI
 # events that concern it:
 #
 #   pull request     the four checks
-#   push to main     the four checks, then Vimdoc
+#   push to main     the four checks
 #   version tag      the four checks, then the release jobs
 #
 # The four checks are the Analyzer, the Analyzer on Windows, the Front
@@ -381,55 +381,6 @@ jobs:
           fi
           cat tests/results.txt
           grep -qx 'All tests passed' tests/results.txt
-
-  # The help file a Vim user reads is generated from the readme, so it
-  # is rebuilt on every push to main and committed only when it
-  # differs. Deciding first whether a source of it changed cannot be
-  # done from a push event alone, and would leave a hand edit of the
-  # generated file standing.
-  vimdoc:
-    name: Vimdoc
-    if: >-
-      github.ref == 'refs/heads/main'
-      && (github.event_name == 'push'
-      || (github.event_name == 'workflow_dispatch'
-      && github.event.inputs.tag == ''))
-    needs:
-      - rust
-      - front-end
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7.0.1
-
-      - name: Generate Vimdoc
-        uses: docker://pandoc/core:latest
-        with:
-          args: >-
-            README.md
-            --from=markdown
-            --to=vimdoc
-            --standalone
-            --columns=78
-            --toc=true
-            --shift-heading-level-by=-1
-            --metadata-file=doc/pandoc.yaml
-            --lua-filter=doc/vimdoc-filter.lua
-            --output=doc/ghostcode.txt
-
-      - name: Commit generated Vimdoc
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add doc/ghostcode.txt
-          if git diff --cached --quiet; then
-            echo "doc/ghostcode.txt is current."
-            exit 0
-          fi
-          git commit -m "docs: regenerate Vimdoc"
-          git push origin HEAD:${{ github.ref_name }}
 
   # SECTION: Everything below releases, and runs for a release tag or
   # for a run started by hand with one. The condition is on this job
