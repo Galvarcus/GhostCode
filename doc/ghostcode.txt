@@ -38,6 +38,7 @@ In Vim                                                        *ghostcode-in-vim*
 
 Ghostcode adds one command:
 
+                                                                  *:GhostCode*
 >vim
     :GhostCode [path]
 <
@@ -154,32 +155,35 @@ characters. Ghostcode never reports a variable listed there.
 ------------------------------------------------------------------------------
 Vim                                                              *ghostcode-vim*
 
-    Variable                           Effect ~
+                                                             *g:ghostcode_bin*
+`g:ghostcode_bin`
+    The binary to run, for a copy that is neither on `$PATH` nor in the
+    plugin's `bin/` directory.
 
-    `g:ghostcode_bin`                  The binary to run, for a copy that
-                                       is neither on `$PATH` nor in the
-                                       plugin's `bin/` directory.
+                                                 *g:ghostcode_exports_are_api*
+`g:ghostcode_exports_are_api`
+    Override `exports_are_api`. The plugin passes the flag only when you set
+    this, so that a project's `ghostcode.toml` governs where you do not.
 
-    `g:ghostcode_exports_are_api`      Override `exports_are_api`. The
-                                       plugin passes the flag only when
-                                       you set this, so that a project's
-                                       `ghostcode.toml` governs where you
-                                       do not.
+                                                          *g:ghostcode_locals*
+`g:ghostcode_locals`
+    Override `findings.locals`. Passed on the same terms.
 
-    `g:ghostcode_locals`               Override `findings.locals`. Passed
-                                       on the same terms.
+                                                         *g:ghostcode_globals*
+`g:ghostcode_globals`
+    Override `findings.globals`. Passed on the same terms.
 
-    `g:ghostcode_globals`              Override `findings.globals`.
-                                       Passed on the same terms.
+                                                     *g:ghostcode_buffer_vars*
+`g:ghostcode_buffer_vars`
+    Override `findings.buffer_vars`. Passed on the same terms.
 
-    `g:ghostcode_buffer_vars`          Override `findings.buffer_vars`.
-                                       Passed on the same terms.
+                                                     *g:ghostcode_window_vars*
+`g:ghostcode_window_vars`
+    Override `findings.window_vars`. Passed on the same terms.
 
-    `g:ghostcode_window_vars`          Override `findings.window_vars`.
-                                       Passed on the same terms.
-
-    `g:ghostcode_tab_vars`             Override `findings.tab_vars`.
-                                       Passed on the same terms.
+                                                        *g:ghostcode_tab_vars*
+`g:ghostcode_tab_vars`
+    Override `findings.tab_vars`. Passed on the same terms.
 
 ==============================================================================
 What Ghostcode scans                            *ghostcode-what-ghostcode-scans*
