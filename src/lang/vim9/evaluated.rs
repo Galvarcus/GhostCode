@@ -185,6 +185,17 @@ pub fn loose(arg: &str) -> Vec<(String, bool)> {
         .collect()
 }
 
+/// FUNCTION: Every name inside the braces of a text, which an
+/// interpolated string holds as code.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/125
+pub fn in_gaps(arg: &str) -> HashSet<String> {
+    arg.split(GAP)
+        .skip(1)
+        .filter_map(|part| part.split_once(CLOSE).map(|(code, _)| code))
+        .flat_map(identifiers)
+        .collect()
+}
+
 /// FUNCTION: The words of a readable head that Vim reads as its own: a
 /// command at a head position, a modifier before one, a user command,
 /// the arguments of a set-family command and of a command whose
