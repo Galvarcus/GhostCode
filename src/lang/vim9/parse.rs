@@ -2193,16 +2193,27 @@ pub(super) fn text_args(stmt: &[Tok], i: usize, heads: &[usize]) -> bool {
 
         let open = (at + 1..i).all(|k| !ends_command(stmt, k));
 
-        if short_command(stmt, at) {
+        let word = uncounted(&stmt[at].text);
+
+        // A user command takes text, which its body gets as <args>.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/111
+        if short_command(stmt, at) || user_command(word) {
             return open;
         }
 
-        let Some(name) = excmds::canonical(&stmt[at].text) else {
+        let Some(name) = excmds::canonical(word) else {
             return false;
         };
 
         name == NORMAL || (text_family(name) && open)
     })
+}
+
+/// FUNCTION: A command word without the count that the lexer glues to
+/// it, as the `2` of `:2Diag prev`.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/111
+fn uncounted(word: &str) -> &str {
+    word.trim_start_matches(|c: char| c.is_ascii_digit())
 }
 
 /// FUNCTION: Whether the word at `at` is a command of one letter, as
@@ -2250,8 +2261,13 @@ pub(super) fn owns_line(stmt: &[Tok]) -> bool {
         .filter(|at| stmt.get(*at).is_some_and(|t| !modifier(&t.text)))
         .max()
         .filter(|at| reads_command(stmt, *at))
-        .and_then(|at| excmds::canonical(&stmt[at].text))
-        .is_some_and(|name| name == NORMAL || text_family(name) || name.ends_with(MAP))
+        .is_some_and(|at| {
+            let word = uncounted(&stmt[at].text);
+
+            user_command(word)
+                || excmds::canonical(word)
+                    .is_some_and(|name| name == NORMAL || text_family(name) || name.ends_with(MAP))
+        })
 }
 
 /// FUNCTION: Whether the token at `i` is a key of a mapping or an

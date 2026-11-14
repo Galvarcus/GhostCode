@@ -512,3 +512,29 @@ fn the_argument_of_vim9script_is_vims() {
 
     assert!(one(text, "noclear").owned);
 }
+
+/// The body of a user command gets its arguments as `<args>`. They can
+/// be an expression there, but a mark still credits a symbol of its
+/// spelling, so no finding is lost.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/111
+#[test]
+fn the_arguments_of_a_user_command_are_marked_as_vims() {
+    let text = "vim9script\nDiag next\n:2Diag prev\n";
+
+    assert!(one(text, "next").owned);
+    assert!(one(text, "prev").owned);
+}
+
+#[test]
+fn the_arguments_of_a_user_command_in_an_executed_string_are_marked_as_vims() {
+    let text = "vim9script\nexecute('Diag show')\n";
+
+    assert!(one(text, "show").owned);
+}
+
+#[test]
+fn a_bar_ends_the_arguments_of_a_user_command() {
+    let text = "vim9script\nDiag next | echo Helper\n";
+
+    assert!(!one(text, "Helper").owned);
+}

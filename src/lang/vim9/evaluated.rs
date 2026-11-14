@@ -388,7 +388,7 @@ mod tests {
 
     #[test]
     fn a_user_command_at_the_head_is_vims() {
-        assert_eq!(words_of("PluginOpen draft"), vec!["PluginOpen"]);
+        assert_eq!(words_of("PluginOpen draft"), vec!["PluginOpen", "draft"]);
     }
 
     #[test]
