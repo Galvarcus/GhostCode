@@ -205,3 +205,14 @@ fn a_lambda_parameter_read_on_the_next_line_is_no_reference() {
 
     assert!(!names.iter().any(|n| n == "lnum"), "{names:?}");
 }
+
+/// A string inside the braces of an interpolated string belongs to the
+/// code there, and its quotes end nothing.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/95
+#[test]
+fn a_string_inside_the_braces_of_an_interpolation_is_a_string() {
+    let text = "vim9script\nvar p = $'{expand('%:p:r')}.txt'\nvar q = $\"{Join(\"a\", 'b')} d\"\necho p q\n";
+    let names: Vec<String> = refs(text).into_iter().map(|r| r.name).collect();
+
+    assert_eq!(names, vec!["Join", "p", "q"]);
+}
