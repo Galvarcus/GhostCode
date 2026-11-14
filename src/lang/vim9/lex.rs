@@ -60,6 +60,16 @@ const PARAMS: char = '(';
 const LEGACY_COMMENT: char = '"';
 const LEGACY_CARRIED: &str = "\"\\ ";
 
+// What ends a line that opens a block lambda, and what opens the line
+// that closes one.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/96
+const LAMBDA_BLOCK: &str = "=> {";
+const BLOCK_CLOSE: char = '}';
+
+// What stands against the name of a key in a dictionary.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/116
+const KEY_COLON: char = ':';
+
 // The words that open or close a block. A bracket left unclosed by a
 // broken line must not swallow the file, so one of these at the start
 // of a line ends the statement before it, whatever the bracket depth.
@@ -126,6 +136,12 @@ pub fn tokens(text: &str) -> Vec<Tok> {
     // and the body the line stands in, where it stands in one.
     let mut script_legacy = true;
     let mut body: Option<Body> = None;
+    // The depth inside each block lambda still open, and the depth that
+    // a block word inside one set aside, so that the brace closing the
+    // lambda returns to the dict or the call around it.
+    // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/96
+    let mut lambdas: Vec<i32> = Vec::new();
+    let mut set_aside: Vec<i32> = Vec::new();
 
     for (i, raw) in text.lines().enumerate() {
         let line = i as u32 + 1;
@@ -192,8 +208,22 @@ pub fn tokens(text: &str) -> Vec<Tok> {
         } else if rest.starts_with("->") || rest.starts_with("|") {
             pop_newline(&mut toks);
         } else if depth > 0 && opens_block(rest) {
+            // Directly inside a block lambda the word starts a statement
+            // of the lambda's body. Anywhere else a broken line left the
+            // bracket open, and nothing is kept to return to.
+            if lambdas.last() == Some(&depth) {
+                set_aside.push(depth);
+            } else {
+                lambdas.clear();
+                set_aside.clear();
+            }
+
             depth = 0;
             push_newline(&mut toks, line.saturating_sub(1));
+        } else if depth == 0 && rest.starts_with(BLOCK_CLOSE) {
+            if let Some(kept) = set_aside.pop() {
+                depth = kept;
+            }
         }
 
         // Whether a line is a mapping is a question about its tokens,
@@ -218,6 +248,15 @@ pub fn tokens(text: &str) -> Vec<Tok> {
             keys = lex_line(rest, line, &mut toks, &mut depth, &mut heredoc, start);
         }
 
+        // A line that ends by opening a block lambda leaves its depth
+        // behind, and a lambda that closed takes its own away.
+        if rest.trim_end().ends_with(LAMBDA_BLOCK) {
+            lambdas.push(depth);
+        }
+        while lambdas.last().is_some_and(|open| depth < *open) && set_aside.len() < lambdas.len() {
+            lambdas.pop();
+        }
+
         // Inside brackets the statement continues on the next line.
         if depth <= 0 {
             depth = 0;
@@ -230,9 +269,14 @@ pub fn tokens(text: &str) -> Vec<Tok> {
 }
 
 /// FUNCTION: True when a line opens or closes a block, which ends any
-/// statement a broken line left open.
+/// statement a broken line left open. A word with a colon against it
+/// is the key of a dictionary, as `command: 'x',` is, and opens
+/// nothing.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/116
 fn opens_block(line: &str) -> bool {
-    RESYNC.iter().any(|word| opens_with(line, word))
+    RESYNC.iter().any(|word| {
+        opens_with(line, word) && !line.trim_start()[word.len()..].starts_with(KEY_COLON)
+    })
 }
 
 /// The kind of body a line stands in.

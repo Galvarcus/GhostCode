@@ -145,3 +145,38 @@ fn the_target_of_a_heredoc_assignment_is_still_read() {
 
     assert_eq!(refs(text).iter().filter(|r| r.name == "lines").count(), 1);
 }
+
+/// A key of a dictionary may share the name of a word that opens a
+/// block, and the colon against it says it is a key.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/116
+#[test]
+fn a_dict_key_named_as_a_block_word_keeps_its_dict_whole() {
+    for key in ["command", "autocmd", "if", "return"] {
+        let text = format!(
+            "vim9script\nvar d = {{\n  title: 1,\n  {key}: 2,\n  other_key: 3,\n}}\necho d\n"
+        );
+        let names: Vec<String> = refs(&text).into_iter().map(|r| r.name).collect();
+
+        assert!(!names.iter().any(|n| n == "other_key"), "{key}: {names:?}");
+    }
+}
+
+/// A block word inside a block lambda starts a statement of its own,
+/// and the brace that closes the lambda returns to the dict or the call
+/// around it, whose keys are keys again.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/96
+#[test]
+fn a_dict_key_after_a_block_lambda_with_an_if_is_a_key() {
+    let text = "vim9script\nvar o = {\n  out_cb: (ch, msg) => {\n    if msg == \"\"\n      echo 1\n    endif\n  },\n  err_msg: 0,\n}\necho o\n";
+    let names: Vec<String> = refs(text).into_iter().map(|r| r.name).collect();
+
+    assert!(!names.iter().any(|n| n == "err_msg"), "{names:?}");
+}
+
+#[test]
+fn a_dict_argument_after_a_block_lambda_with_an_if_is_a_dict() {
+    let text = "vim9script\nvar t = timer_start(20, (_) => {\n  if 1\n    echo 1\n  endif\n}, {repeat: 0})\n";
+    let names: Vec<String> = refs(text).into_iter().map(|r| r.name).collect();
+
+    assert!(!names.iter().any(|n| n == "repeat"), "{names:?}");
+}
