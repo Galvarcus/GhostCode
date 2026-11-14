@@ -13,6 +13,10 @@ use crate::lang::vim9::lex::Tok;
 use crate::lang::vim9::lex::TokKind;
 use crate::model::SymbolId;
 
+// What stands before the name of a variadic parameter.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/93
+const VARIADIC: &str = "...";
+
 /// The types a file states: its class fields, by class, and its
 /// module-level variables.
 #[derive(Debug, Clone, Default)]
@@ -146,6 +150,14 @@ impl Locals {
         // A parameter with no type is still a variable, and knowing
         // that is what tells it from a class name used directly.
         for param in params(&stmt[open + 1..close]) {
+            // A variadic parameter, `...items: list<any>`, is named
+            // behind the three dots.
+            // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/93
+            let param = match param.split_first() {
+                Some((dots, rest)) if dots.text == VARIADIC => rest,
+                _ => param,
+            };
+
             if let Some((name, ty)) = annotated(param) {
                 locals.vars.insert(name, (Bound::Parameter, ty));
             } else if let Some(name) = param.first().filter(|t| t.kind == TokKind::Ident) {

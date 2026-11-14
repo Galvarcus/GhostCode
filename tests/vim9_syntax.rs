@@ -180,3 +180,69 @@ fn a_dict_argument_after_a_block_lambda_with_an_if_is_a_dict() {
 
     assert!(!names.iter().any(|n| n == "repeat"), "{names:?}");
 }
+
+/// Vim9 requires a space after the colon of a key, so a name glued to
+/// `v:` is a variable of Vim's, inside a dict as well.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/97
+#[test]
+fn a_v_variable_after_a_dict_key_is_no_reference() {
+    let text = "vim9script\nvar d = {id: 1, error: {code: 2,\n  message: v:exception}}\nvar e = {message: v:progpath}\necho d e\n";
+    let names: Vec<String> = refs(text).into_iter().map(|r| r.name).collect();
+
+    assert!(
+        !names.iter().any(|n| n == "exception" || n == "progpath"),
+        "{names:?}"
+    );
+}
+
+/// Vim9 carries a line that ends with `=>` on to the body of the lambda
+/// on the next line, where its parameters are bound.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/94
+#[test]
+fn a_lambda_parameter_read_on_the_next_line_is_no_reference() {
+    let text = "vim9script\nvar Add = (lnum: number) =>\n  lnum + 1\necho Add(1)\n";
+    let names: Vec<String> = refs(text).into_iter().map(|r| r.name).collect();
+
+    assert!(!names.iter().any(|n| n == "lnum"), "{names:?}");
+}
+
+/// A string inside the braces of an interpolated string belongs to the
+/// code there, and its quotes end nothing.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/95
+#[test]
+fn a_string_inside_the_braces_of_an_interpolation_is_a_string() {
+    let text = "vim9script\nvar p = $'{expand('%:p:r')}.txt'\nvar q = $\"{Join(\"a\", 'b')} d\"\necho p q\n";
+    let names: Vec<String> = refs(text).into_iter().map(|r| r.name).collect();
+
+    assert_eq!(names, vec!["Join", "p", "q"]);
+}
+
+/// A string that `call()` or `function()` takes may name a function of
+/// Vim's, which no project declares.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/100
+#[test]
+fn a_builtin_in_a_call_string_is_marked_as_vims() {
+    let text = "vim9script\necho call('printf', ['%d', 1])\nvar F = function('strlen')\necho F\n";
+    let marks: Vec<(String, bool)> = refs(text)
+        .into_iter()
+        .filter(|r| r.name == "printf" || r.name == "strlen")
+        .map(|r| (r.name, r.owned))
+        .collect();
+
+    assert_eq!(
+        marks,
+        vec![("printf".to_string(), true), ("strlen".to_string(), true)]
+    );
+}
+
+#[test]
+fn a_project_function_in_a_call_string_is_still_a_name() {
+    let text = "vim9script\ndef Helper(): number\n  return 1\nenddef\necho call('Helper', [])\n";
+    let marks: Vec<bool> = refs(text)
+        .into_iter()
+        .filter(|r| r.name == "Helper")
+        .map(|r| r.owned)
+        .collect();
+
+    assert_eq!(marks, vec![false]);
+}

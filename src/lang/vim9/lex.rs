@@ -66,6 +66,10 @@ const LEGACY_CARRIED: &str = "\"\\ ";
 const LAMBDA_BLOCK: &str = "=> {";
 const BLOCK_CLOSE: char = '}';
 
+// The arrow of a lambda, behind which Vim9 carries a line on.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/94
+const ARROW: &str = "=>";
+
 // What stands against the name of a key in a dictionary.
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/116
 const KEY_COLON: char = ':';
@@ -257,10 +261,16 @@ pub fn tokens(text: &str) -> Vec<Tok> {
             lambdas.pop();
         }
 
-        // Inside brackets the statement continues on the next line.
+        // Inside brackets the statement continues on the next line, and
+        // so it does behind the arrow of a lambda whose body stands on
+        // the next line.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/94
         if depth <= 0 {
             depth = 0;
-            push_newline(&mut toks, line);
+
+            if !rest.trim_end().ends_with(ARROW) {
+                push_newline(&mut toks, line);
+            }
         }
     }
 
@@ -408,7 +418,7 @@ fn lex_line(
         // code, because a name used only there is still used.
         if c == '$' && matches!(src.get(i + 1), Some('\'') | Some('"')) {
             let quote = src[i + 1];
-            let (text, next) = lex_str(&src, i + 1, quote);
+            let (text, next) = lex_interp_str(&src, i + 1, quote);
             lex_interpolated(&text, line, toks, depth, heredoc);
             i = next;
             continue;
@@ -572,6 +582,63 @@ fn lex_str(src: &[char], start: usize, quote: char) -> (String, usize) {
 
     // Unterminated: the line ends it, so that one bad line costs one
     // line rather than the rest of the file.
+    (src[start..].iter().collect(), src.len())
+}
+
+/// FUNCTION: Read one interpolated string whole. Its braces hold code,
+/// and a quote there opens a string of that code and ends nothing, as
+/// in `$'{expand('%:p:r')}.txt'`. A doubled brace is a brace of the
+/// text.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/95
+fn lex_interp_str(src: &[char], start: usize, quote: char) -> (String, usize) {
+    let mut i = start + 1;
+
+    while i < src.len() {
+        let c = src[i];
+
+        if c == '{' && src.get(i + 1) == Some(&'{') {
+            i += 2;
+            continue;
+        }
+
+        if c == '{' {
+            i += 1;
+            let mut braces = 1;
+
+            while i < src.len() && braces > 0 {
+                match src[i] {
+                    '\'' | '"' => {
+                        i = lex_str(src, i, src[i]).1;
+                        continue;
+                    }
+                    '{' => braces += 1,
+                    '}' => braces -= 1,
+                    _ => {}
+                }
+                i += 1;
+            }
+
+            continue;
+        }
+
+        if quote == '"' && c == '\\' {
+            i += 2;
+            continue;
+        }
+
+        if c == quote {
+            if quote == '\'' && src.get(i + 1) == Some(&'\'') {
+                i += 2;
+                continue;
+            }
+            i += 1;
+            return (src[start..i].iter().collect(), i);
+        }
+
+        i += 1;
+    }
+
+    // Unterminated: the line ends it, as it ends any string.
     (src[start..].iter().collect(), src.len())
 }
 
