@@ -845,11 +845,9 @@ const DISCARD: &str = "_";
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 const DOT: &str = ".";
 
-/// The key notation that names a mapping a plugin offers, and the key
-/// that ends a command line.
+/// The key notation that names a mapping a plugin offers.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/91
 const PLUG: &str = "Plug";
-const ENTER: &str = "cr";
 
 /// What every value of an enum has, which Vim gives and no project
 /// declares. A mark still credits a field of the same name.
@@ -2411,33 +2409,41 @@ pub(super) fn map_args(stmt: &[Tok], i: usize) -> bool {
         return false;
     }
 
-    if !stmt[rhs..]
-        .iter()
-        .any(|tok| CODE.contains(&tok.text.as_str()))
-    {
+    if !stmt[rhs..].iter().any(|tok| key_name(CODE, &tok.text)) {
         return true;
     }
 
-    // The keys after the `<CR>` that ends a command line are keys
-    // again, as the `j` of `<ScriptCmd>Toggle()<cr>j`.
+    // The keys after a key name that runs no code are keys again, as
+    // the `j` of `<ScriptCmd>Toggle()<cr>j` and of `<cr><ESC>j`.
     // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/91
+    // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/123
     if i >= 3
         && stmt[i].glued
         && stmt[i - 1].text == ">"
-        && stmt[i - 2].text.eq_ignore_ascii_case(ENTER)
         && stmt[i - 3].text == "<"
+        && !key_name(CODE, &stmt[i - 2].text)
     {
         return true;
     }
 
     // A command against `<ScriptCmd>` or `<Cmd>`, or behind the colon
-    // that opens a command line, as the `quit` of `:quit<CR>`.
-    let against = i >= 2 && stmt[i - 1].text == ">" && RUNS.contains(&stmt[i - 2].text.as_str());
+    // that opens a command line, as the `quit` of `:quit<CR>`. A user
+    // command is no symbol of the project either.
+    // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/123
+    let against = i >= 2 && stmt[i - 1].text == ">" && key_name(RUNS, &stmt[i - 2].text);
     let behind_colon = i >= 1 && stmt[i - 1].text == COLON;
+    let word = stmt[i].text.as_str();
 
     (against || behind_colon)
-        && excmds::canonical(&stmt[i].text).is_some()
+        && (excmds::canonical(word).is_some() || user_command(word))
         && reads_command(stmt, i)
+}
+
+/// FUNCTION: Whether a word is one of a list of key names, which Vim
+/// reads in any case: `<cmd>` runs a command line as `<Cmd>` does.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/130
+fn key_name(names: &[&str], word: &str) -> bool {
+    names.iter().any(|name| word.eq_ignore_ascii_case(name))
 }
 
 /// FUNCTION: Whether Vim reads a mapping or an unmapping command at
@@ -2500,11 +2506,19 @@ fn map_arg(word: &[Tok]) -> Option<&str> {
 }
 
 /// FUNCTION: Whether the word at `i` stands inside the name of a
-/// `<Plug>` mapping, as each part of `<Plug>(my-undo-action)` does.
-/// The name is a key of Vim's that a plugin gives a mapping, and no
-/// code, wherever the notation stands.
+/// `<Plug>` mapping, as each part of `<Plug>(my-undo-action)` does,
+/// and as `MyBold` of `<Plug>MyBold` does. The name is a key of Vim's
+/// that a plugin gives a mapping, and no code, wherever the notation
+/// stands. Vim reads key notation in any case, as `<plug>`.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/91
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/123
 fn in_plug_name(stmt: &[Tok], i: usize) -> bool {
+    let plug = |k: usize| {
+        k >= 2
+            && stmt[k].text == ">"
+            && stmt[k - 1].text.eq_ignore_ascii_case(PLUG)
+            && stmt[k - 2].text == "<"
+    };
     let mut k = i;
 
     while k > 0 {
@@ -2515,13 +2529,9 @@ fn in_plug_name(stmt: &[Tok], i: usize) -> bool {
         k -= 1;
 
         match stmt[k].text.as_str() {
-            "(" => {
-                return k >= 3
-                    && stmt[k - 1].text == ">"
-                    && stmt[k - 2].text == PLUG
-                    && stmt[k - 3].text == "<";
-            }
+            "(" => return k >= 1 && plug(k - 1),
             ")" => return false,
+            ">" => return plug(k),
             _ => {}
         }
     }
