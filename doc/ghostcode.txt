@@ -93,7 +93,8 @@ A project states its own settings in `ghostcode.toml`, in its root:
 `exports_are_api` is true by default. Ghostcode then treats an exported symbol
 as public API and never reports it. Vim9 cannot export a method or a field by
 itself, so every method and field of an exported class counts as exported too,
-unless its name starts with an underscore.
+unless its name starts with an underscore. A global function, `def g:Name`,
+counts as exported, because any user or plugin can call it.
 
 Set it to false for a plugin whose exports serve only its own files, as in an
 application. Ghostcode then reports an export that nothing in the project
@@ -226,8 +227,8 @@ What Ghostcode detects                        *ghostcode-what-ghostcode-detects*
 - the classic `plugin#Function()` autoload calling convention
 - top-level code in scripts that Vim sources directly (`plugin/`, `ftplugin/`,
   `ftdetect/`, `syntax/`, `indent/`, `compiler/`, `colors/`, `keymap/`,
-  `lang/`, and their `after/` copies) and in `tests/`, all treated as entry
-  points that need no call site
+  `lang/`, and their `after/` copies) and in `tests/` or `test/`, all treated
+  as entry points that need no call site
 
 ==============================================================================
 What Ghostcode doesn't detect           *ghostcode-what-ghostcode-doesnt-detect*

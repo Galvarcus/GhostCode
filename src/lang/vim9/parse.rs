@@ -164,19 +164,29 @@ pub fn declarations(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
     }
 }
 
-/// FUNCTION: Record each scoped variable the body of a heredoc
-/// spells in full.
+/// FUNCTION: Record each line of a heredoc body as text, and each
+/// scoped variable it spells in full.
 ///
 /// A statement holds no heredoc body, because the body is text and no
-/// code. The text is often a script for another Vim, and a variable
-/// it names is in use. The read is given to the top-level code of the
-/// file: the lexer does not say which body a heredoc stands in, and
-/// that code runs wherever any part of the file does.
+/// code. The text is often code that a plugin runs later, through an
+/// autocommand or execute(), or a script for another Vim, so a name it
+/// holds is in use, as a name a string holds is. The read is given to
+/// the top-level code of the file: the lexer does not say which body a
+/// heredoc stands in, and that code runs wherever any part of the file
+/// does.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/87
 pub fn heredocs(file: &Path, toks: &[Tok], out: &mut dyn Sink) {
     let origin = SymbolId::script(file);
 
     for tok in toks.iter().filter(|t| t.kind == TokKind::Heredoc) {
+        out.text(Text {
+            text: tok.text.clone(),
+            file: file.to_path_buf(),
+            line: tok.line,
+            origin: Some(origin.clone()),
+        });
+
         for name in shared::scope_givers(&tok.text) {
             out.give(name);
         }
@@ -339,6 +349,10 @@ fn function(
         return true;
     }
 
+    // Any user or plugin can call a global function, as it can an
+    // export, so it is public API on the same terms.
+    // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/102
+    let exported = exported || def_global(stmt, rest);
     let (kind, exported) = member_kind(scope, Kind::Function, Kind::Method, name, exported);
     let id = SymbolId::of(file, scope.owner.as_deref(), name);
 
@@ -1563,6 +1577,15 @@ fn def_name<'a>(stmt: &'a [Tok], rest: &[&'a str]) -> Option<&'a str> {
         .and_then(|at| global_def_at(stmt, at));
 
     Some(behind.map_or(first, |at| stmt[at].text.as_str()))
+}
+
+/// FUNCTION: Whether a `def` statement declares a global function,
+/// `def g:Name`.
+fn def_global(stmt: &[Tok], rest: &[&str]) -> bool {
+    rest.get(1)
+        .and_then(|first| stmt.iter().position(|t| t.text == *first))
+        .and_then(|at| global_def_at(stmt, at))
+        .is_some()
 }
 
 /// FUNCTION: Where the name behind the global scope stands, when the

@@ -1,0 +1,12 @@
+# The settings of one truth family: every finding class on, and an
+# export is public API, so that a global function is API as well.
+# License: GNU GPL 3.0
+
+exports_are_api = true
+
+[findings]
+locals = true
+globals = true
+buffer_vars = true
+window_vars = true
+tab_vars = true
