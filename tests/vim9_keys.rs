@@ -287,3 +287,15 @@ fn the_keys_after_any_key_name_that_runs_no_code_are_marked_as_vims() {
     assert!(!one(text, "Toggle").owned);
     assert!(!one(text, "Pick").owned);
 }
+
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/130
+#[test]
+fn a_key_name_in_lower_case_opens_a_command_line() {
+    let text = "vim9script\nnnoremap b <cmd>call Go()<cr>\nnnoremap c <scriptcmd>Go()<cr>\n";
+
+    assert!(one(text, "call").owned);
+    assert!(refs(text)
+        .iter()
+        .filter(|r| r.name == "Go")
+        .all(|r| !r.owned));
+}

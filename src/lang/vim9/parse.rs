@@ -2409,10 +2409,7 @@ pub(super) fn map_args(stmt: &[Tok], i: usize) -> bool {
         return false;
     }
 
-    if !stmt[rhs..]
-        .iter()
-        .any(|tok| CODE.contains(&tok.text.as_str()))
-    {
+    if !stmt[rhs..].iter().any(|tok| key_name(CODE, &tok.text)) {
         return true;
     }
 
@@ -2424,9 +2421,7 @@ pub(super) fn map_args(stmt: &[Tok], i: usize) -> bool {
         && stmt[i].glued
         && stmt[i - 1].text == ">"
         && stmt[i - 3].text == "<"
-        && !CODE
-            .iter()
-            .any(|c| stmt[i - 2].text.eq_ignore_ascii_case(c))
+        && !key_name(CODE, &stmt[i - 2].text)
     {
         return true;
     }
@@ -2435,13 +2430,20 @@ pub(super) fn map_args(stmt: &[Tok], i: usize) -> bool {
     // that opens a command line, as the `quit` of `:quit<CR>`. A user
     // command is no symbol of the project either.
     // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/123
-    let against = i >= 2 && stmt[i - 1].text == ">" && RUNS.contains(&stmt[i - 2].text.as_str());
+    let against = i >= 2 && stmt[i - 1].text == ">" && key_name(RUNS, &stmt[i - 2].text);
     let behind_colon = i >= 1 && stmt[i - 1].text == COLON;
     let word = stmt[i].text.as_str();
 
     (against || behind_colon)
         && (excmds::canonical(word).is_some() || user_command(word))
         && reads_command(stmt, i)
+}
+
+/// FUNCTION: Whether a word is one of a list of key names, which Vim
+/// reads in any case: `<cmd>` runs a command line as `<Cmd>` does.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/130
+fn key_name(names: &[&str], word: &str) -> bool {
+    names.iter().any(|name| word.eq_ignore_ascii_case(name))
 }
 
 /// FUNCTION: Whether Vim reads a mapping or an unmapping command at
