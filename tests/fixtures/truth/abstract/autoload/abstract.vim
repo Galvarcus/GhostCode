@@ -8,8 +8,11 @@ vim9script
 # LIVE
 abstract class Base
   # LIVE
+  abstract def Name(): string
+
+  # LIVE
   def Hello(): string
-    return 'hello'
+    return this.Name()
   enddef
 
   # GHOST
@@ -39,5 +42,4 @@ export def Run(): void
   # LIVE
   var l = Leaf.new()
   echo l.Hello()
-  echo l.Name()
 enddef

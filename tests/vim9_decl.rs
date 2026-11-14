@@ -288,3 +288,42 @@ fn a_variable_in_a_def_behind_the_global_scope_is_scoped_to_the_function() {
         .iter()
         .any(|s| s.id.to_string() == "tests/t.vim::Capture.row"));
 }
+
+/// FUNCTION: Each class that extends another, as `class base`.
+fn heirs(a: &Analysis) -> Vec<String> {
+    a.heirs
+        .iter()
+        .map(|(class, base)| format!("{class} {base}"))
+        .collect()
+}
+
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/82
+#[test]
+fn a_class_that_extends_another_states_it() {
+    let a = scan(
+        "autoload/p.vim",
+        "vim9script\nabstract class Base\nendclass\nexport class Leaf extends Base implements Shape\nendclass\n",
+    );
+
+    assert_eq!(heirs(&a), vec!["Leaf Base"]);
+}
+
+#[test]
+fn a_class_that_extends_one_behind_an_alias_states_the_class() {
+    let a = scan(
+        "autoload/p.vim",
+        "vim9script\nclass Leaf extends M.Base\nendclass\n",
+    );
+
+    assert_eq!(heirs(&a), vec!["Leaf Base"]);
+}
+
+#[test]
+fn a_class_that_extends_nothing_states_nothing() {
+    let a = scan(
+        "autoload/p.vim",
+        "vim9script\nclass Leaf implements Shape\nendclass\n",
+    );
+
+    assert!(heirs(&a).is_empty());
+}

@@ -264,6 +264,10 @@ fn open_container(
         Container::None => return false,
     };
 
+    if let Some(base) = base_name(rest) {
+        out.heir(name, base);
+    }
+
     scope.owner = Some(name.to_string());
     scope.owner_exported = exported;
     scope.container = container;
@@ -766,6 +770,12 @@ const DISCARD: &str = "_";
 // `..`, which the lexer reads as one operator of its own.
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 const DOT: &str = ".";
+
+/// The word before the class that a class extends, and the word that
+/// ends that name where the class also implements an interface.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/82
+const EXTENDS: &str = "extends";
+const IMPLEMENTS: &str = "implements";
 
 // The constructor Vim supplies for a class that declares none. Behind
 // a dot the name is the language's, and a constructor a class does
@@ -1606,6 +1616,20 @@ fn body_id(file: &Path, stmt: &[Tok], words: &[&str], scope: &Scope) -> Option<S
     }
 
     Some(SymbolId::of(file, scope.owner.as_deref(), name))
+}
+
+/// FUNCTION: The class a class statement extends, if it extends one.
+/// A class of another file stands behind the alias of its import, and
+/// the name of the class is the part after the last dot.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/82
+fn base_name<'a>(words: &'a [&'a str]) -> Option<&'a str> {
+    let at = words.iter().position(|w| *w == EXTENDS)?;
+    let base = words[at + 1..]
+        .iter()
+        .take_while(|w| **w != IMPLEMENTS)
+        .last()?;
+
+    base.rsplit(DOT).next()
 }
 
 /// FUNCTION: The container a statement opens and the name it gives

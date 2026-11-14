@@ -34,6 +34,9 @@ pub struct Index<'a> {
     by_name: HashMap<&'a str, Vec<&'a SymbolId>>,
     members: HashMap<&'a str, Vec<&'a SymbolId>>,
     containers: HashMap<&'a str, Vec<&'a SymbolId>>,
+    /// Per class, the classes that extend it, by name.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/82
+    heirs: HashMap<&'a str, Vec<&'a str>>,
     /// Per file, the namespace alias of an import and the file it names.
     aliases: HashMap<&'a Path, HashMap<&'a str, &'a Path>>,
     /// Per file, a named import's local name and the file and original
@@ -82,6 +85,10 @@ impl<'a> Index<'a> {
             if matches!(sym.kind, Kind::Class | Kind::Enum | Kind::Interface) {
                 idx.containers.entry(&sym.name).or_default().push(&sym.id);
             }
+        }
+
+        for (class, base) in &a.heirs {
+            idx.heirs.entry(base).or_default().push(class);
         }
 
         for imp in &a.outside {
@@ -168,7 +175,7 @@ impl<'a> Index<'a> {
         // A container declared in this same file.
         let here = SymbolId::of(&r.file, Some(recv), &r.name);
         if self.by_id.contains_key(&here) {
-            return vec![here];
+            return self.with_heirs(here, recv, &r.name);
         }
 
         // An import's namespace alias: `import autoload 'u.vim' as u`
@@ -186,7 +193,7 @@ impl<'a> Index<'a> {
         if let Some(file) = self.unique_container(recv) {
             let id = SymbolId::of(file, Some(recv), &r.name);
             if self.by_id.contains_key(&id) {
-                return vec![id];
+                return self.with_heirs(id, recv, &r.name);
             }
 
             // A class with no `new` has the default constructor, which
@@ -209,6 +216,48 @@ impl<'a> Index<'a> {
         // The receiver's type is unknown, so any member of that name
         // may be the target, and every one of them counts as used.
         self.cloned(self.members.get(r.name.as_str()))
+    }
+
+    /// METHOD: A member of a class, and the member of that name in
+    /// each class that extends it, at any depth.
+    ///
+    /// The receiver names the class a variable is declared as. The
+    /// object in it can be of a class that extends that one, and the
+    /// call then runs the method of that class: a base class that
+    /// calls `this.Name()` runs the `Name` of the class that
+    /// implements it. A class is known by its name alone, so two
+    /// classes of one name in two files both count, which credits
+    /// more and reports no less than is proved.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/82
+    fn with_heirs(&self, id: SymbolId, recv: &str, name: &str) -> Vec<SymbolId> {
+        let mut seen: HashSet<&str> = HashSet::from([recv]);
+        let mut todo: Vec<&str> = vec![recv];
+        let mut heirs: HashSet<&str> = HashSet::new();
+
+        while let Some(class) = todo.pop() {
+            for heir in self.heirs.get(class).into_iter().flatten() {
+                if seen.insert(heir) {
+                    heirs.insert(heir);
+                    todo.push(heir);
+                }
+            }
+        }
+
+        let mut out = vec![id];
+
+        if heirs.is_empty() {
+            return out;
+        }
+
+        for member in self.members.get(name).into_iter().flatten() {
+            let owner = self.by_id.get(*member).and_then(|s| s.owner.as_deref());
+
+            if owner.is_some_and(|o| heirs.contains(o)) {
+                out.push((*member).clone());
+            }
+        }
+
+        out
     }
 
     /// METHOD: Whether an import of a file the scan does not hold
@@ -562,6 +611,75 @@ mod tests {
         assert_eq!(
             ids(&a, &re("plugin/p.vim", Some("Menu"), "Open")),
             vec!["autoload/m.vim::Menu.Open"]
+        );
+    }
+
+    /// A variable typed as a class can hold an object of a class that
+    /// extends it, and Vim then runs the method of that class.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/82
+    #[test]
+    fn a_typed_receiver_also_credits_the_member_of_each_class_that_extends_it() {
+        let a = Analysis {
+            syms: vec![
+                sym("autoload/m.vim", Some("Base"), "Name", Kind::Method),
+                sym("autoload/m.vim", Some("Leaf"), "Name", Kind::Method),
+                sym("autoload/n.vim", Some("Twig"), "Name", Kind::Method),
+                sym("autoload/p.vim", Some("Other"), "Name", Kind::Method),
+                sym("autoload/m.vim", None, "Base", Kind::Class),
+            ],
+            heirs: vec![
+                ("Leaf".to_string(), "Base".to_string()),
+                ("Twig".to_string(), "Leaf".to_string()),
+            ],
+            ..Analysis::default()
+        };
+
+        assert_eq!(
+            ids(&a, &re("autoload/m.vim", Some("Base"), "Name")),
+            vec![
+                "autoload/m.vim::Base.Name",
+                "autoload/m.vim::Leaf.Name",
+                "autoload/n.vim::Twig.Name",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_typed_receiver_does_not_credit_the_member_of_the_class_it_extends() {
+        let a = Analysis {
+            syms: vec![
+                sym("autoload/m.vim", Some("Base"), "Name", Kind::Method),
+                sym("autoload/m.vim", Some("Leaf"), "Name", Kind::Method),
+                sym("autoload/m.vim", None, "Leaf", Kind::Class),
+            ],
+            heirs: vec![("Leaf".to_string(), "Base".to_string())],
+            ..Analysis::default()
+        };
+
+        assert_eq!(
+            ids(&a, &re("autoload/m.vim", Some("Leaf"), "Name")),
+            vec!["autoload/m.vim::Leaf.Name"]
+        );
+    }
+
+    #[test]
+    fn two_classes_that_extend_each_other_end_the_search() {
+        let a = Analysis {
+            syms: vec![
+                sym("autoload/m.vim", Some("Base"), "Name", Kind::Method),
+                sym("autoload/m.vim", Some("Leaf"), "Name", Kind::Method),
+                sym("autoload/m.vim", None, "Base", Kind::Class),
+            ],
+            heirs: vec![
+                ("Leaf".to_string(), "Base".to_string()),
+                ("Base".to_string(), "Leaf".to_string()),
+            ],
+            ..Analysis::default()
+        };
+
+        assert_eq!(
+            ids(&a, &re("autoload/m.vim", Some("Base"), "Name")),
+            vec!["autoload/m.vim::Base.Name", "autoload/m.vim::Leaf.Name"]
         );
     }
 

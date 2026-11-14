@@ -253,6 +253,7 @@ pub trait Sink {
     fn text(&mut self, t: Text);
     fn fit(&mut self, f: Fit);
     fn give(&mut self, name: &str);
+    fn heir(&mut self, class: &str, base: &str);
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -273,6 +274,11 @@ pub struct Analysis {
     /// language's own name is no reference, so it is recorded here.
     /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/61
     pub given: HashSet<String>,
+    /// Each class that extends another, with the class it extends, by
+    /// name. An object of the first can stand where the second is
+    /// named, so a call on the second can run a method of the first.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/82
+    pub heirs: Vec<(String, String)>,
 }
 
 impl Analysis {
@@ -306,6 +312,10 @@ impl Sink for Analysis {
 
     fn fit(&mut self, f: Fit) {
         self.fits.push(f);
+    }
+
+    fn heir(&mut self, class: &str, base: &str) {
+        self.heirs.push((class.to_string(), base.to_string()));
     }
 
     fn give(&mut self, name: &str) {
