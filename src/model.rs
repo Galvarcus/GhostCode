@@ -261,6 +261,7 @@ pub trait Sink {
     fn fit(&mut self, f: Fit);
     fn give(&mut self, name: &str);
     fn heir(&mut self, class: &str, base: &str);
+    fn abstract_member(&mut self, id: SymbolId);
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -286,6 +287,10 @@ pub struct Analysis {
     /// named, so a call on the second can run a method of the first.
     /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/82
     pub heirs: Vec<(String, String)>,
+    /// Each method declared abstract. An override of one fulfils it,
+    /// so the abstract method is used where an override is.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/120
+    pub abstracts: Vec<SymbolId>,
 }
 
 impl Analysis {
@@ -319,6 +324,10 @@ impl Sink for Analysis {
 
     fn fit(&mut self, f: Fit) {
         self.fits.push(f);
+    }
+
+    fn abstract_member(&mut self, id: SymbolId) {
+        self.abstracts.push(id);
     }
 
     fn heir(&mut self, class: &str, base: &str) {

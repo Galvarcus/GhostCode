@@ -20,6 +20,7 @@ use crate::lang;
 use crate::model::Analysis;
 use crate::model::Class;
 use crate::model::Kind;
+use crate::model::Reference;
 use crate::model::Sink;
 use crate::model::SymbolId;
 use crate::project;
@@ -166,6 +167,7 @@ pub fn analyze(root: &Path, cfg: &Config) -> anyhow::Result<Report> {
     }
 
     fold(&mut a);
+    override_references(&mut a);
     text_references(&mut a);
     drop_unmet(&mut a);
     fit_references(&mut a);
@@ -195,6 +197,71 @@ pub fn analyze(root: &Path, cfg: &Config) -> anyhow::Result<Report> {
         .collect();
 
     Ok(report)
+}
+
+/// FUNCTION: A reference from each method that overrides an abstract
+/// one to the abstract method, so that the abstract method is used
+/// where its override is.
+///
+/// The abstract method is the contract that its overrides fulfil, and
+/// the language checks that each class extending it does. A call made
+/// through the class that extends credits the override alone, so the
+/// contract would read as a ghost though every override of it runs.
+/// The classes are known by name alone, as the credit of a call on a
+/// class that is extended is.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/120
+fn override_references(a: &mut Analysis) {
+    if a.abstracts.is_empty() {
+        return;
+    }
+
+    let base_of: HashMap<&str, &str> = a
+        .heirs
+        .iter()
+        .map(|(class, base)| (class.as_str(), base.as_str()))
+        .collect();
+    let by_id = a.by_id();
+    let abstracts: HashMap<(&str, &str), &SymbolId> = a
+        .abstracts
+        .iter()
+        .filter_map(|id| {
+            let sym = by_id.get(id)?;
+            Some(((sym.owner.as_deref()?, sym.name.as_str()), id))
+        })
+        .collect();
+
+    let mut found: Vec<Reference> = Vec::new();
+
+    for sym in &a.syms {
+        let Some(owner) = sym.owner.as_deref() else {
+            continue;
+        };
+        let mut seen: HashSet<&str> = HashSet::from([owner]);
+        let mut class = owner;
+
+        while let Some(&base) = base_of.get(class) {
+            if !seen.insert(base) {
+                break;
+            }
+
+            if let Some(&id) = abstracts.get(&(base, sym.name.as_str())) {
+                found.push(Reference {
+                    name: sym.name.clone(),
+                    recv: Some(base.to_string()),
+                    file: sym.file.clone(),
+                    line: sym.line,
+                    origin: Some(sym.id.clone()),
+                    target: Some(id.clone()),
+                    owned: false,
+                    member: true,
+                });
+            }
+
+            class = base;
+        }
+    }
+
+    a.refs.extend(found);
 }
 
 /// FUNCTION: Keep one symbol for each id that belongs to no file.

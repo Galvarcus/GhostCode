@@ -11,6 +11,12 @@ abstract class Base
   abstract def Name(): string
 
   # LIVE
+  abstract def Speak(): string
+
+  # GHOST
+  abstract def Unheard(): string
+
+  # LIVE
   def Hello(): string
     return this.Name()
   enddef
@@ -35,11 +41,21 @@ class Leaf extends Base
   def Name(): string
     return 'leaf'
   enddef
+
+  # LIVE
+  def Speak(): string
+    return 'speak'
+  enddef
+
+  # GHOST
+  def Unheard(): string
+    return 'unheard'
+  enddef
 endclass
 
 # LIVE
 export def Run(): void
   # LIVE
   var l = Leaf.new()
-  echo l.Hello()
+  echo l.Hello() l.Speak()
 enddef
