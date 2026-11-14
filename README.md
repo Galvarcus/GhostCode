@@ -420,6 +420,12 @@ above the verdict. Read those names: a skip is a test that did not run.
 `doc/ghostcode.txt` is generated from this README by
 `.github/workflows/vimdoc.yml`. Edit the README, not the help file.
 
+`tools/survey` clones the Vim9 plugins of other projects that
+`tools/survey.txt` lists, scans each, and prints a table of the counts.
+The findings and the unplaced names of each scan go to
+`target/survey/report`, for evaluation. No check runs it, and
+`tools/survey --clean` removes what it wrote.
+
 <!-- vimdoc-ignore-end -->
 
 ## License
