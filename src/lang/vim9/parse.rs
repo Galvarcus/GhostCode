@@ -332,6 +332,14 @@ fn function(
     out: &mut dyn Sink,
 ) -> bool {
     let (exported, rest) = strip_export(words);
+
+    // Only a modifier before `def` can make it abstract; a parameter
+    // may carry the word as its name.
+    // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/120
+    let is_abstract = rest
+        .iter()
+        .take_while(|w| **w != "def")
+        .any(|w| *w == ABSTRACT);
     let rest = strip_modifiers(rest);
 
     if rest.first().copied() != Some("def") {
@@ -364,6 +372,10 @@ fn function(
     // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/101
     if rules::is_test(file, scope.owner.as_deref(), name) {
         out.root(id.clone());
+    }
+
+    if is_abstract && scope.owner.is_some() {
+        out.abstract_member(id.clone());
     }
 
     out.sym(Symbol {
@@ -843,6 +855,10 @@ const ENTER: &str = "cr";
 /// declares. A mark still credits a field of the same name.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/99
 const ENUM_MEMBERS: &[&str] = &["ordinal", "name"];
+
+/// The modifier of a method that a class extending its own fulfils.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/120
+const ABSTRACT: &str = "abstract";
 
 /// The operator that opens a heredoc.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/89
@@ -1833,7 +1849,7 @@ fn opens_def_body(words: &[&str], scope: &Scope) -> bool {
     !rest
         .iter()
         .take_while(|w| MODIFIERS.contains(w))
-        .any(|w| *w == "abstract")
+        .any(|w| *w == ABSTRACT)
 }
 
 /// FUNCTION: Whether a type word is called rather than named as a
