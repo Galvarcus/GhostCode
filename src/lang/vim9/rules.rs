@@ -9,15 +9,21 @@ use std::path::PathBuf;
 use crate::config::Config;
 use crate::model::Symbol;
 
-// The directories whose scripts Vim sources by itself, plus tests,
-// which a test runner sources. Top-level code in one of them needs no
-// caller, so it roots everything it reaches. Plugins name the test
-// directory either way.
-// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/86
+// The directories whose scripts Vim sources by itself. Top-level code
+// in one of them needs no caller, so it roots everything it reaches.
 const ENTRY_DIRS: &[&str] = &[
     "plugin", "ftplugin", "ftdetect", "syntax", "indent", "compiler", "colors", "keymap", "lang",
-    "tests", "test",
 ];
+
+// The directories of tests, which a test runner sources, so that they
+// are entry points too. Plugins name the directory either way.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/86
+const TEST_DIRS: &[&str] = &["tests", "test"];
+
+// How the name of a test starts, by Vim's own convention. A runner
+// finds each such function by its name and calls it.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/101
+const TEST_PREFIX: &str = "Test_";
 
 // What ends the name of a script.
 pub const SCRIPT_EXT: &str = "vim";
@@ -48,7 +54,22 @@ pub fn is_entry(file: &Path) -> bool {
         first
     };
 
-    ENTRY_DIRS.contains(&dir.as_ref())
+    ENTRY_DIRS.contains(&dir.as_ref()) || TEST_DIRS.contains(&dir.as_ref())
+}
+
+/// FUNCTION: True when a function is a test that a runner finds by its
+/// name: a function, not a method, named by the convention, in a file
+/// of a test directory.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/101
+pub fn is_test(file: &Path, owner: Option<&str>, name: &str) -> bool {
+    let first = file
+        .components()
+        .next()
+        .map(|c| c.as_os_str().to_string_lossy());
+
+    owner.is_none()
+        && name.starts_with(TEST_PREFIX)
+        && first.is_some_and(|dir| TEST_DIRS.contains(&dir.as_ref()))
 }
 
 /// FUNCTION: True when a symbol counts as public API, so that nothing
