@@ -124,3 +124,24 @@ fn a_highlight_command_in_executed_text_is_marked_as_vims() {
 
     assert!(one(text, "pluginTitle").owned);
 }
+
+/// The words after `=<<` are the heredoc's own syntax, `trim`, `eval`
+/// and the end marker, and never a name.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/89
+#[test]
+fn the_words_that_open_a_heredoc_are_no_references() {
+    let text = "vim9script\nvar lines =<< trim END\n  hello\nEND\nvar more =<< trim eval DATA\n  x\nDATA\n";
+    let names: Vec<String> = refs(text).into_iter().map(|r| r.name).collect();
+
+    for word in ["trim", "eval", "END", "DATA"] {
+        assert!(!names.iter().any(|n| n == word), "{word}: {names:?}");
+    }
+}
+
+/// The value before `=<<` is still read.
+#[test]
+fn the_target_of_a_heredoc_assignment_is_still_read() {
+    let text = "vim9script\nvar lines: list<string> = []\nlines =<< trim END\n  hello\nEND\n";
+
+    assert_eq!(refs(text).iter().filter(|r| r.name == "lines").count(), 1);
+}

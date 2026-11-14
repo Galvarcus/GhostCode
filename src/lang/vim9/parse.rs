@@ -821,7 +821,7 @@ pub(super) const KEYWORDS: &[&str] = &[
 // `n = n + 1` must not give different answers for one statement
 // spelled two ways.
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-const WRITES: &[&str] = &["=", "=<<"];
+const WRITES: &[&str] = &["=", HEREDOC];
 
 // Vim9's discard placeholder. A value assigned to it is stated to be
 // unwanted, so there is nothing to report and nothing to record.
@@ -832,6 +832,10 @@ const DISCARD: &str = "_";
 // `..`, which the lexer reads as one operator of its own.
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 const DOT: &str = ".";
+
+/// The operator that opens a heredoc.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/89
+const HEREDOC: &str = "=<<";
 
 /// The command that defines a user command.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/112
@@ -1356,6 +1360,13 @@ impl Collect<'_> {
         // it declares, and a user command is Vim's name thereafter.
         // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
         if in_command_def(stmt, i) {
+            return;
+        }
+
+        // The words after `=<<` are the heredoc's own syntax: `trim`,
+        // `eval` and the marker that ends the body.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/89
+        if stmt[..i].iter().any(|t| t.text == HEREDOC) {
             return;
         }
 
