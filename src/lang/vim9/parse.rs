@@ -2398,20 +2398,15 @@ pub(super) fn map_args(stmt: &[Tok], i: usize) -> bool {
         return false;
     }
 
-    // Each word behind the command, as the index it starts at.
-    let starts: Vec<usize> = (at + 1..stmt.len()).filter(|k| !stmt[*k].glued).collect();
-    let word = |n: usize| &stmt[starts[n]..starts.get(n + 1).copied().unwrap_or(stmt.len())];
-    let Some(lhs) = (0..starts.len()).find(|n| map_arg(word(*n)).is_none()) else {
+    let Some(Sides { lhs, rhs, expr }) = sides(stmt, at) else {
         return false;
     };
 
-    let rhs = starts.get(lhs + 1).copied().unwrap_or(stmt.len());
-
     if i < rhs {
-        return i >= starts[lhs];
+        return i >= lhs;
     }
 
-    if (0..lhs).any(|n| map_arg(word(n)) == Some(EXPR)) {
+    if expr {
         return false;
     }
 
@@ -2443,6 +2438,69 @@ pub(super) fn map_args(stmt: &[Tok], i: usize) -> bool {
     (against || behind_colon)
         && (excmds::canonical(word).is_some() || user_command(word))
         && reads_command(stmt, i)
+}
+
+/// Where the two sides of a mapping start, and whether `<expr>` makes
+/// the right side an expression.
+struct Sides {
+    lhs: usize,
+    rhs: usize,
+    expr: bool,
+}
+
+/// FUNCTION: The sides of the mapping command at `at`. The left side
+/// is the first word behind the command that is not one of its
+/// arguments, and a word is what stands between two spaces.
+fn sides(stmt: &[Tok], at: usize) -> Option<Sides> {
+    let starts: Vec<usize> = (at + 1..stmt.len()).filter(|k| !stmt[*k].glued).collect();
+    let word = |n: usize| &stmt[starts[n]..starts.get(n + 1).copied().unwrap_or(stmt.len())];
+    let lhs = (0..starts.len()).find(|n| map_arg(word(*n)).is_none())?;
+
+    Some(Sides {
+        lhs: starts[lhs],
+        rhs: starts.get(lhs + 1).copied().unwrap_or(stmt.len()),
+        expr: (0..lhs).any(|n| map_arg(word(n)) == Some(EXPR)),
+    })
+}
+
+/// FUNCTION: Where each command line that the right side of a mapping
+/// runs reads a command: behind `<ScriptCmd>` or `<Cmd>`, and behind
+/// the colon that opens a command line, past any modifier. The colon
+/// of a scope, as in `g:x`, opens none. The right side of an `<expr>`
+/// mapping is an expression and runs no command line.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/131
+fn map_lines(stmt: &[Tok], at: usize) -> Vec<usize> {
+    let mut out = Vec::new();
+
+    if !maps(stmt, at) {
+        return out;
+    }
+
+    let Some(Sides {
+        rhs, expr: false, ..
+    }) = sides(stmt, at)
+    else {
+        return out;
+    };
+
+    for k in rhs..stmt.len() {
+        if stmt[k].text == BAR {
+            break;
+        }
+
+        let runs = k >= 3
+            && stmt[k - 1].text == ">"
+            && key_name(RUNS, &stmt[k - 2].text)
+            && stmt[k - 3].text == "<";
+        let colon =
+            stmt[k - 1].text == COLON && !(stmt[k - 1].glued && stmt[k - 2].kind == TokKind::Ident);
+
+        if runs || colon {
+            out.extend(k..=command_from(stmt, k).unwrap_or(k));
+        }
+    }
+
+    out
 }
 
 /// FUNCTION: Whether a word is one of a list of key names, which Vim
@@ -2567,6 +2625,8 @@ pub(super) fn heads(stmt: &[Tok]) -> Vec<usize> {
     if let Some(body) = autocmd::body(stmt, first) {
         at.extend(body..=command_from(stmt, body).unwrap_or(body));
     }
+
+    at.extend(map_lines(stmt, first));
 
     // The body of a `:command` definition is a command of its own,
     // past any modifier it opens with.

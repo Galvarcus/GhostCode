@@ -28,6 +28,15 @@ fn one(text: &str, name: &str) -> Reference {
         .unwrap_or_else(|| panic!("no reference named {name}"))
 }
 
+/// FUNCTION: Whether every reference one snippet emits for a name is
+/// marked as Vim's. A command at a head emits none at all.
+fn vims_or_none(text: &str, name: &str) -> bool {
+    refs(text)
+        .iter()
+        .filter(|r| r.name == name)
+        .all(|r| r.owned)
+}
+
 /// The left side of a mapping is the keys the user presses, and the
 /// project declares nothing a key could mean. What the mapping runs
 /// stands on the right, and that name is left alone.
@@ -62,7 +71,7 @@ fn a_command_of_vims_that_a_mapping_runs_is_marked_as_vims() {
     let text = "vim9script\nnnoremap <buffer> q <ScriptCmd>close<CR>\n";
 
     assert!(one(text, "q").owned);
-    assert!(one(text, "close").owned);
+    assert!(vims_or_none(text, "close"));
 }
 
 #[test]
@@ -250,7 +259,7 @@ fn the_name_of_a_plug_mapping_is_marked_as_vims() {
 fn a_command_behind_the_colon_of_a_right_side_is_marked_as_vims() {
     let text = "vim9script\n:nnoremap <silent> q :quit<CR>\n";
 
-    assert!(one(text, "quit").owned);
+    assert!(vims_or_none(text, "quit"));
 }
 
 #[test]
@@ -293,9 +302,28 @@ fn the_keys_after_any_key_name_that_runs_no_code_are_marked_as_vims() {
 fn a_key_name_in_lower_case_opens_a_command_line() {
     let text = "vim9script\nnnoremap b <cmd>call Go()<cr>\nnnoremap c <scriptcmd>Go()<cr>\n";
 
-    assert!(one(text, "call").owned);
+    assert!(vims_or_none(text, "call"));
     assert!(refs(text)
         .iter()
         .filter(|r| r.name == "Go")
         .all(|r| !r.owned));
+}
+
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/131
+#[test]
+fn the_arguments_of_the_command_line_a_mapping_runs_are_vims() {
+    let text = "vim9script\ndef LspFormatFunc(t: string)\nenddef\nnnoremap <silent> <Plug>(LspFormat) <ScriptCmd>set operatorfunc=LspFormatFunc<CR>g@\nnnoremap <buffer> <Esc> <Cmd>wincmd c<CR>\nnnoremap <buffer><nowait> <C-r> <ScriptCmd>keepj edit<CR>\nnnoremap q :quit<CR>:wincmd p<CR>\n";
+
+    for word in ["operatorfunc", "c", "keepj", "edit", "p"] {
+        assert!(vims_or_none(text, word), "{word}");
+    }
+}
+
+#[test]
+fn a_call_on_the_command_line_a_mapping_runs_keeps_its_credit() {
+    let text =
+        "vim9script\nnnoremap x <ScriptCmd>keepj Toggle()<CR>\nnnoremap y <Cmd>call Pick()<CR>\n";
+
+    assert!(!one(text, "Toggle").owned);
+    assert!(!one(text, "Pick").owned);
 }
