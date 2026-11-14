@@ -60,6 +60,10 @@ const PARAMS: char = '(';
 const LEGACY_COMMENT: char = '"';
 const LEGACY_CARRIED: &str = "\"\\ ";
 
+// What stands against the name of a key in a dictionary.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/116
+const KEY_COLON: char = ':';
+
 // The words that open or close a block. A bracket left unclosed by a
 // broken line must not swallow the file, so one of these at the start
 // of a line ends the statement before it, whatever the bracket depth.
@@ -230,9 +234,14 @@ pub fn tokens(text: &str) -> Vec<Tok> {
 }
 
 /// FUNCTION: True when a line opens or closes a block, which ends any
-/// statement a broken line left open.
+/// statement a broken line left open. A word with a colon against it
+/// is the key of a dictionary, as `command: 'x',` is, and opens
+/// nothing.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/116
 fn opens_block(line: &str) -> bool {
-    RESYNC.iter().any(|word| opens_with(line, word))
+    RESYNC.iter().any(|word| {
+        opens_with(line, word) && !line.trim_start()[word.len()..].starts_with(KEY_COLON)
+    })
 }
 
 /// The kind of body a line stands in.
