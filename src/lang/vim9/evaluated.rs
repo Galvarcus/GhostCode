@@ -335,7 +335,7 @@ mod tests {
 
     #[test]
     fn a_command_at_the_head_is_vims() {
-        assert_eq!(words_of("silent file x"), vec!["silent", "file"]);
+        assert_eq!(words_of("silent echo x"), vec!["silent", "echo"]);
     }
 
     #[test]
@@ -346,10 +346,10 @@ mod tests {
     #[test]
     fn every_name_of_the_argument_comes_back_in_order() {
         assert_eq!(
-            names("silent file x"),
+            names("silent echo x"),
             vec![
                 Word::bare(("silent".to_string(), true)),
-                Word::bare(("file".to_string(), true)),
+                Word::bare(("echo".to_string(), true)),
                 Word::bare(("x".to_string(), false)),
             ]
         );
@@ -364,13 +364,13 @@ mod tests {
     fn every_command_of_a_literal_string_is_read() {
         assert_eq!(
             words_of("silent! bwipe! | edit x"),
-            vec!["silent", "bwipe", "edit"]
+            vec!["silent", "bwipe", "edit", "x"]
         );
     }
 
     #[test]
     fn an_argument_that_is_no_command_is_left_alone() {
-        assert_eq!(words_of("edit Foo"), vec!["edit"]);
+        assert_eq!(words_of("echo Foo"), vec!["echo"]);
     }
 
     #[test]
@@ -554,8 +554,8 @@ mod tests {
     #[test]
     fn a_string_inside_a_gap_of_a_command_that_owns_no_line_is_not_vims() {
         assert_eq!(
-            words_of("edit {on ? \"enable\" : \"disable\"}"),
-            vec!["edit"]
+            words_of("echo {on ? \"enable\" : \"disable\"}"),
+            vec!["echo"]
         );
     }
 

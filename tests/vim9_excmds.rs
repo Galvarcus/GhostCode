@@ -444,3 +444,41 @@ fn an_argument_of_the_function_builtin_is_not_marked() {
 
     assert!(!one(text, "Width").owned);
 }
+
+/// Most commands of Vim take text and no expression, so their
+/// arguments are Vim's: a file, a keyword, a register, an event.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/108
+#[test]
+fn the_arguments_of_a_command_that_takes_text_are_marked_as_vims() {
+    let text =
+        "vim9script\nedit foo.txt\nfiletype plugin on\nwincmd p\nredir END\npackadd matchit\n";
+
+    for word in ["foo", "plugin", "on", "p", "END", "matchit"] {
+        assert!(one(text, word).owned, "{word}");
+    }
+}
+
+#[test]
+fn the_argument_of_a_command_that_takes_an_expression_is_still_a_name() {
+    let text = "vim9script\nreturn Helper\n";
+
+    assert!(!one(text, "Helper").owned);
+}
+
+#[test]
+fn the_command_a_command_runs_is_still_read_as_one() {
+    let text = "vim9script\nwindo Helper()\n";
+
+    assert!(!one(text, "Helper").owned);
+}
+
+/// The pattern of `:catch` is text that Vim matches, not code.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/92
+#[test]
+fn the_pattern_of_a_catch_command_is_marked_as_vims() {
+    let text = "vim9script\ntry\n  echo 1\ncatch /^Vim\\%((\\a\\+)\\)\\?:E11/\nendtry\n";
+
+    for word in ["Vim", "a", "E11"] {
+        assert!(one(text, word).owned, "{word}");
+    }
+}

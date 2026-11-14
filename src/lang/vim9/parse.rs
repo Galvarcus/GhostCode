@@ -865,35 +865,68 @@ const DICT: &str = "dict";
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 const SET_FAMILY: &[&str] = &["set", "setlocal", "setglobal"];
 
-// The commands whose arguments are text Vim keeps for itself from the
-// command to its end: a highlight group, an attribute and its value,
-// a keyword of the command, the words of a pattern, the path of a
-// menu, a color scheme, a locale with its category, and a filetype.
-// `canonical` reaches each from an abbreviation, as it does a set
-// command.
+// The commands whose arguments are code: an expression, a command to
+// run, or a statement that the parser reads by its own rules. Every
+// other command of Vim takes text that Vim keeps for itself from the
+// command to its end: a file, a keyword, a group, a pattern, a
+// register, an event. The list of code is closed and short, where a
+// list of text would grow with each plugin. A word marked as text
+// still credits a symbol of its spelling, so a command missing here
+// costs a count and never a finding.
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-//
-// `:sleep` takes a count with its unit, `:vimgrep` a pattern, its
-// flags and file names, `:messages` a keyword or a count, and
-// `:source` a file name.
-const TEXT_FAMILY: &[&str] = &[
-    "highlight",
-    "syntax",
-    "echohl",
-    "colorscheme",
-    "language",
-    "setfiletype",
-    "sleep",
-    "vimgrep",
-    "messages",
-    "source",
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/108
+const CODE_ARGS: &[&str] = &[
+    // An expression.
+    "echo",
+    "echon",
+    "echomsg",
+    "echoerr",
+    "echoconsole",
+    "echowindow",
+    "execute",
+    "call",
+    "eval",
+    "if",
+    "elseif",
+    "while",
+    "for",
+    "return",
+    "throw",
+    "var",
+    "const",
+    "final",
+    "let",
+    "unlet",
+    "lockvar",
+    "unlockvar",
+    // A command to run.
+    "windo",
+    "bufdo",
+    "tabdo",
+    "argdo",
+    "cdo",
+    "ldo",
+    "cfdo",
+    "lfdo",
+    "folddoopen",
+    "folddoclosed",
+    "global",
+    "vglobal",
+    "vim9cmd",
+    "legacy",
+    // A statement with rules of its own.
+    "autocmd",
+    "command",
+    "substitute",
+    "def",
+    "function",
+    "class",
+    "enum",
+    "interface",
+    "type",
+    "import",
+    "export",
 ];
-
-// What the name of every menu command ends with: `amenu`, `emenu`,
-// `nnoremenu`, `aunmenu`. Each takes a priority, a keyword or a path,
-// and the keys the entry runs.
-// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-const MENU: &str = "menu";
 
 // The command that runs its argument as keys. It is apart from the
 // family above because it takes a bar as one of those keys, so
@@ -2167,9 +2200,14 @@ pub(super) fn text_args(stmt: &[Tok], i: usize, heads: &[usize]) -> bool {
 }
 
 /// FUNCTION: Whether a command keeps its arguments as text of Vim's
-/// own from the command to its end.
+/// own from the command to its end: every command but one whose
+/// arguments are code, a modifier, and the commands whose arguments
+/// have rules of their own.
 fn text_family(name: &str) -> bool {
-    TEXT_FAMILY.contains(&name) || name.ends_with(MENU)
+    !CODE_ARGS.contains(&name)
+        && !MODS.contains(&name)
+        && !SET_FAMILY.contains(&name)
+        && !name.ends_with(MAP)
 }
 
 /// FUNCTION: Whether the last command of a statement takes the rest
