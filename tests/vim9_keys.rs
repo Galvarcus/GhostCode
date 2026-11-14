@@ -227,3 +227,36 @@ fn a_mapping_command_with_its_argument_against_it_is_a_mapping() {
 
     assert!(!one(text, "Heads").owned);
 }
+
+/// The special arguments of a mapping may stand together with no space.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/91
+#[test]
+fn the_left_side_after_joined_special_arguments_is_marked_as_vims() {
+    let text = "vim9script\nnnoremap <buffer><nowait> g, <ScriptCmd>echo 1<cr>\n";
+
+    assert!(one(text, "g").owned);
+}
+
+#[test]
+fn the_name_of_a_plug_mapping_is_marked_as_vims() {
+    let text = "vim9script\nnmap <c-g> <Plug>(MyToggle)\ninoremap <silent><expr> <Plug>(my-undo-action) Undo()\n";
+
+    for word in ["MyToggle", "my", "undo", "action"] {
+        assert!(one(text, word).owned, "{word}");
+    }
+}
+
+#[test]
+fn a_command_behind_the_colon_of_a_right_side_is_marked_as_vims() {
+    let text = "vim9script\n:nnoremap <silent> q :quit<CR>\n";
+
+    assert!(one(text, "quit").owned);
+}
+
+#[test]
+fn the_keys_after_the_end_of_a_command_line_are_marked_as_vims() {
+    let text = "vim9script\nnnoremap <buffer> x <ScriptCmd>Toggle()<cr>j\n";
+
+    assert!(one(text, "j").owned);
+    assert!(!one(text, "Toggle").owned);
+}

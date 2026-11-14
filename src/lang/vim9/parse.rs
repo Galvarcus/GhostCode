@@ -833,6 +833,12 @@ const DISCARD: &str = "_";
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 const DOT: &str = ".";
 
+/// The key notation that names a mapping a plugin offers, and the key
+/// that ends a command line.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/91
+const PLUG: &str = "Plug";
+const ENTER: &str = "cr";
+
 /// The operator that opens a heredoc.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/89
 const HEREDOC: &str = "=<<";
@@ -977,7 +983,7 @@ const RUNS: &[&str] = &["ScriptCmd", "Cmd"];
 // alone: a key name that runs or names code, the colon that opens a
 // command line, and the bracket of a call.
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-const CODE: &[&str] = &["ScriptCmd", "Cmd", "SID", "Plug", ":", "("];
+const CODE: &[&str] = &["ScriptCmd", "Cmd", "SID", PLUG, ":", "("];
 
 // What stands before a bar that ends no command, as a pattern writes
 // its alternation.
@@ -1479,7 +1485,8 @@ impl Collect<'_> {
             || NULLS.contains(&word)
             || (TYPES.contains(&word) && in_type(stmt, i) && !called(stmt, i))
             || legacy_local(stmt, i)
-            || legacy_signature(stmt, i);
+            || legacy_signature(stmt, i)
+            || in_plug_name(stmt, i);
 
         self.out.re(Reference {
             name: tok.text.clone(),
@@ -2354,9 +2361,24 @@ pub(super) fn map_args(stmt: &[Tok], i: usize) -> bool {
         return true;
     }
 
-    i >= 2
+    // The keys after the `<CR>` that ends a command line are keys
+    // again, as the `j` of `<ScriptCmd>Toggle()<cr>j`.
+    // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/91
+    if i >= 3
+        && stmt[i].glued
         && stmt[i - 1].text == ">"
-        && RUNS.contains(&stmt[i - 2].text.as_str())
+        && stmt[i - 2].text.eq_ignore_ascii_case(ENTER)
+        && stmt[i - 3].text == "<"
+    {
+        return true;
+    }
+
+    // A command against `<ScriptCmd>` or `<Cmd>`, or behind the colon
+    // that opens a command line, as the `quit` of `:quit<CR>`.
+    let against = i >= 2 && stmt[i - 1].text == ">" && RUNS.contains(&stmt[i - 2].text.as_str());
+    let behind_colon = i >= 1 && stmt[i - 1].text == COLON;
+
+    (against || behind_colon)
         && excmds::canonical(&stmt[i].text).is_some()
         && reads_command(stmt, i)
 }
@@ -2396,11 +2418,58 @@ pub(super) fn map_at(line: &[Tok]) -> Option<usize> {
 
 /// FUNCTION: The argument of a mapping command that one word states,
 /// as `<buffer>` states `buffer`, or none where the word is no such
-/// argument.
+/// argument. Several may stand together with no space, as in
+/// `<buffer><nowait>`, and `<expr>` among them is the one that tells.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/91
 fn map_arg(word: &[Tok]) -> Option<&str> {
-    (word.len() == 3 && word[0].text == "<" && word[2].text == ">")
-        .then(|| word[1].text.as_str())
-        .filter(|name| MAP_ARGS.contains(name))
+    if word.is_empty() || !word.len().is_multiple_of(3) {
+        return None;
+    }
+
+    let names: Vec<&str> = word
+        .chunks(3)
+        .map(|g| (g[0].text == "<" && g[2].text == ">").then(|| g[1].text.as_str()))
+        .collect::<Option<_>>()?;
+
+    if !names.iter().all(|name| MAP_ARGS.contains(name)) {
+        return None;
+    }
+
+    names
+        .iter()
+        .find(|name| **name == EXPR)
+        .or(names.first())
+        .copied()
+}
+
+/// FUNCTION: Whether the word at `i` stands inside the name of a
+/// `<Plug>` mapping, as each part of `<Plug>(my-undo-action)` does.
+/// The name is a key of Vim's that a plugin gives a mapping, and no
+/// code, wherever the notation stands.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/91
+fn in_plug_name(stmt: &[Tok], i: usize) -> bool {
+    let mut k = i;
+
+    while k > 0 {
+        if !stmt[k].glued {
+            return false;
+        }
+
+        k -= 1;
+
+        match stmt[k].text.as_str() {
+            "(" => {
+                return k >= 3
+                    && stmt[k - 1].text == ">"
+                    && stmt[k - 2].text == PLUG
+                    && stmt[k - 3].text == "<";
+            }
+            ")" => return false,
+            _ => {}
+        }
+    }
+
+    false
 }
 
 /// FUNCTION: Every index at which Vim reads a command: the statement's
