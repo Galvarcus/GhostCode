@@ -163,19 +163,29 @@ pub fn declarations(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
     }
 }
 
-/// FUNCTION: Record each scoped variable the body of a heredoc
-/// spells in full.
+/// FUNCTION: Record each line of a heredoc body as text, and each
+/// scoped variable it spells in full.
 ///
 /// A statement holds no heredoc body, because the body is text and no
-/// code. The text is often a script for another Vim, and a variable
-/// it names is in use. The read is given to the top-level code of the
-/// file: the lexer does not say which body a heredoc stands in, and
-/// that code runs wherever any part of the file does.
+/// code. The text is often code that a plugin runs later, through an
+/// autocommand or execute(), or a script for another Vim, so a name it
+/// holds is in use, as a name a string holds is. The read is given to
+/// the top-level code of the file: the lexer does not say which body a
+/// heredoc stands in, and that code runs wherever any part of the file
+/// does.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/87
 pub fn heredocs(file: &Path, toks: &[Tok], out: &mut dyn Sink) {
     let origin = SymbolId::script(file);
 
     for tok in toks.iter().filter(|t| t.kind == TokKind::Heredoc) {
+        out.text(Text {
+            text: tok.text.clone(),
+            file: file.to_path_buf(),
+            line: tok.line,
+            origin: Some(origin.clone()),
+        });
+
         for name in shared::scope_givers(&tok.text) {
             out.give(name);
         }
