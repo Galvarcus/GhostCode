@@ -1256,6 +1256,24 @@ pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
         let mut passed = skip.clone();
         passed.extend(&used.taken);
 
+        // The name of a global function read as a value credits that
+        // function. It is marked as the language's, because the same
+        // spelling may name a variable that another plugin or the user
+        // sets, and that is no unplaced name.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/122
+        for &at in &used.funcrefs {
+            out.re(Reference {
+                name: stmt[at].text.clone(),
+                recv: None,
+                file: file.to_path_buf(),
+                line: stmt[at].line,
+                origin: Some(origin.clone()),
+                target: None,
+                owned: true,
+                member: false,
+            });
+        }
+
         for read in used.found.into_iter().filter(|u| !u.write) {
             let line = stmt[read.at].line;
 
