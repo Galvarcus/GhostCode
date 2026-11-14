@@ -2661,13 +2661,19 @@ pub(super) fn in_command(stmt: &[Tok], i: usize, heads: &[usize]) -> bool {
 /// `auto = Helper()` would otherwise hand a whole line to Vim and take
 /// the credit of every name on it. Every rule that claims the words
 /// after a head asks this first.
+///
+/// A dot apart from the word on the same line reaches into nothing,
+/// as `echo d .a` gives E15, so it opens the argument of a command,
+/// as the path of `edit ./main.rs` does.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/127
 pub(super) fn reads_command(stmt: &[Tok], at: usize) -> bool {
     !stmt.get(at + 1).is_some_and(|t| {
-        matches!(
-            t.text.as_str(),
-            "(" | "[" | "." | "->" | "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "..=" | "<<=" | ">>="
-        )
+        (t.text == DOT && t.glued)
+            || matches!(
+                t.text.as_str(),
+                "(" | "[" | "->" | "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "..=" | "<<=" | ">>="
+            )
     })
 }
 
