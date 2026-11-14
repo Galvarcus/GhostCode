@@ -144,6 +144,9 @@ pub struct Symbol {
     pub name: String,
     pub file: PathBuf,
     pub line: u32,
+    /// Whether another script can reach the symbol by its name: an
+    /// export, a member of an exported class, or a global function.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/102
     pub exported: bool,
     /// The name of the class, enum or interface that holds it. A name
     /// rather than an id, because a class-qualified call such as

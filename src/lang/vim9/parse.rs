@@ -348,6 +348,10 @@ fn function(
         return true;
     }
 
+    // Any user or plugin can call a global function, as it can an
+    // export, so it is public API on the same terms.
+    // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/102
+    let exported = exported || def_global(stmt, rest);
     let (kind, exported) = member_kind(scope, Kind::Function, Kind::Method, name, exported);
 
     out.sym(Symbol {
@@ -1565,6 +1569,15 @@ fn def_name<'a>(stmt: &'a [Tok], rest: &[&'a str]) -> Option<&'a str> {
         .and_then(|at| global_def_at(stmt, at));
 
     Some(behind.map_or(first, |at| stmt[at].text.as_str()))
+}
+
+/// FUNCTION: Whether a `def` statement declares a global function,
+/// `def g:Name`.
+fn def_global(stmt: &[Tok], rest: &[&str]) -> bool {
+    rest.get(1)
+        .and_then(|first| stmt.iter().position(|t| t.text == *first))
+        .and_then(|at| global_def_at(stmt, at))
+        .is_some()
 }
 
 /// FUNCTION: Where the name behind the global scope stands, when the

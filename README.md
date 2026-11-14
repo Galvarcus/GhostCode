@@ -211,7 +211,9 @@ tab_vars = true
 `exports_are_api` is true by default. Ghostcode then treats an exported
 symbol as public API and never reports it. Vim9 cannot export a method
 or a field by itself, so every method and field of an exported class
-counts as exported too, unless its name starts with an underscore.
+counts as exported too, unless its name starts with an underscore. A
+global function, `def g:Name`, counts as exported, because any user or
+plugin can call it.
 
 Set it to false for a plugin whose exports serve only its own files, as
 in an application. Ghostcode then reports an export that nothing in the
