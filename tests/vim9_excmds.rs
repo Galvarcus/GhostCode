@@ -482,3 +482,15 @@ fn the_pattern_of_a_catch_command_is_marked_as_vims() {
         assert!(one(text, word).owned, "{word}");
     }
 }
+
+/// A modifier may stand before the colon and the range of the command
+/// it modifies, and Vim reads the command behind both.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/109
+#[test]
+fn a_command_behind_a_modifier_a_colon_and_a_range_is_found() {
+    let text = "vim9script\n:silent! :%d _\n:silent :1,$delete\n";
+
+    assert!(one(text, "d").owned);
+    assert_eq!(count(text, "delete"), 0);
+    assert!(one(text, "_").owned);
+}

@@ -1441,7 +1441,7 @@ impl Collect<'_> {
         // reached into or assigned to, and `in_command` refuses those.
         let vims = recv.is_none()
             && in_command(stmt, i, heads)
-            && (excmds::canonical(word).is_some() || user_command(word));
+            && (excmds::canonical(word).is_some() || user_command(word) || short_command(stmt, i));
 
         if vims && excmds::has(word) {
             return;
@@ -2187,16 +2187,43 @@ fn ends_command(stmt: &[Tok], k: usize) -> bool {
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 pub(super) fn text_args(stmt: &[Tok], i: usize, heads: &[usize]) -> bool {
     heads.iter().copied().filter(|at| *at < i).any(|at| {
-        let Some(name) = excmds::canonical(&stmt[at].text) else {
-            return false;
-        };
-
         if !reads_command(stmt, at) {
             return false;
         }
 
-        name == NORMAL || (text_family(name) && (at + 1..i).all(|k| !ends_command(stmt, k)))
+        let open = (at + 1..i).all(|k| !ends_command(stmt, k));
+
+        if short_command(stmt, at) {
+            return open;
+        }
+
+        let Some(name) = excmds::canonical(&stmt[at].text) else {
+            return false;
+        };
+
+        name == NORMAL || (text_family(name) && open)
     })
+}
+
+/// FUNCTION: Whether the word at `at` is a command of one letter, as
+/// the `d` of `:%d _` is. The table answers no word that short, so
+/// that `g:flag` keeps its reference, but behind the colon of a
+/// command and its range a word can be nothing but a command. Its
+/// arguments are then text: a mark still credits a symbol of its
+/// spelling, so `:s` and `:g`, which take code, cost a count at most.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/109
+fn short_command(stmt: &[Tok], at: usize) -> bool {
+    let word = &stmt[at];
+
+    if word.kind != TokKind::Ident || word.text.len() != 1 {
+        return false;
+    }
+
+    stmt[..at]
+        .iter()
+        .rev()
+        .find(|t| !in_range(&t.text))
+        .is_some_and(|t| t.text == COLON)
 }
 
 /// FUNCTION: Whether a command keeps its arguments as text of Vim's
@@ -2460,21 +2487,26 @@ pub(super) fn command_at(stmt: &[Tok]) -> Option<usize> {
 
 /// FUNCTION: Where the command word of the command that opens at
 /// `from` stands, past any modifier and past a colon with its range.
+/// The two can take turns, as in `:silent! :%d _`, where the modifier
+/// has a colon of its own.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/109
 fn command_from(stmt: &[Tok], from: usize) -> Option<usize> {
-    let at = from
-        + stmt
-            .get(from..)?
-            .iter()
-            .position(|t| t.text != "!" && !modifier(&t.text))?;
+    let mut at = from;
 
-    if stmt[at].text != COLON {
-        return Some(at);
+    loop {
+        let text = stmt.get(at)?.text.as_str();
+
+        if text == "!" || modifier(text) {
+            at += 1;
+        } else if text == COLON {
+            at += 1 + stmt
+                .get(at + 1..)?
+                .iter()
+                .position(|t| !in_range(&t.text))?;
+        } else {
+            return Some(at);
+        }
     }
-
-    stmt[at + 1..]
-        .iter()
-        .position(|t| !in_range(&t.text))
-        .map(|past| at + 1 + past)
 }
 
 /// FUNCTION: Whether a token is part of a range: the whole buffer, a
