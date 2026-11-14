@@ -1608,7 +1608,18 @@ impl Collect<'_> {
         } else if gate == EVAL {
             bare(evaluated::loose(&arg))
         } else {
-            bare(identifiers(&arg).into_iter().map(|n| (n, false)).collect())
+            // A string that `call()` or `function()` takes may name a
+            // function of Vim's, which no project declares.
+            // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/100
+            bare(
+                identifiers(&arg)
+                    .into_iter()
+                    .map(|n| {
+                        let vims = builtins::has(&n);
+                        (n, vims)
+                    })
+                    .collect(),
+            )
         };
 
         for Word { name, vims, recv } in names {

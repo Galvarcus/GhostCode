@@ -216,3 +216,33 @@ fn a_string_inside_the_braces_of_an_interpolation_is_a_string() {
 
     assert_eq!(names, vec!["Join", "p", "q"]);
 }
+
+/// A string that `call()` or `function()` takes may name a function of
+/// Vim's, which no project declares.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/100
+#[test]
+fn a_builtin_in_a_call_string_is_marked_as_vims() {
+    let text = "vim9script\necho call('printf', ['%d', 1])\nvar F = function('strlen')\necho F\n";
+    let marks: Vec<(String, bool)> = refs(text)
+        .into_iter()
+        .filter(|r| r.name == "printf" || r.name == "strlen")
+        .map(|r| (r.name, r.owned))
+        .collect();
+
+    assert_eq!(
+        marks,
+        vec![("printf".to_string(), true), ("strlen".to_string(), true)]
+    );
+}
+
+#[test]
+fn a_project_function_in_a_call_string_is_still_a_name() {
+    let text = "vim9script\ndef Helper(): number\n  return 1\nenddef\necho call('Helper', [])\n";
+    let marks: Vec<bool> = refs(text)
+        .into_iter()
+        .filter(|r| r.name == "Helper")
+        .map(|r| r.owned)
+        .collect();
+
+    assert_eq!(marks, vec![false]);
+}
