@@ -11,10 +11,12 @@ use crate::model::Symbol;
 
 // The directories whose scripts Vim sources by itself, plus tests,
 // which a test runner sources. Top-level code in one of them needs no
-// caller, so it roots everything it reaches.
+// caller, so it roots everything it reaches. Plugins name the test
+// directory either way.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/86
 const ENTRY_DIRS: &[&str] = &[
     "plugin", "ftplugin", "ftdetect", "syntax", "indent", "compiler", "colors", "keymap", "lang",
-    "tests",
+    "tests", "test",
 ];
 
 // What ends the name of a script.

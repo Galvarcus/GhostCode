@@ -347,7 +347,8 @@ hidden directories, as Vim's own `globpath` does; name a file in
 - top-level code in scripts that Vim sources directly (`plugin/`,
   `ftplugin/`, `ftdetect/`, `syntax/`, `indent/`, `compiler/`,
   `colors/`, `keymap/`, `lang/`, and their `after/` copies) and in
-  `tests/`, all treated as entry points that need no call site
+  `tests/` or `test/`, all treated as entry points that need no call
+  site
 
 ## What Ghostcode doesn't detect
 
