@@ -1605,11 +1605,14 @@ impl Collect<'_> {
 
         // The word before the string names what reads it, as a command
         // in `execute 'x'` or as a call in `exists('x')`, where a
-        // bracket stands between.
+        // bracket stands between. Nothing else may stand between: the
+        // colon of the key `function:` makes no call.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/126
+        let call = i > 0 && stmt[i - 1].text == "(";
         let gate = stmt[..i]
             .iter()
             .rev()
-            .take(2)
+            .take(if call { 2 } else { 1 })
             .enumerate()
             .find_map(|(back, t)| gate_of(&t.text, back == 0));
 
