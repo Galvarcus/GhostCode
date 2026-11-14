@@ -535,13 +535,31 @@ pub fn unpacked_at(stmt: &[Tok]) -> Vec<usize> {
 }
 
 /// FUNCTION: The name and type of an annotated declaration, `x: Foo`,
-/// taking the outermost type of `list<Foo>` as the type itself.
+/// taking the outermost type of `list<Foo>` as the type itself. A type
+/// written behind the alias of its import, `k: types.Kind`, is the
+/// type behind the dot. Where the name is the alias itself, as in
+/// `var board: board.Board`, the alias stays the type: the annotation
+/// is read with the name in scope, and the type `Board` there would
+/// place `board.Board` in the class rather than in the import.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/99
 fn annotated(toks: &[Tok]) -> Option<(String, String)> {
     let name = toks.first().filter(|t| t.kind == TokKind::Ident)?;
     if toks.get(1).map(|t| t.text.as_str()) != Some(":") {
         return None;
     }
     let ty = toks.get(2).filter(|t| t.kind == TokKind::Ident)?;
+    let ty = match (toks.get(3), toks.get(4)) {
+        (Some(dot), Some(behind))
+            if dot.text == "."
+                && dot.glued
+                && behind.glued
+                && behind.kind == TokKind::Ident
+                && ty.text != name.text =>
+        {
+            behind
+        }
+        _ => ty,
+    };
 
     Some((name.text.clone(), ty.text.clone()))
 }

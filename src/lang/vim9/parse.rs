@@ -839,6 +839,11 @@ const DOT: &str = ".";
 const PLUG: &str = "Plug";
 const ENTER: &str = "cr";
 
+/// What every value of an enum has, which Vim gives and no project
+/// declares. A mark still credits a field of the same name.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/99
+const ENUM_MEMBERS: &[&str] = &["ordinal", "name"];
+
 /// The operator that opens a heredoc.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/89
 const HEREDOC: &str = "=<<";
@@ -1486,7 +1491,8 @@ impl Collect<'_> {
             || (TYPES.contains(&word) && in_type(stmt, i) && !called(stmt, i))
             || legacy_local(stmt, i)
             || legacy_signature(stmt, i)
-            || in_plug_name(stmt, i);
+            || in_plug_name(stmt, i)
+            || (member && ENUM_MEMBERS.contains(&word));
 
         self.out.re(Reference {
             name: tok.text.clone(),

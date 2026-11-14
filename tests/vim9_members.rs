@@ -156,3 +156,32 @@ fn a_class_behind_an_import_alias_still_names_itself() {
     let text = "vim9script\nimport autoload 'x/m.vim' as M\nM.Menu.new()\n";
     assert_eq!(one(text, "new").recv.as_deref(), Some("Menu"));
 }
+
+/// A type written behind the alias of its import is the type itself.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/99
+#[test]
+fn a_parameter_typed_behind_an_import_alias_has_that_type() {
+    let text = "vim9script\nimport autoload 'x/types.vim' as types\ndef F(k: types.Kind)\n  k.Label()\nenddef\n";
+
+    assert_eq!(one(text, "Label").recv.as_deref(), Some("Kind"));
+}
+
+/// Every value of an enum has an `ordinal` and a `name`, which Vim
+/// gives and no project declares.
+#[test]
+fn the_ordinal_and_the_name_of_an_enum_value_are_marked_as_vims() {
+    let text = "vim9script\ndef F(k: Kind): string\n  return k.name .. k.ordinal\nenddef\n";
+
+    assert!(one(text, "ordinal").owned);
+    assert!(one(text, "name").owned);
+}
+
+/// A variable may carry the name of the alias its type stands behind,
+/// as `var board: board.Board` does, and the annotation still names
+/// the import.
+#[test]
+fn a_variable_named_as_the_alias_of_its_type_keeps_its_annotation_placed() {
+    let text = "vim9script\nimport autoload 'x/board.vim' as board\nclass Game\n  var board: board.Board\nendclass\n";
+
+    assert_eq!(one(text, "Board").recv.as_deref(), Some("board"));
+}
