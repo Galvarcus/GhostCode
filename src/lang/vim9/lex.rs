@@ -66,6 +66,10 @@ const LEGACY_CARRIED: &str = "\"\\ ";
 const LAMBDA_BLOCK: &str = "=> {";
 const BLOCK_CLOSE: char = '}';
 
+// The arrow of a lambda, behind which Vim9 carries a line on.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/94
+const ARROW: &str = "=>";
+
 // What stands against the name of a key in a dictionary.
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/116
 const KEY_COLON: char = ':';
@@ -257,10 +261,16 @@ pub fn tokens(text: &str) -> Vec<Tok> {
             lambdas.pop();
         }
 
-        // Inside brackets the statement continues on the next line.
+        // Inside brackets the statement continues on the next line, and
+        // so it does behind the arrow of a lambda whose body stands on
+        // the next line.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/94
         if depth <= 0 {
             depth = 0;
-            push_newline(&mut toks, line);
+
+            if !rest.trim_end().ends_with(ARROW) {
+                push_newline(&mut toks, line);
+            }
         }
     }
 

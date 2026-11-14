@@ -194,3 +194,14 @@ fn a_v_variable_after_a_dict_key_is_no_reference() {
         "{names:?}"
     );
 }
+
+/// Vim9 carries a line that ends with `=>` on to the body of the lambda
+/// on the next line, where its parameters are bound.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/94
+#[test]
+fn a_lambda_parameter_read_on_the_next_line_is_no_reference() {
+    let text = "vim9script\nvar Add = (lnum: number) =>\n  lnum + 1\necho Add(1)\n";
+    let names: Vec<String> = refs(text).into_iter().map(|r| r.name).collect();
+
+    assert!(!names.iter().any(|n| n == "lnum"), "{names:?}");
+}
