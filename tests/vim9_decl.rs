@@ -194,6 +194,17 @@ fn an_entry_script_directory_roots_its_top_level_code() {
     assert!(!Vim9.is_entry(root, Path::new("import/p.vim")));
 }
 
+/// Many plugins keep their tests in `test/`, as five of the eleven in
+/// the survey do.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/86
+#[test]
+fn a_test_directory_of_either_name_roots_its_top_level_code() {
+    let root = Path::new("/project");
+
+    assert!(Vim9.is_entry(root, Path::new("tests/test_p.vim")));
+    assert!(Vim9.is_entry(root, Path::new("test/test_p.vim")));
+}
+
 #[test]
 fn a_legacy_function_file_yields_no_symbols_and_no_error() {
     let a = scan(
