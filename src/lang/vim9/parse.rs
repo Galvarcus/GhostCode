@@ -160,6 +160,10 @@ pub fn declarations(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
             continue;
         }
 
+        if alias(file, stmt, &words, line, &scope, out) {
+            continue;
+        }
+
         variable(file, stmt, &words, line, &scope, out);
     }
 }
@@ -370,6 +374,42 @@ fn function(
         line,
         exported,
         owner: scope.owner.clone(),
+        scope: None,
+        lead: false,
+    });
+
+    true
+}
+
+/// FUNCTION: Record a type alias, `type Name = list<string>`. True
+/// when the statement was one. Vim takes one only at script level.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/88
+fn alias(
+    file: &Path,
+    stmt: &[Tok],
+    words: &[&str],
+    line: u32,
+    scope: &Scope,
+    out: &mut dyn Sink,
+) -> bool {
+    if scope.owner.is_some() {
+        return false;
+    }
+
+    let (exported, _) = strip_export(words);
+
+    let Some(at) = alias_at(stmt) else {
+        return false;
+    };
+
+    out.sym(Symbol {
+        id: SymbolId::of(file, None, &stmt[at].text),
+        kind: Kind::Type,
+        name: stmt[at].text.clone(),
+        file: file.to_path_buf(),
+        line,
+        exported,
+        owner: None,
         scope: None,
         lead: false,
     });
@@ -793,6 +833,11 @@ const DISCARD: &str = "_";
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 const DOT: &str = ".";
 
+/// The words that open a type alias, `export type Name = ...`.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/88
+const EXPORT: &str = "export";
+const ALIAS: &str = "type";
+
 /// The word before the class that a class extends, and the word that
 /// ends that name where the class also implements an interface.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/82
@@ -1078,6 +1123,16 @@ pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
             .cloned()
             .unwrap_or_else(|| SymbolId::script(file));
         let in_def = scope.depth() > 0;
+
+        // The type an alias names is used where the alias is, as the
+        // calls of a body are used where the body is.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/88
+        let origin = match alias_at(stmt) {
+            Some(at) if !in_def && scope.owner.is_none() => {
+                SymbolId::of(file, None, &stmt[at].text)
+            }
+            _ => origin,
+        };
 
         // A declaration inside the body gives its name a type that
         // the calls after it are resolved against, and a loop binds
@@ -1541,6 +1596,10 @@ fn bound_names<'a>(stmt: &'a [Tok], words: &[&str]) -> Vec<&'a str> {
 /// FUNCTION: The index of the name a statement declares, which is a
 /// declaration rather than a use of itself.
 fn declared_name_at(stmt: &[Tok], words: &[&str]) -> Option<usize> {
+    if let Some(at) = alias_at(stmt) {
+        return Some(at);
+    }
+
     let (_, rest) = strip_export(words);
     let rest = strip_modifiers(rest);
 
@@ -2419,10 +2478,26 @@ fn in_type(stmt: &[Tok], i: usize) -> bool {
             continue;
         }
 
-        return text == ":";
+        return text == ":" || (text == "=" && alias_at(stmt).is_some_and(|name| name + 1 == at));
     }
 
     false
+}
+
+/// FUNCTION: Where the name of a type alias stands, when a statement
+/// declares one: `type`, a name, then `=`. The word alone is also the
+/// function `type()`, which no `=` follows.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/88
+fn alias_at(stmt: &[Tok]) -> Option<usize> {
+    let start = usize::from(stmt.first()?.text == EXPORT);
+    let keyword = stmt.get(start)?;
+    let name = stmt.get(start + 1)?;
+
+    (keyword.text == ALIAS
+        && keyword.kind == TokKind::Ident
+        && name.kind == TokKind::Ident
+        && stmt.get(start + 2).is_some_and(|t| t.text == "="))
+    .then_some(start + 1)
 }
 
 /// FUNCTION: Whether the class at `at` stands inside the brackets of

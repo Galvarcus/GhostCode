@@ -322,6 +322,7 @@ hidden directories, as Vim's own `globpath` does; name a file in
 - `class` and `export class`, including `extends` and `implements`
 - `enum` and `export enum`, and enum values (`Color.Red`)
 - `interface` and `export interface` declarations
+- `type` and `export type` aliases, and the types an alias names
 - class methods, static methods, and fields
 - module-level script variables and class fields
 - a `var` or a `const` of a function body that nothing in that body
