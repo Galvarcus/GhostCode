@@ -26,6 +26,9 @@ pub enum Kind {
     EnumValue,
     Field,
     Variable,
+    /// A type alias, `type Name = list<string>`.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/88
+    Type,
 }
 
 impl fmt::Display for Kind {
@@ -39,6 +42,7 @@ impl fmt::Display for Kind {
             Self::EnumValue => "enum_value",
             Self::Field => "field",
             Self::Variable => "variable",
+            Self::Type => "type",
         };
         f.write_str(word)
     }
@@ -144,6 +148,9 @@ pub struct Symbol {
     pub name: String,
     pub file: PathBuf,
     pub line: u32,
+    /// Whether another script can reach the symbol by its name: an
+    /// export, a member of an exported class, or a global function.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/102
     pub exported: bool,
     /// The name of the class, enum or interface that holds it. A name
     /// rather than an id, because a class-qualified call such as
@@ -253,6 +260,8 @@ pub trait Sink {
     fn text(&mut self, t: Text);
     fn fit(&mut self, f: Fit);
     fn give(&mut self, name: &str);
+    fn heir(&mut self, class: &str, base: &str);
+    fn abstract_member(&mut self, id: SymbolId);
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -273,6 +282,15 @@ pub struct Analysis {
     /// language's own name is no reference, so it is recorded here.
     /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/61
     pub given: HashSet<String>,
+    /// Each class that extends another, with the class it extends, by
+    /// name. An object of the first can stand where the second is
+    /// named, so a call on the second can run a method of the first.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/82
+    pub heirs: Vec<(String, String)>,
+    /// Each method declared abstract. An override of one fulfils it,
+    /// so the abstract method is used where an override is.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/120
+    pub abstracts: Vec<SymbolId>,
 }
 
 impl Analysis {
@@ -308,6 +326,14 @@ impl Sink for Analysis {
         self.fits.push(f);
     }
 
+    fn abstract_member(&mut self, id: SymbolId) {
+        self.abstracts.push(id);
+    }
+
+    fn heir(&mut self, class: &str, base: &str) {
+        self.heirs.push((class.to_string(), base.to_string()));
+    }
+
     fn give(&mut self, name: &str) {
         self.given.insert(name.to_string());
     }
@@ -328,6 +354,7 @@ mod tests {
             Kind::EnumValue,
             Kind::Field,
             Kind::Variable,
+            Kind::Type,
         ]
         .iter()
         .map(|k| k.to_string())
@@ -344,6 +371,7 @@ mod tests {
                 "enum_value",
                 "field",
                 "variable",
+                "type",
             ]
         );
     }

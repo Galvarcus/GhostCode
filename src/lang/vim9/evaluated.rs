@@ -6,7 +6,6 @@
 
 use std::collections::HashSet;
 
-use super::autocmd;
 use super::builtins;
 use super::excmds;
 use super::lex;
@@ -39,6 +38,10 @@ const KEY_JOIN: &str = "-";
 /// What opens the arguments of a call.
 const CALL: &str = "(";
 
+/// What opens and closes an index.
+const INDEX: &str = "[";
+const INDEX_CLOSE: &str = "]";
+
 /// One name of an executed text.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Word {
@@ -68,10 +71,11 @@ impl Word {
 ///
 /// The reading by position stops at the first gap, because a word
 /// after one stands at a position no one can know: in
-/// `execute 'silent ' .. mods .. ' edit '`, whether `edit` is a
-/// command depends on what `mods` left behind. The harvest does not
-/// stop there. Three symbols in the corpora are credited only by text
-/// after a gap, so every name still comes back.
+/// `execute $'echo {x} edit'`, whether `edit` is a command depends on
+/// what `x` left behind. A gap that opens the text is the exception,
+/// because what stands before a command can stand only there. The
+/// harvest does not stop there. Three symbols in the corpora are
+/// credited only by text after a gap, so every name still comes back.
 ///
 /// Past the gap a word is marked for one of two reasons. Its own
 /// shape says it is Vim's, wherever it stands: see `loose_words`. Or
@@ -104,10 +108,15 @@ pub fn names(arg: &str) -> Vec<Word> {
     let mut code = true;
     let mut rest = tail;
 
-    // A word glued behind a gap that opens the text is the rest of a
-    // command the gap began, as `{mode}noremap` is, so the text behind
-    // that gap is read by position as a head is.
-    let mut glued = head.is_empty();
+    // A gap that opens the text, alone or behind the colon and the
+    // range of a command line, holds what stands before a command: the
+    // start of its name, as `{mode}noremap`, or its modifiers and its
+    // count, as `{mods} copen` and `:{bnum}bw`. The text behind that
+    // gap is read by position as a head is.
+    // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/124
+    let mut glued = lex::tokens(head)
+        .iter()
+        .all(|tok| tok.text == COLON || parse::in_range(&tok.text));
 
     while !rest.is_empty() {
         let end = if code { CLOSE } else { GAP };
@@ -115,8 +124,10 @@ pub fn names(arg: &str) -> Vec<Word> {
         let mut loose = loose_words(part, code);
 
         if !code && glued {
-            if part.starts_with(|c: char| c.is_ascii_alphabetic()) {
-                let stmts = parse::statements(&lex::tokens(part));
+            let text = part.trim_start();
+
+            if text.starts_with(|c: char| c.is_ascii_alphabetic()) {
+                let stmts = parse::statements(&lex::tokens(text));
 
                 owns = stmts.last().is_some_and(|stmt| parse::owns_line(stmt));
                 loose.extend(vims_words(&stmts));
@@ -173,6 +184,17 @@ pub fn loose(arg: &str) -> Vec<(String, bool)> {
         .collect()
 }
 
+/// FUNCTION: Every name inside the braces of a text, which an
+/// interpolated string holds as code.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/125
+pub fn in_gaps(arg: &str) -> HashSet<String> {
+    arg.split(GAP)
+        .skip(1)
+        .filter_map(|part| part.split_once(CLOSE).map(|(code, _)| code))
+        .flat_map(identifiers)
+        .collect()
+}
+
 /// FUNCTION: The words of a readable head that Vim reads as its own: a
 /// command at a head position, a modifier before one, a user command,
 /// the arguments of a set-family command and of a command whose
@@ -183,24 +205,47 @@ pub fn loose(arg: &str) -> Vec<(String, bool)> {
 /// The head is lexed and run through the statement rules, so a
 /// command written short is read as one and a bar starts the next
 /// command, exactly as in code.
+///
+/// A text holds a command line and nothing else, so a word of one
+/// letter at a head position is a command, as the `b` of
+/// `keepalt b`. The scope of `g:x` has its colon glued behind it. A
+/// line Vim owns keeps the words of its strings as well, as the keys
+/// `"_y` of a `:normal`, where the quote names a register.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/124
 fn vims_words(stmts: &[Vec<lex::Tok>]) -> HashSet<String> {
     let mut out = HashSet::new();
 
     for stmt in stmts {
         let heads = parse::heads(stmt);
-        let owned = parse::command_at(stmt).and_then(|at| autocmd::owned(stmt, at));
+        let owned = parse::autocmd_words(stmt, &heads);
+
+        if parse::owns_line(stmt) {
+            out.extend(
+                stmt.iter()
+                    .filter(|tok| tok.kind == TokKind::Str)
+                    .flat_map(|tok| identifiers(&tok.text)),
+            );
+        }
 
         for (i, tok) in stmt.iter().enumerate() {
             if tok.kind != TokKind::Ident {
                 continue;
             }
 
+            let scope = stmt
+                .get(i + 1)
+                .is_some_and(|next| next.text == COLON && next.glued);
+            let word = tok.text.as_str();
+
             let vims = (parse::in_command(stmt, i, &heads)
-                && (excmds::canonical(&tok.text).is_some() || parse::user_command(&tok.text)))
+                && (excmds::canonical(word).is_some()
+                    || parse::user_command(word)
+                    || (word.len() == 1 && !scope)))
                 || parse::set_args(stmt, i, &heads)
                 || parse::text_args(stmt, i, &heads)
                 || parse::map_args(stmt, i)
-                || owned.as_ref().is_some_and(|own| own.contains(&i));
+                || parse::in_command_def(stmt, i)
+                || owned.iter().any(|own| own.contains(&i));
 
             if vims {
                 out.insert(tok.text.clone());
@@ -267,14 +312,35 @@ fn keyed(text: &str) -> Vec<(String, String)> {
     toks.iter()
         .enumerate()
         .filter(|(i, tok)| is_key(&toks, *i) && tok.kind == TokKind::Ident)
-        .map(|(i, tok)| (tok.text.clone(), toks[i - 2].text.clone()))
+        .filter_map(|(i, tok)| Some((tok.text.clone(), receiver(&toks, i - 1)?)))
         .collect()
 }
 
 /// FUNCTION: Whether the token at `i` is glued behind a dot that
 /// follows a name.
 fn is_key(toks: &[lex::Tok], i: usize) -> bool {
-    i > 1 && toks[i].glued && toks[i - 1].text == DOT && toks[i - 2].kind == TokKind::Ident
+    i > 1 && toks[i].glued && toks[i - 1].text == DOT && receiver(toks, i - 1).is_some()
+}
+
+/// FUNCTION: The name a dot at `dot` reaches into, past every index
+/// behind that name, as the `t` of `t[0].file`.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/124
+fn receiver(toks: &[lex::Tok], dot: usize) -> Option<String> {
+    let mut k = dot.checked_sub(1)?;
+    let mut depth = 0usize;
+
+    loop {
+        match toks[k].text.as_str() {
+            INDEX_CLOSE => depth += 1,
+            INDEX => depth = depth.checked_sub(1)?,
+            _ if depth == 0 => break,
+            _ => {}
+        }
+
+        k = k.checked_sub(1)?;
+    }
+
+    (toks[k].kind == TokKind::Ident).then(|| toks[k].text.clone())
 }
 
 /// FUNCTION: The words inside the strings of an expression.
@@ -335,7 +401,7 @@ mod tests {
 
     #[test]
     fn a_command_at_the_head_is_vims() {
-        assert_eq!(words_of("silent file x"), vec!["silent", "file"]);
+        assert_eq!(words_of("silent echo x"), vec!["silent", "echo"]);
     }
 
     #[test]
@@ -346,10 +412,10 @@ mod tests {
     #[test]
     fn every_name_of_the_argument_comes_back_in_order() {
         assert_eq!(
-            names("silent file x"),
+            names("silent echo x"),
             vec![
                 Word::bare(("silent".to_string(), true)),
-                Word::bare(("file".to_string(), true)),
+                Word::bare(("echo".to_string(), true)),
                 Word::bare(("x".to_string(), false)),
             ]
         );
@@ -364,13 +430,13 @@ mod tests {
     fn every_command_of_a_literal_string_is_read() {
         assert_eq!(
             words_of("silent! bwipe! | edit x"),
-            vec!["silent", "bwipe", "edit"]
+            vec!["silent", "bwipe", "edit", "x"]
         );
     }
 
     #[test]
     fn an_argument_that_is_no_command_is_left_alone() {
-        assert_eq!(words_of("edit Foo"), vec!["edit"]);
+        assert_eq!(words_of("echo Foo"), vec!["echo"]);
     }
 
     #[test]
@@ -382,13 +448,13 @@ mod tests {
     }
 
     #[test]
-    fn a_name_after_a_gap_is_never_vims() {
-        assert_eq!(words_of("{x} edit"), Vec::<String>::new());
+    fn a_name_after_a_gap_inside_the_text_is_never_vims() {
+        assert_eq!(words_of("echo {x} edit"), vec!["echo"]);
     }
 
     #[test]
     fn a_user_command_at_the_head_is_vims() {
-        assert_eq!(words_of("PluginOpen draft"), vec!["PluginOpen"]);
+        assert_eq!(words_of("PluginOpen draft"), vec!["PluginOpen", "draft"]);
     }
 
     #[test]
@@ -536,9 +602,46 @@ mod tests {
         assert_eq!(words_of("{m}map {lhs} x"), vec!["map", "x"]);
     }
 
+    /// The gap that opens the text holds what stands before a command,
+    /// as modifiers or a count, so the word apart from it is read by
+    /// position too.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/124
     #[test]
-    fn a_word_apart_from_the_gap_that_opens_the_text_is_not_vims() {
-        assert_eq!(words_of("{m} noremap"), Vec::<String>::new());
+    fn a_command_apart_from_the_gap_that_opens_the_text_is_vims() {
+        assert_eq!(words_of("{mods} copen"), vec!["copen"]);
+    }
+
+    #[test]
+    fn a_command_behind_a_range_and_a_gap_is_vims() {
+        assert_eq!(words_of(":{bnum}bw"), vec!["bw"]);
+    }
+
+    #[test]
+    fn the_attributes_of_a_command_definition_are_vims() {
+        assert_eq!(
+            words_of("command -nargs=* -bang -range"),
+            vec!["command", "nargs", "bang", "range"]
+        );
+    }
+
+    #[test]
+    fn the_keys_in_a_string_of_a_normal_command_are_vims() {
+        assert_eq!(words_of("normal! 1G\"_y"), vec!["normal", "_y"]);
+    }
+
+    #[test]
+    fn a_command_of_one_letter_behind_a_modifier_is_vims() {
+        assert_eq!(words_of("sil! keepalt b "), vec!["sil", "keepalt", "b"]);
+    }
+
+    #[test]
+    fn a_word_behind_an_index_inside_a_gap_is_a_member() {
+        let file = names("split {t[0].file}")
+            .into_iter()
+            .find(|word| word.name == "file")
+            .expect("the word comes back");
+
+        assert_eq!(file.recv.as_deref(), Some("t"));
     }
 
     /// A string inside a gap of a line that a command owns is text
@@ -554,8 +657,8 @@ mod tests {
     #[test]
     fn a_string_inside_a_gap_of_a_command_that_owns_no_line_is_not_vims() {
         assert_eq!(
-            words_of("edit {on ? \"enable\" : \"disable\"}"),
-            vec!["edit"]
+            words_of("echo {on ? \"enable\" : \"disable\"}"),
+            vec!["echo"]
         );
     }
 

@@ -1,0 +1,12 @@
+# The settings of one truth family: every finding class on, and an
+# export is no public API, so that each symbol needs a use of its own.
+# License: GNU GPL 3.0
+
+exports_are_api = false
+
+[findings]
+locals = true
+globals = true
+buffer_vars = true
+window_vars = true
+tab_vars = true

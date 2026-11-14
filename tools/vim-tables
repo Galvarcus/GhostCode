@@ -108,12 +108,16 @@ fi
 
 # Each row of the section reads `|:tag|<tab>:c[ommand]<tab>action`, and
 # the second field holds the name with its optional part in brackets.
+# A few rows have spaces in place of the tab after the tag, as the row of
+# :scriptencoding does, so the field is read as the first word after the
+# tag rather than by the tab.
+# REFERENCE: https://github.com/Galvarcus/GhostCode/issues/110
 # The table is searched by `partition_point`, which orders names by
 # their bytes, so the sort has to as well. A name the file lists twice
 # keeps the shorter prefix, which is the one Vim answers to.
 names=$(
   sed -n '/\*ex-cmd-index\*/,$p' "$doc" |
-    awk -F'\t+' '/^\|:/ {print $2}' |
+    awk '/^\|:/ {sub(/^\|[^|]*\|[ \t]+/, ""); sub(/[ \t].*$/, ""); print}' |
     sed 's/^://' |
     awk '{
       whole = $0

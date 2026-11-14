@@ -545,3 +545,25 @@ fn an_interpolated_name_with_more_joined_fixes_no_end() {
 
     assert_eq!(fits(text), vec![fit("g:p_", "", false)]);
 }
+
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/122
+#[test]
+fn a_global_function_read_as_a_value_credits_its_bare_name() {
+    let text = "vim9script\ndef F()\n  const G = g:Name\nenddef\n";
+
+    assert!(one(text, "Name").owned);
+}
+
+#[test]
+fn a_global_name_that_names_no_function_reads_no_bare_name() {
+    let cases = [
+        ("vim9script\ng:Name = 1\n", "Name"),
+        ("vim9script\nunlet g:Name\n", "Name"),
+        ("vim9script\ndef F()\n  echo g:name\nenddef\n", "name"),
+        ("let g:Name_{kind} = 1\necho g:Name_{kind}\n", "Name_"),
+    ];
+
+    for (text, name) in cases {
+        assert_eq!(reads(text, name), 0, "{text}");
+    }
+}

@@ -347,3 +347,12 @@ fn a_variable_of_a_closed_body_is_not_named_by_the_next_body() {
 
     assert_eq!(one(text, "total").target, None);
 }
+
+/// A variadic parameter is a parameter, and its body reads it by name.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/93
+#[test]
+fn a_variadic_parameter_read_in_its_body_is_no_reference() {
+    let text = "vim9script\ndef F(first: number, ...items: list<any>)\n  for i in items\n    echo i first\n  endfor\nenddef\n";
+
+    assert_eq!(count(text, "items"), 0);
+}

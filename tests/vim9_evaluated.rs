@@ -143,3 +143,39 @@ fn a_called_name_in_the_text_beside_a_key_of_its_spelling_stays_bare() {
         .iter()
         .any(|r| r.name == "Enabled" && !r.member && r.recv.is_none()));
 }
+
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/125
+#[test]
+fn a_local_inside_the_gap_of_any_read_string_is_dropped() {
+    let text = "vim9script\ndef F(provider: string, sid: number)\n  var o = eval($'{provider}.options')\n  echo o exists($'{provider}.x')\n  echo function($'<SNR>{sid}_{provider}')\nenddef\n";
+
+    assert_eq!(count(text, "provider"), 0);
+    assert_eq!(count(text, "sid"), 0);
+}
+
+/// The gap may hold the name of an imported script, so the word behind
+/// its dot may be a function of that script, and it stays bare.
+#[test]
+fn a_name_behind_a_dot_after_a_gap_of_an_evaluated_string_stays_bare() {
+    let text =
+        "vim9script\ndef F(provider: string)\n  echo eval($'{provider}.Completor')\nenddef\n";
+
+    assert!(!one(text, "Completor").member);
+}
+
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/126
+#[test]
+fn a_string_after_a_dict_key_named_function_is_text() {
+    let text = "vim9script\nconst M = {\n  def: 'E1057: Missing :enddef', function: 'E126: Missing :endfunction',\n}\necho M\n";
+
+    for name in ["E126", "Missing", "endfunction"] {
+        assert_eq!(count(text, name), 0, "{name}");
+    }
+}
+
+#[test]
+fn a_string_in_the_brackets_of_function_still_names_a_function() {
+    let text = "vim9script\ndef Helper()\nenddef\necho function('Helper')\n";
+
+    assert_eq!(count(text, "Helper"), 1);
+}

@@ -141,3 +141,37 @@ fn a_call_after_a_bar_on_a_removing_autocommand_keeps_its_credit() {
 
     assert_eq!(count(text, "Fn"), 1);
 }
+
+/// FUNCTION: Whether every reference a snippet emits for a name is
+/// marked as Vim's.
+fn all_vims(text: &str, name: &str) -> bool {
+    refs(text)
+        .iter()
+        .filter(|r| r.name == name)
+        .all(|r| r.owned)
+}
+
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/128
+#[test]
+fn the_pattern_of_an_autocommand_behind_a_bar_is_vims() {
+    let text = "vim9script\naugroup Grp | autocmd! * <buffer> | augroup END\n";
+
+    assert!(all_vims(text, "buffer"));
+}
+
+#[test]
+fn a_doautocmd_an_autocommand_runs_behind_a_modifier_is_vims() {
+    let text = "vim9script\nautocmd VimEnter * silent! doautocmd <nomodeline> User MyLoaded\n";
+
+    for name in ["doautocmd", "nomodeline", "User", "MyLoaded"] {
+        assert!(all_vims(text, name), "{name}");
+    }
+}
+
+#[test]
+fn a_call_an_autocommand_runs_behind_a_modifier_keeps_its_credit() {
+    let text = "vim9script\nautocmd VimEnter * silent! Fn()\n";
+
+    assert_eq!(count(text, "Fn"), 1);
+    assert!(!all_vims(text, "Fn"));
+}

@@ -28,6 +28,15 @@ fn one(text: &str, name: &str) -> Reference {
         .unwrap_or_else(|| panic!("no reference named {name}"))
 }
 
+/// FUNCTION: Whether every reference one snippet emits for a name is
+/// marked as Vim's. A command at a head emits none at all.
+fn vims_or_none(text: &str, name: &str) -> bool {
+    refs(text)
+        .iter()
+        .filter(|r| r.name == name)
+        .all(|r| r.owned)
+}
+
 /// The left side of a mapping is the keys the user presses, and the
 /// project declares nothing a key could mean. What the mapping runs
 /// stands on the right, and that name is left alone.
@@ -62,7 +71,7 @@ fn a_command_of_vims_that_a_mapping_runs_is_marked_as_vims() {
     let text = "vim9script\nnnoremap <buffer> q <ScriptCmd>close<CR>\n";
 
     assert!(one(text, "q").owned);
-    assert!(one(text, "close").owned);
+    assert!(vims_or_none(text, "close"));
 }
 
 #[test]
@@ -226,4 +235,95 @@ fn a_mapping_command_with_its_argument_against_it_is_a_mapping() {
     let text = "vim9script\ninoremap<buffer> # #<ScriptCmd>Heads()<CR>\n";
 
     assert!(!one(text, "Heads").owned);
+}
+
+/// The special arguments of a mapping may stand together with no space.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/91
+#[test]
+fn the_left_side_after_joined_special_arguments_is_marked_as_vims() {
+    let text = "vim9script\nnnoremap <buffer><nowait> g, <ScriptCmd>echo 1<cr>\n";
+
+    assert!(one(text, "g").owned);
+}
+
+#[test]
+fn the_name_of_a_plug_mapping_is_marked_as_vims() {
+    let text = "vim9script\nnmap <c-g> <Plug>(MyToggle)\ninoremap <silent><expr> <Plug>(my-undo-action) Undo()\n";
+
+    for word in ["MyToggle", "my", "undo", "action"] {
+        assert!(one(text, word).owned, "{word}");
+    }
+}
+
+#[test]
+fn a_command_behind_the_colon_of_a_right_side_is_marked_as_vims() {
+    let text = "vim9script\n:nnoremap <silent> q :quit<CR>\n";
+
+    assert!(vims_or_none(text, "quit"));
+}
+
+#[test]
+fn the_keys_after_the_end_of_a_command_line_are_marked_as_vims() {
+    let text = "vim9script\nnnoremap <buffer> x <ScriptCmd>Toggle()<cr>j\n";
+
+    assert!(one(text, "j").owned);
+    assert!(!one(text, "Toggle").owned);
+}
+
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/123
+#[test]
+fn a_plug_name_in_any_spelling_is_marked_as_vims() {
+    let text = "vim9script\nnnoremap <buffer> <localleader>b <Plug>MarkdownBold\nnmap gq <plug>(LspFormat)\n";
+
+    for word in ["MarkdownBold", "LspFormat"] {
+        assert!(one(text, word).owned, "{word}");
+    }
+}
+
+#[test]
+fn a_user_command_a_mapping_runs_is_marked_as_vims() {
+    let text = "vim9script\nnnoremap <buffer> <localleader>o <Cmd>OutlineToggle ^- [ <cr>\nnnoremap x <ScriptCmd>Toggle()<cr>\n";
+
+    assert!(one(text, "OutlineToggle").owned);
+    assert!(!one(text, "Toggle").owned);
+}
+
+#[test]
+fn the_keys_after_any_key_name_that_runs_no_code_are_marked_as_vims() {
+    let text = "vim9script\nxnoremap <buffer><nowait> x <ScriptCmd>Toggle()<cr><ESC>j\nnnoremap y <SID>Pick()<cr>\n";
+
+    assert!(one(text, "j").owned);
+    assert!(!one(text, "Toggle").owned);
+    assert!(!one(text, "Pick").owned);
+}
+
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/130
+#[test]
+fn a_key_name_in_lower_case_opens_a_command_line() {
+    let text = "vim9script\nnnoremap b <cmd>call Go()<cr>\nnnoremap c <scriptcmd>Go()<cr>\n";
+
+    assert!(vims_or_none(text, "call"));
+    assert!(refs(text)
+        .iter()
+        .filter(|r| r.name == "Go")
+        .all(|r| !r.owned));
+}
+
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/131
+#[test]
+fn the_arguments_of_the_command_line_a_mapping_runs_are_vims() {
+    let text = "vim9script\ndef LspFormatFunc(t: string)\nenddef\nnnoremap <silent> <Plug>(LspFormat) <ScriptCmd>set operatorfunc=LspFormatFunc<CR>g@\nnnoremap <buffer> <Esc> <Cmd>wincmd c<CR>\nnnoremap <buffer><nowait> <C-r> <ScriptCmd>keepj edit<CR>\nnnoremap q :quit<CR>:wincmd p<CR>\n";
+
+    for word in ["operatorfunc", "c", "keepj", "edit", "p"] {
+        assert!(vims_or_none(text, word), "{word}");
+    }
+}
+
+#[test]
+fn a_call_on_the_command_line_a_mapping_runs_keeps_its_credit() {
+    let text =
+        "vim9script\nnnoremap x <ScriptCmd>keepj Toggle()<CR>\nnnoremap y <Cmd>call Pick()<CR>\n";
+
+    assert!(!one(text, "Toggle").owned);
+    assert!(!one(text, "Pick").owned);
 }

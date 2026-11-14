@@ -15,6 +15,7 @@ use crate::lang::vim9::excmds;
 use crate::lang::vim9::exists;
 use crate::lang::vim9::lex::Tok;
 use crate::lang::vim9::lex::TokKind;
+use crate::lang::vim9::rules;
 use crate::lang::vim9::shared;
 use crate::lang::vim9::types;
 use crate::lang::vim9::types::Blocks;
@@ -159,23 +160,37 @@ pub fn declarations(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
             continue;
         }
 
+        if alias(file, stmt, &words, line, &scope, out) {
+            continue;
+        }
+
         variable(file, stmt, &words, line, &scope, out);
     }
 }
 
-/// FUNCTION: Record each scoped variable the body of a heredoc
-/// spells in full.
+/// FUNCTION: Record each line of a heredoc body as text, and each
+/// scoped variable it spells in full.
 ///
 /// A statement holds no heredoc body, because the body is text and no
-/// code. The text is often a script for another Vim, and a variable
-/// it names is in use. The read is given to the top-level code of the
-/// file: the lexer does not say which body a heredoc stands in, and
-/// that code runs wherever any part of the file does.
+/// code. The text is often code that a plugin runs later, through an
+/// autocommand or execute(), or a script for another Vim, so a name it
+/// holds is in use, as a name a string holds is. The read is given to
+/// the top-level code of the file: the lexer does not say which body a
+/// heredoc stands in, and that code runs wherever any part of the file
+/// does.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/55
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/87
 pub fn heredocs(file: &Path, toks: &[Tok], out: &mut dyn Sink) {
     let origin = SymbolId::script(file);
 
     for tok in toks.iter().filter(|t| t.kind == TokKind::Heredoc) {
+        out.text(Text {
+            text: tok.text.clone(),
+            file: file.to_path_buf(),
+            line: tok.line,
+            origin: Some(origin.clone()),
+        });
+
         for name in shared::scope_givers(&tok.text) {
             out.give(name);
         }
@@ -264,6 +279,10 @@ fn open_container(
         Container::None => return false,
     };
 
+    if let Some(base) = base_name(rest) {
+        out.heir(name, base);
+    }
+
     scope.owner = Some(name.to_string());
     scope.owner_exported = exported;
     scope.container = container;
@@ -313,6 +332,14 @@ fn function(
     out: &mut dyn Sink,
 ) -> bool {
     let (exported, rest) = strip_export(words);
+
+    // Only a modifier before `def` can make it abstract; a parameter
+    // may carry the word as its name.
+    // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/120
+    let is_abstract = rest
+        .iter()
+        .take_while(|w| **w != "def")
+        .any(|w| *w == ABSTRACT);
     let rest = strip_modifiers(rest);
 
     if rest.first().copied() != Some("def") {
@@ -334,16 +361,67 @@ fn function(
         return true;
     }
 
+    // Any user or plugin can call a global function, as it can an
+    // export, so it is public API on the same terms.
+    // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/102
+    let exported = exported || def_global(stmt, rest);
     let (kind, exported) = member_kind(scope, Kind::Function, Kind::Method, name, exported);
+    let id = SymbolId::of(file, scope.owner.as_deref(), name);
+
+    // A runner calls a test by its name, which no parser sees.
+    // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/101
+    if rules::is_test(file, scope.owner.as_deref(), name) {
+        out.root(id.clone());
+    }
+
+    if is_abstract && scope.owner.is_some() {
+        out.abstract_member(id.clone());
+    }
 
     out.sym(Symbol {
-        id: SymbolId::of(file, scope.owner.as_deref(), name),
+        id,
         kind,
         name: (*name).to_string(),
         file: file.to_path_buf(),
         line,
         exported,
         owner: scope.owner.clone(),
+        scope: None,
+        lead: false,
+    });
+
+    true
+}
+
+/// FUNCTION: Record a type alias, `type Name = list<string>`. True
+/// when the statement was one. Vim takes one only at script level.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/88
+fn alias(
+    file: &Path,
+    stmt: &[Tok],
+    words: &[&str],
+    line: u32,
+    scope: &Scope,
+    out: &mut dyn Sink,
+) -> bool {
+    if scope.owner.is_some() {
+        return false;
+    }
+
+    let (exported, _) = strip_export(words);
+
+    let Some(at) = alias_at(stmt) else {
+        return false;
+    };
+
+    out.sym(Symbol {
+        id: SymbolId::of(file, None, &stmt[at].text),
+        kind: Kind::Type,
+        name: stmt[at].text.clone(),
+        file: file.to_path_buf(),
+        line,
+        exported,
+        owner: None,
         scope: None,
         lead: false,
     });
@@ -755,7 +833,7 @@ pub(super) const KEYWORDS: &[&str] = &[
 // `n = n + 1` must not give different answers for one statement
 // spelled two ways.
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-const WRITES: &[&str] = &["=", "=<<"];
+const WRITES: &[&str] = &["=", HEREDOC];
 
 // Vim9's discard placeholder. A value assigned to it is stated to be
 // unwanted, so there is nothing to report and nothing to record.
@@ -766,6 +844,38 @@ const DISCARD: &str = "_";
 // `..`, which the lexer reads as one operator of its own.
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 const DOT: &str = ".";
+
+/// The key notation that names a mapping a plugin offers.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/91
+const PLUG: &str = "Plug";
+
+/// What every value of an enum has, which Vim gives and no project
+/// declares. A mark still credits a field of the same name.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/99
+const ENUM_MEMBERS: &[&str] = &["ordinal", "name"];
+
+/// The modifier of a method that a class extending its own fulfils.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/120
+const ABSTRACT: &str = "abstract";
+
+/// The operator that opens a heredoc.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/89
+const HEREDOC: &str = "=<<";
+
+/// The command that defines a user command.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/112
+const DEFINES_COMMAND: &str = "command";
+
+/// The words that open a type alias, `export type Name = ...`.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/88
+const EXPORT: &str = "export";
+const ALIAS: &str = "type";
+
+/// The word before the class that a class extends, and the word that
+/// ends that name where the class also implements an interface.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/82
+const EXTENDS: &str = "extends";
+const IMPLEMENTS: &str = "implements";
 
 // The constructor Vim supplies for a class that declares none. Behind
 // a dot the name is the language's, and a constructor a class does
@@ -788,35 +898,68 @@ const DICT: &str = "dict";
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 const SET_FAMILY: &[&str] = &["set", "setlocal", "setglobal"];
 
-// The commands whose arguments are text Vim keeps for itself from the
-// command to its end: a highlight group, an attribute and its value,
-// a keyword of the command, the words of a pattern, the path of a
-// menu, a color scheme, a locale with its category, and a filetype.
-// `canonical` reaches each from an abbreviation, as it does a set
-// command.
+// The commands whose arguments are code: an expression, a command to
+// run, or a statement that the parser reads by its own rules. Every
+// other command of Vim takes text that Vim keeps for itself from the
+// command to its end: a file, a keyword, a group, a pattern, a
+// register, an event. The list of code is closed and short, where a
+// list of text would grow with each plugin. A word marked as text
+// still credits a symbol of its spelling, so a command missing here
+// costs a count and never a finding.
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-//
-// `:sleep` takes a count with its unit, `:vimgrep` a pattern, its
-// flags and file names, `:messages` a keyword or a count, and
-// `:source` a file name.
-const TEXT_FAMILY: &[&str] = &[
-    "highlight",
-    "syntax",
-    "echohl",
-    "colorscheme",
-    "language",
-    "setfiletype",
-    "sleep",
-    "vimgrep",
-    "messages",
-    "source",
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/108
+const CODE_ARGS: &[&str] = &[
+    // An expression.
+    "echo",
+    "echon",
+    "echomsg",
+    "echoerr",
+    "echoconsole",
+    "echowindow",
+    "execute",
+    "call",
+    "eval",
+    "if",
+    "elseif",
+    "while",
+    "for",
+    "return",
+    "throw",
+    "var",
+    "const",
+    "final",
+    "let",
+    "unlet",
+    "lockvar",
+    "unlockvar",
+    // A command to run.
+    "windo",
+    "bufdo",
+    "tabdo",
+    "argdo",
+    "cdo",
+    "ldo",
+    "cfdo",
+    "lfdo",
+    "folddoopen",
+    "folddoclosed",
+    "global",
+    "vglobal",
+    "vim9cmd",
+    "legacy",
+    // A statement with rules of its own.
+    "autocmd",
+    "command",
+    "substitute",
+    "def",
+    "function",
+    "class",
+    "enum",
+    "interface",
+    "type",
+    "import",
+    "export",
 ];
-
-// What the name of every menu command ends with: `amenu`, `emenu`,
-// `nnoremenu`, `aunmenu`. Each takes a priority, a keyword or a path,
-// and the keys the entry runs.
-// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-const MENU: &str = "menu";
 
 // The command that runs its argument as keys. It is apart from the
 // family above because it takes a bar as one of those keys, so
@@ -859,7 +1002,7 @@ const RUNS: &[&str] = &["ScriptCmd", "Cmd"];
 // alone: a key name that runs or names code, the colon that opens a
 // command line, and the bracket of a call.
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-const CODE: &[&str] = &["ScriptCmd", "Cmd", "SID", "Plug", ":", "("];
+const CODE: &[&str] = &["ScriptCmd", "Cmd", "SID", PLUG, ":", "("];
 
 // What stands before a bar that ends no command, as a pattern writes
 // its alternation.
@@ -1047,11 +1190,28 @@ pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
             .unwrap_or_else(|| SymbolId::script(file));
         let in_def = scope.depth() > 0;
 
+        // The type an alias names is used where the alias is, as the
+        // calls of a body are used where the body is.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/88
+        let origin = match alias_at(stmt) {
+            Some(at) if !in_def && scope.owner.is_none() => {
+                SymbolId::of(file, None, &stmt[at].text)
+            }
+            _ => origin,
+        };
+
         // A declaration inside the body gives its name a type that
         // the calls after it are resolved against, and a loop binds
         // its variables for the statements the loop holds.
         locals.declare(stmt);
         locals.bind_loop(stmt);
+
+        // A loop that opens the body of a `:command` binds its
+        // variables for the rest of the line, as a loop does.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/112
+        if let Some((_, body)) = command_body_at(stmt) {
+            locals.bind_loop(&stmt[body..]);
+        }
 
         // A declaration's own name is not a use of itself, so the
         // statement is read from after it: a def's parameter types and
@@ -1093,6 +1253,24 @@ pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
         let used = shared::uses(stmt, &consts);
         let mut passed = skip.clone();
         passed.extend(&used.taken);
+
+        // The name of a global function read as a value credits that
+        // function. It is marked as the language's, because the same
+        // spelling may name a variable that another plugin or the user
+        // sets, and that is no unplaced name.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/122
+        for &at in &used.funcrefs {
+            out.re(Reference {
+                name: stmt[at].text.clone(),
+                recv: None,
+                file: file.to_path_buf(),
+                line: stmt[at].line,
+                origin: Some(origin.clone()),
+                target: None,
+                owned: true,
+                member: false,
+            });
+        }
 
         for read in used.found.into_iter().filter(|u| !u.write) {
             let line = stmt[read.at].line;
@@ -1183,7 +1361,7 @@ impl Collect<'_> {
     /// METHOD: Read one statement, from the token after its own name.
     fn statement(&mut self, stmt: &[Tok], skip: &[usize]) {
         let heads = heads(stmt);
-        let owned = command_at(stmt).and_then(|at| autocmd::owned(stmt, at));
+        let owned = autocmd_words(stmt, &heads);
 
         for (i, tok) in stmt.iter().enumerate() {
             if skip.contains(&i) {
@@ -1191,7 +1369,7 @@ impl Collect<'_> {
             }
 
             match tok.kind {
-                TokKind::Ident => self.ident(stmt, i, tok, &heads, owned.as_ref()),
+                TokKind::Ident => self.ident(stmt, i, tok, &heads, &owned),
                 TokKind::Str => self.text(stmt, i, tok),
                 _ => {}
             }
@@ -1206,7 +1384,7 @@ impl Collect<'_> {
         i: usize,
         tok: &Tok,
         heads: &[usize],
-        owned: Option<&Range<usize>>,
+        owned: &[Range<usize>],
     ) {
         if KEYWORDS.contains(&tok.text.as_str()) {
             return;
@@ -1216,8 +1394,7 @@ impl Collect<'_> {
             return;
         }
 
-        if in_notation(stmt, i) || in_augroup(stmt, i) || owned.is_some_and(|own| own.contains(&i))
-        {
+        if in_notation(stmt, i) || in_augroup(stmt, i) || owned.iter().any(|own| own.contains(&i)) {
             return;
         }
 
@@ -1225,6 +1402,13 @@ impl Collect<'_> {
         // it declares, and a user command is Vim's name thereafter.
         // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
         if in_command_def(stmt, i) {
+            return;
+        }
+
+        // The words after `=<<` are the heredoc's own syntax: `trim`,
+        // `eval` and the marker that ends the body.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/89
+        if stmt[..i].iter().any(|t| t.text == HEREDOC) {
             return;
         }
 
@@ -1321,7 +1505,7 @@ impl Collect<'_> {
         // reached into or assigned to, and `in_command` refuses those.
         let vims = recv.is_none()
             && in_command(stmt, i, heads)
-            && (excmds::canonical(word).is_some() || user_command(word));
+            && (excmds::canonical(word).is_some() || user_command(word) || short_command(stmt, i));
 
         if vims && excmds::has(word) {
             return;
@@ -1337,7 +1521,9 @@ impl Collect<'_> {
             || NULLS.contains(&word)
             || (TYPES.contains(&word) && in_type(stmt, i) && !called(stmt, i))
             || legacy_local(stmt, i)
-            || legacy_signature(stmt, i);
+            || legacy_signature(stmt, i)
+            || in_plug_name(stmt, i)
+            || (member && ENUM_MEMBERS.contains(&word));
 
         self.out.re(Reference {
             name: tok.text.clone(),
@@ -1419,11 +1605,14 @@ impl Collect<'_> {
 
         // The word before the string names what reads it, as a command
         // in `execute 'x'` or as a call in `exists('x')`, where a
-        // bracket stands between.
+        // bracket stands between. Nothing else may stand between: the
+        // colon of the key `function:` makes no call.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/126
+        let call = i > 0 && stmt[i - 1].text == "(";
         let gate = stmt[..i]
             .iter()
             .rev()
-            .take(2)
+            .take(if call { 2 } else { 1 })
             .enumerate()
             .find_map(|(back, t)| gate_of(&t.text, back == 0));
 
@@ -1438,6 +1627,7 @@ impl Collect<'_> {
         };
 
         let arg = unquote(&tok.text);
+        let gapped = evaluated::in_gaps(&arg);
 
         // `exists()` takes Vim's own syntax rather than a bare name: a
         // scope prefix, an option, a feature, an autocommand group.
@@ -1453,7 +1643,18 @@ impl Collect<'_> {
         } else if gate == EVAL {
             bare(evaluated::loose(&arg))
         } else {
-            bare(identifiers(&arg).into_iter().map(|n| (n, false)).collect())
+            // A string that `call()` or `function()` takes may name a
+            // function of Vim's, which no project declares.
+            // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/100
+            bare(
+                identifiers(&arg)
+                    .into_iter()
+                    .map(|n| {
+                        let vims = builtins::has(&n);
+                        (n, vims)
+                    })
+                    .collect(),
+            )
         };
 
         for Word { name, vims, recv } in names {
@@ -1462,9 +1663,12 @@ impl Collect<'_> {
             // the code around the string is dropped there. This is
             // the second reading of the same name, and it has to
             // agree. It goes by spelling, so a word of the text that
-            // matches such a variable is dropped with it.
+            // matches such a variable is dropped with it. Whatever
+            // reads the string, a name inside its braces is such a
+            // second reading.
             // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-            if EXECUTE.contains(&gate) && self.local(&name) {
+            // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/125
+            if (EXECUTE.contains(&gate) || gapped.contains(&name)) && self.local(&name) {
                 continue;
             }
 
@@ -1509,6 +1713,10 @@ fn bound_names<'a>(stmt: &'a [Tok], words: &[&str]) -> Vec<&'a str> {
 /// FUNCTION: The index of the name a statement declares, which is a
 /// declaration rather than a use of itself.
 fn declared_name_at(stmt: &[Tok], words: &[&str]) -> Option<usize> {
+    if let Some(at) = alias_at(stmt) {
+        return Some(at);
+    }
+
     let (_, rest) = strip_export(words);
     let rest = strip_modifiers(rest);
 
@@ -1545,6 +1753,15 @@ fn def_name<'a>(stmt: &'a [Tok], rest: &[&'a str]) -> Option<&'a str> {
         .and_then(|at| global_def_at(stmt, at));
 
     Some(behind.map_or(first, |at| stmt[at].text.as_str()))
+}
+
+/// FUNCTION: Whether a `def` statement declares a global function,
+/// `def g:Name`.
+fn def_global(stmt: &[Tok], rest: &[&str]) -> bool {
+    rest.get(1)
+        .and_then(|first| stmt.iter().position(|t| t.text == *first))
+        .and_then(|at| global_def_at(stmt, at))
+        .is_some()
 }
 
 /// FUNCTION: Where the name behind the global scope stands, when the
@@ -1608,6 +1825,20 @@ fn body_id(file: &Path, stmt: &[Tok], words: &[&str], scope: &Scope) -> Option<S
     Some(SymbolId::of(file, scope.owner.as_deref(), name))
 }
 
+/// FUNCTION: The class a class statement extends, if it extends one.
+/// A class of another file stands behind the alias of its import, and
+/// the name of the class is the part after the last dot.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/82
+fn base_name<'a>(words: &'a [&'a str]) -> Option<&'a str> {
+    let at = words.iter().position(|w| *w == EXTENDS)?;
+    let base = words[at + 1..]
+        .iter()
+        .take_while(|w| **w != IMPLEMENTS)
+        .last()?;
+
+    base.rsplit(DOT).next()
+}
+
 /// FUNCTION: The container a statement opens and the name it gives
 /// it, if it opens one.
 fn container_name<'a>(words: &'a [&'a str]) -> Option<(Container, &'a str)> {
@@ -1640,7 +1871,7 @@ fn opens_def_body(words: &[&str], scope: &Scope) -> bool {
     !rest
         .iter()
         .take_while(|w| MODIFIERS.contains(w))
-        .any(|w| *w == "abstract")
+        .any(|w| *w == ABSTRACT)
 }
 
 /// FUNCTION: Whether a type word is called rather than named as a
@@ -1803,7 +2034,13 @@ fn scoped(stmt: &[Tok], i: usize, word: &str) -> bool {
         return true;
     }
 
-    i >= 2 && stmt[i - 1].text == ":" && stmt[i - 2].text == "v" && is_type_position(stmt, i)
+    // Vim9 requires a space after the colon of a key, so a name glued
+    // to `v:` is a variable of Vim's inside a dict as well.
+    // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/97
+    i >= 2
+        && stmt[i - 1].text == ":"
+        && stmt[i - 2].text == "v"
+        && (is_type_position(stmt, i) || (stmt[i].glued && stmt[i - 1].glued))
 }
 
 /// FUNCTION: Whether a name stands behind `a:` or `l:`, which hold
@@ -1848,12 +2085,14 @@ fn legacy_signature(stmt: &[Tok], i: usize) -> bool {
 /// `-complete=customlist,Func`, where the word after the comma names
 /// a function of the project's. A shape this does not expect ends the
 /// walk, which leaves the rest of the line counted rather than
-/// dropping a name the project owns.
+/// dropping a name the project owns. A line that ends among the
+/// attributes holds no name, and the end stands for it, as in the
+/// text `'command -nargs=* -bang'` whose name a gap adds.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/124
 fn command_name_at(stmt: &[Tok]) -> Option<usize> {
-    let head_at = stmt
-        .iter()
-        .position(|t| t.text != "!" && !modifier(&t.text))?;
+    // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/112
+    let head_at = command_at(stmt)?;
 
     let mut i = head_at + 1;
     while let Some(tok) = stmt.get(i) {
@@ -1876,7 +2115,20 @@ fn command_name_at(stmt: &[Tok]) -> Option<usize> {
         }
     }
 
-    None
+    Some(i.min(stmt.len()))
+}
+
+/// FUNCTION: Where the name of a `:command` definition stands, and the
+/// command word that opens its body, past any modifier.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/112
+fn command_body_at(stmt: &[Tok]) -> Option<(usize, usize)> {
+    if head(stmt).and_then(excmds::canonical) != Some(DEFINES_COMMAND) {
+        return None;
+    }
+
+    let name = command_name_at(stmt)?;
+
+    Some((name, command_from(stmt, name + 1)?))
 }
 
 /// FUNCTION: Whether a token of a `:command` or `:delcommand`
@@ -1889,7 +2141,7 @@ fn command_name_at(stmt: &[Tok]) -> Option<usize> {
 /// handler after the name, and both are left alone: the handler is
 /// often the only caller the function has.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-fn in_command_def(stmt: &[Tok], i: usize) -> bool {
+pub(super) fn in_command_def(stmt: &[Tok], i: usize) -> bool {
     if !matches!(
         head(stmt).and_then(excmds::canonical),
         Some("command" | "delcommand")
@@ -2040,22 +2292,65 @@ fn ends_command(stmt: &[Tok], k: usize) -> bool {
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 pub(super) fn text_args(stmt: &[Tok], i: usize, heads: &[usize]) -> bool {
     heads.iter().copied().filter(|at| *at < i).any(|at| {
-        let Some(name) = excmds::canonical(&stmt[at].text) else {
-            return false;
-        };
-
         if !reads_command(stmt, at) {
             return false;
         }
 
-        name == NORMAL || (text_family(name) && (at + 1..i).all(|k| !ends_command(stmt, k)))
+        let open = (at + 1..i).all(|k| !ends_command(stmt, k));
+
+        let word = uncounted(&stmt[at].text);
+
+        // A user command takes text, which its body gets as <args>.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/111
+        if short_command(stmt, at) || user_command(word) {
+            return open;
+        }
+
+        let Some(name) = excmds::canonical(word) else {
+            return false;
+        };
+
+        name == NORMAL || (text_family(name) && open)
     })
 }
 
+/// FUNCTION: A command word without the count that the lexer glues to
+/// it, as the `2` of `:2Diag prev`.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/111
+fn uncounted(word: &str) -> &str {
+    word.trim_start_matches(|c: char| c.is_ascii_digit())
+}
+
+/// FUNCTION: Whether the word at `at` is a command of one letter, as
+/// the `d` of `:%d _` is. The table answers no word that short, so
+/// that `g:flag` keeps its reference, but behind the colon of a
+/// command and its range a word can be nothing but a command. Its
+/// arguments are then text: a mark still credits a symbol of its
+/// spelling, so `:s` and `:g`, which take code, cost a count at most.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/109
+fn short_command(stmt: &[Tok], at: usize) -> bool {
+    let word = &stmt[at];
+
+    if word.kind != TokKind::Ident || word.text.len() != 1 {
+        return false;
+    }
+
+    stmt[..at]
+        .iter()
+        .rev()
+        .find(|t| !in_range(&t.text))
+        .is_some_and(|t| t.text == COLON)
+}
+
 /// FUNCTION: Whether a command keeps its arguments as text of Vim's
-/// own from the command to its end.
+/// own from the command to its end: every command but one whose
+/// arguments are code, a modifier, and the commands whose arguments
+/// have rules of their own.
 fn text_family(name: &str) -> bool {
-    TEXT_FAMILY.contains(&name) || name.ends_with(MENU)
+    !CODE_ARGS.contains(&name)
+        && !MODS.contains(&name)
+        && !SET_FAMILY.contains(&name)
+        && !name.ends_with(MAP)
 }
 
 /// FUNCTION: Whether the last command of a statement takes the rest
@@ -2071,8 +2366,13 @@ pub(super) fn owns_line(stmt: &[Tok]) -> bool {
         .filter(|at| stmt.get(*at).is_some_and(|t| !modifier(&t.text)))
         .max()
         .filter(|at| reads_command(stmt, *at))
-        .and_then(|at| excmds::canonical(&stmt[at].text))
-        .is_some_and(|name| name == NORMAL || text_family(name) || name.ends_with(MAP))
+        .is_some_and(|at| {
+            let word = uncounted(&stmt[at].text);
+
+            user_command(word)
+                || excmds::canonical(word)
+                    .is_some_and(|name| name == NORMAL || text_family(name) || name.ends_with(MAP))
+        })
 }
 
 /// FUNCTION: Whether the token at `i` is a key of a mapping or an
@@ -2101,35 +2401,116 @@ pub(super) fn map_args(stmt: &[Tok], i: usize) -> bool {
         return false;
     }
 
-    // Each word behind the command, as the index it starts at.
-    let starts: Vec<usize> = (at + 1..stmt.len()).filter(|k| !stmt[*k].glued).collect();
-    let word = |n: usize| &stmt[starts[n]..starts.get(n + 1).copied().unwrap_or(stmt.len())];
-    let Some(lhs) = (0..starts.len()).find(|n| map_arg(word(*n)).is_none()) else {
+    let Some(Sides { lhs, rhs, expr }) = sides(stmt, at) else {
         return false;
     };
 
-    let rhs = starts.get(lhs + 1).copied().unwrap_or(stmt.len());
-
     if i < rhs {
-        return i >= starts[lhs];
+        return i >= lhs;
     }
 
-    if (0..lhs).any(|n| map_arg(word(n)) == Some(EXPR)) {
+    if expr {
         return false;
     }
 
-    if !stmt[rhs..]
-        .iter()
-        .any(|tok| CODE.contains(&tok.text.as_str()))
+    if !stmt[rhs..].iter().any(|tok| key_name(CODE, &tok.text)) {
+        return true;
+    }
+
+    // The keys after a key name that runs no code are keys again, as
+    // the `j` of `<ScriptCmd>Toggle()<cr>j` and of `<cr><ESC>j`.
+    // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/91
+    // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/123
+    if i >= 3
+        && stmt[i].glued
+        && stmt[i - 1].text == ">"
+        && stmt[i - 3].text == "<"
+        && !key_name(CODE, &stmt[i - 2].text)
     {
         return true;
     }
 
-    i >= 2
-        && stmt[i - 1].text == ">"
-        && RUNS.contains(&stmt[i - 2].text.as_str())
-        && excmds::canonical(&stmt[i].text).is_some()
+    // A command against `<ScriptCmd>` or `<Cmd>`, or behind the colon
+    // that opens a command line, as the `quit` of `:quit<CR>`. A user
+    // command is no symbol of the project either.
+    // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/123
+    let against = i >= 2 && stmt[i - 1].text == ">" && key_name(RUNS, &stmt[i - 2].text);
+    let behind_colon = i >= 1 && stmt[i - 1].text == COLON;
+    let word = stmt[i].text.as_str();
+
+    (against || behind_colon)
+        && (excmds::canonical(word).is_some() || user_command(word))
         && reads_command(stmt, i)
+}
+
+/// Where the two sides of a mapping start, and whether `<expr>` makes
+/// the right side an expression.
+struct Sides {
+    lhs: usize,
+    rhs: usize,
+    expr: bool,
+}
+
+/// FUNCTION: The sides of the mapping command at `at`. The left side
+/// is the first word behind the command that is not one of its
+/// arguments, and a word is what stands between two spaces.
+fn sides(stmt: &[Tok], at: usize) -> Option<Sides> {
+    let starts: Vec<usize> = (at + 1..stmt.len()).filter(|k| !stmt[*k].glued).collect();
+    let word = |n: usize| &stmt[starts[n]..starts.get(n + 1).copied().unwrap_or(stmt.len())];
+    let lhs = (0..starts.len()).find(|n| map_arg(word(*n)).is_none())?;
+
+    Some(Sides {
+        lhs: starts[lhs],
+        rhs: starts.get(lhs + 1).copied().unwrap_or(stmt.len()),
+        expr: (0..lhs).any(|n| map_arg(word(n)) == Some(EXPR)),
+    })
+}
+
+/// FUNCTION: Where each command line that the right side of a mapping
+/// runs reads a command: behind `<ScriptCmd>` or `<Cmd>`, and behind
+/// the colon that opens a command line, past any modifier. The colon
+/// of a scope, as in `g:x`, opens none. The right side of an `<expr>`
+/// mapping is an expression and runs no command line.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/131
+fn map_lines(stmt: &[Tok], at: usize) -> Vec<usize> {
+    let mut out = Vec::new();
+
+    if !maps(stmt, at) {
+        return out;
+    }
+
+    let Some(Sides {
+        rhs, expr: false, ..
+    }) = sides(stmt, at)
+    else {
+        return out;
+    };
+
+    for k in rhs..stmt.len() {
+        if stmt[k].text == BAR {
+            break;
+        }
+
+        let runs = k >= 3
+            && stmt[k - 1].text == ">"
+            && key_name(RUNS, &stmt[k - 2].text)
+            && stmt[k - 3].text == "<";
+        let colon =
+            stmt[k - 1].text == COLON && !(stmt[k - 1].glued && stmt[k - 2].kind == TokKind::Ident);
+
+        if runs || colon {
+            out.extend(k..=command_from(stmt, k).unwrap_or(k));
+        }
+    }
+
+    out
+}
+
+/// FUNCTION: Whether a word is one of a list of key names, which Vim
+/// reads in any case: `<cmd>` runs a command line as `<Cmd>` does.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/130
+fn key_name(names: &[&str], word: &str) -> bool {
+    names.iter().any(|name| word.eq_ignore_ascii_case(name))
 }
 
 /// FUNCTION: Whether Vim reads a mapping or an unmapping command at
@@ -2167,11 +2548,62 @@ pub(super) fn map_at(line: &[Tok]) -> Option<usize> {
 
 /// FUNCTION: The argument of a mapping command that one word states,
 /// as `<buffer>` states `buffer`, or none where the word is no such
-/// argument.
+/// argument. Several may stand together with no space, as in
+/// `<buffer><nowait>`, and `<expr>` among them is the one that tells.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/91
 fn map_arg(word: &[Tok]) -> Option<&str> {
-    (word.len() == 3 && word[0].text == "<" && word[2].text == ">")
-        .then(|| word[1].text.as_str())
-        .filter(|name| MAP_ARGS.contains(name))
+    if word.is_empty() || !word.len().is_multiple_of(3) {
+        return None;
+    }
+
+    let names: Vec<&str> = word
+        .chunks(3)
+        .map(|g| (g[0].text == "<" && g[2].text == ">").then(|| g[1].text.as_str()))
+        .collect::<Option<_>>()?;
+
+    if !names.iter().all(|name| MAP_ARGS.contains(name)) {
+        return None;
+    }
+
+    names
+        .iter()
+        .find(|name| **name == EXPR)
+        .or(names.first())
+        .copied()
+}
+
+/// FUNCTION: Whether the word at `i` stands inside the name of a
+/// `<Plug>` mapping, as each part of `<Plug>(my-undo-action)` does,
+/// and as `MyBold` of `<Plug>MyBold` does. The name is a key of Vim's
+/// that a plugin gives a mapping, and no code, wherever the notation
+/// stands. Vim reads key notation in any case, as `<plug>`.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/91
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/123
+fn in_plug_name(stmt: &[Tok], i: usize) -> bool {
+    let plug = |k: usize| {
+        k >= 2
+            && stmt[k].text == ">"
+            && stmt[k - 1].text.eq_ignore_ascii_case(PLUG)
+            && stmt[k - 2].text == "<"
+    };
+    let mut k = i;
+
+    while k > 0 {
+        if !stmt[k].glued {
+            return false;
+        }
+
+        k -= 1;
+
+        match stmt[k].text.as_str() {
+            "(" => return k >= 1 && plug(k - 1),
+            ")" => return false,
+            ">" => return plug(k),
+            _ => {}
+        }
+    }
+
+    false
 }
 
 /// FUNCTION: Every index at which Vim reads a command: the statement's
@@ -2190,8 +2622,20 @@ pub(super) fn heads(stmt: &[Tok]) -> Vec<usize> {
 
     let mut at: Vec<usize> = (0..=first).collect();
 
+    // The command an autocommand runs may open with modifiers, as
+    // `silent! doautocmd` does.
+    // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/128
     if let Some(body) = autocmd::body(stmt, first) {
-        at.push(body);
+        at.extend(body..=command_from(stmt, body).unwrap_or(body));
+    }
+
+    at.extend(map_lines(stmt, first));
+
+    // The body of a `:command` definition is a command of its own,
+    // past any modifier it opens with.
+    // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/112
+    if let Some((name, body)) = command_body_at(stmt) {
+        at.extend(name + 1..=body);
     }
 
     // A bar ends one command and starts the next, which the lexer
@@ -2211,6 +2655,18 @@ pub(super) fn heads(stmt: &[Tok]) -> Vec<usize> {
     }
 
     at
+}
+
+/// FUNCTION: The words each autocommand of a statement owns, from
+/// every head that opens one: the statement's own command, the one
+/// behind a bar, as in `augroup Grp | autocmd! * <buffer>`, and the
+/// one that an autocommand runs.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/128
+pub(super) fn autocmd_words(stmt: &[Tok], heads: &[usize]) -> Vec<Range<usize>> {
+    heads
+        .iter()
+        .filter_map(|at| autocmd::owned(stmt, *at))
+        .collect()
 }
 
 /// FUNCTION: Every index at which a line of a lambda block opens.
@@ -2286,13 +2742,19 @@ pub(super) fn in_command(stmt: &[Tok], i: usize, heads: &[usize]) -> bool {
 /// `auto = Helper()` would otherwise hand a whole line to Vim and take
 /// the credit of every name on it. Every rule that claims the words
 /// after a head asks this first.
+///
+/// A dot apart from the word on the same line reaches into nothing,
+/// as `echo d .a` gives E15, so it opens the argument of a command,
+/// as the path of `edit ./main.rs` does.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/127
 pub(super) fn reads_command(stmt: &[Tok], at: usize) -> bool {
     !stmt.get(at + 1).is_some_and(|t| {
-        matches!(
-            t.text.as_str(),
-            "(" | "[" | "." | "->" | "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "..=" | "<<=" | ">>="
-        )
+        (t.text == DOT && t.glued)
+            || matches!(
+                t.text.as_str(),
+                "(" | "[" | "->" | "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "..=" | "<<=" | ">>="
+            )
     })
 }
 
@@ -2308,27 +2770,32 @@ pub(super) fn command_at(stmt: &[Tok]) -> Option<usize> {
 
 /// FUNCTION: Where the command word of the command that opens at
 /// `from` stands, past any modifier and past a colon with its range.
+/// The two can take turns, as in `:silent! :%d _`, where the modifier
+/// has a colon of its own.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/109
 fn command_from(stmt: &[Tok], from: usize) -> Option<usize> {
-    let at = from
-        + stmt
-            .get(from..)?
-            .iter()
-            .position(|t| t.text != "!" && !modifier(&t.text))?;
+    let mut at = from;
 
-    if stmt[at].text != COLON {
-        return Some(at);
+    loop {
+        let text = stmt.get(at)?.text.as_str();
+
+        if text == "!" || modifier(text) {
+            at += 1;
+        } else if text == COLON {
+            at += 1 + stmt
+                .get(at + 1..)?
+                .iter()
+                .position(|t| !in_range(&t.text))?;
+        } else {
+            return Some(at);
+        }
     }
-
-    stmt[at + 1..]
-        .iter()
-        .position(|t| !in_range(&t.text))
-        .map(|past| at + 1 + past)
 }
 
 /// FUNCTION: Whether a token is part of a range: the whole buffer, a
 /// line number, the current or the last line, an offset, or the
 /// separator between two addresses.
-fn in_range(text: &str) -> bool {
+pub(super) fn in_range(text: &str) -> bool {
     RANGE.contains(&text) || text.bytes().all(|b| b.is_ascii_digit())
 }
 
@@ -2364,10 +2831,26 @@ fn in_type(stmt: &[Tok], i: usize) -> bool {
             continue;
         }
 
-        return text == ":";
+        return text == ":" || (text == "=" && alias_at(stmt).is_some_and(|name| name + 1 == at));
     }
 
     false
+}
+
+/// FUNCTION: Where the name of a type alias stands, when a statement
+/// declares one: `type`, a name, then `=`. The word alone is also the
+/// function `type()`, which no `=` follows.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/88
+fn alias_at(stmt: &[Tok]) -> Option<usize> {
+    let start = usize::from(stmt.first()?.text == EXPORT);
+    let keyword = stmt.get(start)?;
+    let name = stmt.get(start + 1)?;
+
+    (keyword.text == ALIAS
+        && keyword.kind == TokKind::Ident
+        && name.kind == TokKind::Ident
+        && stmt.get(start + 2).is_some_and(|t| t.text == "="))
+    .then_some(start + 1)
 }
 
 /// FUNCTION: Whether the class at `at` stands inside the brackets of
@@ -2391,17 +2874,24 @@ fn class_in_types(stmt: &[Tok], at: usize) -> bool {
 
 /// FUNCTION: True when a colon after a name introduces a type rather
 /// than separating a key from its value, as `var x: Config` does and
-/// `{callback: OnDone}` does not.
+/// `{callback: OnDone}` does not. A brace that closes one opened
+/// before the statement, as the `}` that ends a block lambda in
+/// `}, {repeat: 0})`, leaves the name inside a dict as well.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/96
 fn is_type_position(stmt: &[Tok], i: usize) -> bool {
-    let mut depth = 0i32;
+    let mut open = 0u32;
+    let mut closed_outside = false;
+
     for tok in &stmt[..i] {
         match tok.text.as_str() {
-            "{" => depth += 1,
-            "}" => depth -= 1,
+            "{" => open += 1,
+            "}" if open > 0 => open -= 1,
+            "}" => closed_outside = true,
             _ => {}
         }
     }
-    depth == 0
+
+    open == 0 && !closed_outside
 }
 
 /// FUNCTION: Every identifier inside a piece of text.

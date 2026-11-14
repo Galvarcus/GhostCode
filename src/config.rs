@@ -66,6 +66,12 @@ pub struct Config {
     pub external: Vec<String>,
     pub no_ignore: bool,
     pub findings: FindingFlags,
+
+    /// Whether the report names each unplaced name. A flag alone sets
+    /// it: ghostcode.toml states what a project is, and this states
+    /// what one run is for.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/84
+    pub unplaced: bool,
 }
 
 impl Config {
@@ -95,6 +101,7 @@ impl Config {
             entry: file.entry,
             external: file.external,
             no_ignore: args.no_ignore,
+            unplaced: args.unplaced,
             findings: FindingFlags {
                 write_only: args.findings.write_only.unwrap_or(file.findings.write_only),
                 locals: args.findings.locals.unwrap_or(file.findings.locals),

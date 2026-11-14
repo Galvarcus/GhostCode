@@ -194,6 +194,17 @@ fn an_entry_script_directory_roots_its_top_level_code() {
     assert!(!Vim9.is_entry(root, Path::new("import/p.vim")));
 }
 
+/// Many plugins keep their tests in `test/`, as five of the eleven in
+/// the survey do.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/86
+#[test]
+fn a_test_directory_of_either_name_roots_its_top_level_code() {
+    let root = Path::new("/project");
+
+    assert!(Vim9.is_entry(root, Path::new("tests/test_p.vim")));
+    assert!(Vim9.is_entry(root, Path::new("test/test_p.vim")));
+}
+
 #[test]
 fn a_legacy_function_file_yields_no_symbols_and_no_error() {
     let a = scan(
@@ -287,4 +298,120 @@ fn a_variable_in_a_def_behind_the_global_scope_is_scoped_to_the_function() {
         .syms
         .iter()
         .any(|s| s.id.to_string() == "tests/t.vim::Capture.row"));
+}
+
+/// FUNCTION: Each class that extends another, as `class base`.
+fn heirs(a: &Analysis) -> Vec<String> {
+    a.heirs
+        .iter()
+        .map(|(class, base)| format!("{class} {base}"))
+        .collect()
+}
+
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/82
+#[test]
+fn a_class_that_extends_another_states_it() {
+    let a = scan(
+        "autoload/p.vim",
+        "vim9script\nabstract class Base\nendclass\nexport class Leaf extends Base implements Shape\nendclass\n",
+    );
+
+    assert_eq!(heirs(&a), vec!["Leaf Base"]);
+}
+
+#[test]
+fn a_class_that_extends_one_behind_an_alias_states_the_class() {
+    let a = scan(
+        "autoload/p.vim",
+        "vim9script\nclass Leaf extends M.Base\nendclass\n",
+    );
+
+    assert_eq!(heirs(&a), vec!["Leaf Base"]);
+}
+
+#[test]
+fn a_class_that_extends_nothing_states_nothing() {
+    let a = scan(
+        "autoload/p.vim",
+        "vim9script\nclass Leaf implements Shape\nendclass\n",
+    );
+
+    assert!(heirs(&a).is_empty());
+}
+
+/// FUNCTION: The id of each root a scan of one file gives, as text.
+fn roots(a: &Analysis) -> Vec<String> {
+    a.roots.iter().map(|r| r.to_string()).collect()
+}
+
+/// A runner finds each test by its name, as Vim's own tests are found.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/101
+#[test]
+fn a_test_function_in_a_test_directory_is_a_root() {
+    let a = scan(
+        "test/t.vim",
+        "vim9script\ndef Test_one()\nenddef\ndef g:Test_two()\nenddef\ndef Helper()\nenddef\n",
+    );
+
+    assert_eq!(
+        roots(&a),
+        vec!["test/t.vim::Test_one", "test/t.vim::Test_two"]
+    );
+}
+
+#[test]
+fn a_test_function_outside_a_test_directory_is_no_root() {
+    let a = scan("autoload/t.vim", "vim9script\ndef Test_one()\nenddef\n");
+
+    assert!(roots(&a).is_empty(), "{:?}", roots(&a));
+}
+
+#[test]
+fn a_method_named_as_a_test_is_no_root() {
+    let a = scan(
+        "tests/t.vim",
+        "vim9script\nclass C\n  def Test_one()\n  enddef\nendclass\n",
+    );
+
+    assert!(roots(&a).is_empty(), "{:?}", roots(&a));
+}
+
+/// Any user or plugin can call a global function, as it can an export.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/102
+#[test]
+fn a_global_function_counts_as_exported() {
+    let a = scan(
+        "plugin/p.vim",
+        "vim9script\ndef g:Api()\nenddef\ndef Local()\nenddef\n",
+    );
+
+    let exported: Vec<(&str, bool)> = a
+        .syms
+        .iter()
+        .map(|s| (s.name.as_str(), s.exported))
+        .collect();
+    assert_eq!(exported, vec![("Api", true), ("Local", false)]);
+}
+
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/88
+#[test]
+fn type_and_export_type_declare_aliases() {
+    let a = scan(
+        "autoload/p.vim",
+        "vim9script\ntype Amount = number\nexport type Lines = list<string>\n",
+    );
+
+    assert_eq!(decls(&a), vec!["type Amount", "type Lines"]);
+    assert!(!a.syms[0].exported);
+    assert!(a.syms[1].exported);
+}
+
+#[test]
+fn a_call_of_the_type_function_declares_nothing() {
+    let a = scan(
+        "autoload/p.vim",
+        "vim9script\nvar t = type(1)\necho type(t)\n",
+    );
+
+    assert_eq!(decls(&a), vec!["variable t"]);
 }

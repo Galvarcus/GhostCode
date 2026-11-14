@@ -124,3 +124,125 @@ fn a_highlight_command_in_executed_text_is_marked_as_vims() {
 
     assert!(one(text, "pluginTitle").owned);
 }
+
+/// The words after `=<<` are the heredoc's own syntax, `trim`, `eval`
+/// and the end marker, and never a name.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/89
+#[test]
+fn the_words_that_open_a_heredoc_are_no_references() {
+    let text = "vim9script\nvar lines =<< trim END\n  hello\nEND\nvar more =<< trim eval DATA\n  x\nDATA\n";
+    let names: Vec<String> = refs(text).into_iter().map(|r| r.name).collect();
+
+    for word in ["trim", "eval", "END", "DATA"] {
+        assert!(!names.iter().any(|n| n == word), "{word}: {names:?}");
+    }
+}
+
+/// The value before `=<<` is still read.
+#[test]
+fn the_target_of_a_heredoc_assignment_is_still_read() {
+    let text = "vim9script\nvar lines: list<string> = []\nlines =<< trim END\n  hello\nEND\n";
+
+    assert_eq!(refs(text).iter().filter(|r| r.name == "lines").count(), 1);
+}
+
+/// A key of a dictionary may share the name of a word that opens a
+/// block, and the colon against it says it is a key.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/116
+#[test]
+fn a_dict_key_named_as_a_block_word_keeps_its_dict_whole() {
+    for key in ["command", "autocmd", "if", "return"] {
+        let text = format!(
+            "vim9script\nvar d = {{\n  title: 1,\n  {key}: 2,\n  other_key: 3,\n}}\necho d\n"
+        );
+        let names: Vec<String> = refs(&text).into_iter().map(|r| r.name).collect();
+
+        assert!(!names.iter().any(|n| n == "other_key"), "{key}: {names:?}");
+    }
+}
+
+/// A block word inside a block lambda starts a statement of its own,
+/// and the brace that closes the lambda returns to the dict or the call
+/// around it, whose keys are keys again.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/96
+#[test]
+fn a_dict_key_after_a_block_lambda_with_an_if_is_a_key() {
+    let text = "vim9script\nvar o = {\n  out_cb: (ch, msg) => {\n    if msg == \"\"\n      echo 1\n    endif\n  },\n  err_msg: 0,\n}\necho o\n";
+    let names: Vec<String> = refs(text).into_iter().map(|r| r.name).collect();
+
+    assert!(!names.iter().any(|n| n == "err_msg"), "{names:?}");
+}
+
+#[test]
+fn a_dict_argument_after_a_block_lambda_with_an_if_is_a_dict() {
+    let text = "vim9script\nvar t = timer_start(20, (_) => {\n  if 1\n    echo 1\n  endif\n}, {repeat: 0})\n";
+    let names: Vec<String> = refs(text).into_iter().map(|r| r.name).collect();
+
+    assert!(!names.iter().any(|n| n == "repeat"), "{names:?}");
+}
+
+/// Vim9 requires a space after the colon of a key, so a name glued to
+/// `v:` is a variable of Vim's, inside a dict as well.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/97
+#[test]
+fn a_v_variable_after_a_dict_key_is_no_reference() {
+    let text = "vim9script\nvar d = {id: 1, error: {code: 2,\n  message: v:exception}}\nvar e = {message: v:progpath}\necho d e\n";
+    let names: Vec<String> = refs(text).into_iter().map(|r| r.name).collect();
+
+    assert!(
+        !names.iter().any(|n| n == "exception" || n == "progpath"),
+        "{names:?}"
+    );
+}
+
+/// Vim9 carries a line that ends with `=>` on to the body of the lambda
+/// on the next line, where its parameters are bound.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/94
+#[test]
+fn a_lambda_parameter_read_on_the_next_line_is_no_reference() {
+    let text = "vim9script\nvar Add = (lnum: number) =>\n  lnum + 1\necho Add(1)\n";
+    let names: Vec<String> = refs(text).into_iter().map(|r| r.name).collect();
+
+    assert!(!names.iter().any(|n| n == "lnum"), "{names:?}");
+}
+
+/// A string inside the braces of an interpolated string belongs to the
+/// code there, and its quotes end nothing.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/95
+#[test]
+fn a_string_inside_the_braces_of_an_interpolation_is_a_string() {
+    let text = "vim9script\nvar p = $'{expand('%:p:r')}.txt'\nvar q = $\"{Join(\"a\", 'b')} d\"\necho p q\n";
+    let names: Vec<String> = refs(text).into_iter().map(|r| r.name).collect();
+
+    assert_eq!(names, vec!["Join", "p", "q"]);
+}
+
+/// A string that `call()` or `function()` takes may name a function of
+/// Vim's, which no project declares.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/100
+#[test]
+fn a_builtin_in_a_call_string_is_marked_as_vims() {
+    let text = "vim9script\necho call('printf', ['%d', 1])\nvar F = function('strlen')\necho F\n";
+    let marks: Vec<(String, bool)> = refs(text)
+        .into_iter()
+        .filter(|r| r.name == "printf" || r.name == "strlen")
+        .map(|r| (r.name, r.owned))
+        .collect();
+
+    assert_eq!(
+        marks,
+        vec![("printf".to_string(), true), ("strlen".to_string(), true)]
+    );
+}
+
+#[test]
+fn a_project_function_in_a_call_string_is_still_a_name() {
+    let text = "vim9script\ndef Helper(): number\n  return 1\nenddef\necho call('Helper', [])\n";
+    let marks: Vec<bool> = refs(text)
+        .into_iter()
+        .filter(|r| r.name == "Helper")
+        .map(|r| r.owned)
+        .collect();
+
+    assert_eq!(marks, vec![false]);
+}

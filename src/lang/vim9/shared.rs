@@ -18,6 +18,9 @@ pub(super) const SCOPES: &[char] = &['g', 'b', 'w', 't'];
 // What stands between a scope letter and the name behind it.
 const COLON: &str = ":";
 
+// The scope that holds functions as well as variables.
+const GLOBAL: char = 'g';
+
 // What Vim writes between two commands on one line.
 const BAR: &str = "|";
 
@@ -204,6 +207,10 @@ pub(super) struct Uses {
     /// The name tokens behind a scope, which are no bare names of the
     /// project and must not be emitted as such.
     pub taken: Vec<usize>,
+    /// The taken names that may be a global function read as a value,
+    /// as the `Name` of `F = g:Name`.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/122
+    pub funcrefs: Vec<usize>,
 }
 
 /// FUNCTION: The scoped variables one statement writes and reads.
@@ -220,7 +227,7 @@ pub(super) fn uses(stmt: &[Tok], consts: &Consts) -> Uses {
     let mut out = Uses::default();
 
     for run in runs(stmt) {
-        let mut found = named(stmt, run.clone(), &mut out.taken);
+        let mut found = named(stmt, run.clone(), &mut out.taken, &mut out.funcrefs);
         let keyed = called(stmt, run.clone(), consts, &mut found);
         quoted(stmt, run, &mut found);
 
@@ -733,7 +740,12 @@ fn runs(stmt: &[Tok]) -> Vec<Range<usize>> {
 
 /// FUNCTION: The variables one command names by scope and name, as
 /// `g:x`.
-fn named(stmt: &[Tok], run: Range<usize>, taken: &mut Vec<usize>) -> Vec<Use> {
+fn named(
+    stmt: &[Tok],
+    run: Range<usize>,
+    taken: &mut Vec<usize>,
+    funcrefs: &mut Vec<usize>,
+) -> Vec<Use> {
     let removes = stmt[run.clone()]
         .first()
         .is_some_and(|t| excmds::canonical(&t.text) == Some(UNLET));
@@ -748,11 +760,22 @@ fn named(stmt: &[Tok], run: Range<usize>, taken: &mut Vec<usize>) -> Vec<Use> {
         let at = i + 2;
         let name = format!("{scope}{COLON}{}", stmt[at].text);
         let next = stmt.get(at + 1).filter(|_| at + 1 < run.end);
+        let write = next.is_some_and(|t| ASSIGNS.contains(&t.text.as_str()));
+        let gap = next.is_some_and(|t| t.glued && t.text.starts_with(GAP));
 
         // A call through a scope may be a legacy function declared as
         // `g:Name`, which its bare name still has to credit.
         if !next.is_some_and(|t| t.text == CALL && t.glued) {
             taken.push(at);
+
+            // A global function read as a value, as `F = g:Name`, is
+            // used as much as a call of it is. Vim requires a capital
+            // behind the `g:` of a function. A write sets a variable,
+            // and a name with a gap is a variable's.
+            // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/122
+            if scope == GLOBAL && !write && !gap && !removes && capital(&stmt[at].text) {
+                funcrefs.push(at);
+            }
         }
 
         if removes {
@@ -761,7 +784,7 @@ fn named(stmt: &[Tok], run: Range<usize>, taken: &mut Vec<usize>) -> Vec<Use> {
 
         // A legacy name may go on in braces, as `g:plugin_{kind}`,
         // and what the braces give is known only to a run.
-        if next.is_some_and(|t| t.glued && t.text.starts_with(GAP)) {
+        if gap {
             out.push(Use {
                 spelling: Spelling::Fit {
                     head: name,
@@ -776,8 +799,6 @@ fn named(stmt: &[Tok], run: Range<usize>, taken: &mut Vec<usize>) -> Vec<Use> {
 
             continue;
         }
-
-        let write = next.is_some_and(|t| ASSIGNS.contains(&t.text.as_str()));
 
         // A variable the help documents is written for Vim, or for a
         // plugin Vim ships, to read.
@@ -823,4 +844,10 @@ fn scope_at(stmt: &[Tok], i: usize, end: usize) -> Option<char> {
 
     (colon.text == COLON && colon.glued && name.kind == TokKind::Ident && name.glued)
         .then_some(letter)
+}
+
+/// FUNCTION: Whether a name starts with a capital, as the name of a
+/// global function must.
+fn capital(name: &str) -> bool {
+    name.starts_with(|c: char| c.is_ascii_uppercase())
 }

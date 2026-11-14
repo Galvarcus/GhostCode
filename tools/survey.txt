@@ -1,0 +1,33 @@
+# The Vim9 plugins of other projects that tools/survey scans.
+#
+# Each line is a git URL, then the commit to read. A line with no commit
+# reads the head of the default branch, and the report names the commit
+# it read, so that the line can be pinned after. The survey reports for
+# evaluation and sets no pass or fail.
+# License: GNU GPL 3.0
+
+# Large, with legacy functions in Vim9 files.
+https://github.com/yegappan/lsp 96dec727d06c649e654b1926b02713571ed56888
+
+# Classes, an abstract class, an enum, interfaces, legacy functions.
+https://github.com/h-east/vim9ls 41fed13cdad04d30de739382da0cd216381fc2ca
+
+# Separate examples with no entry point, so that every symbol is a ghost.
+# Kept for its classes, enums and interfaces, and its unplaced names.
+https://github.com/yegappan/design-patterns de7f24d5db1fea5734dbe9371b0f19fb85a68988
+
+https://github.com/ubaldot/vim-markdown-extras befd05ad4fda1104f06f4220545be74c9bef5dfd
+https://github.com/vim-fuzzbox/fuzzbox.vim 37af00b3700c19a7f8f4f84b85aba3f05ba31f5e
+
+# Classes and abstract classes.
+https://github.com/nda-cunh/SupraTree e99456f1792e21423cf67c0e63eee97b481f70ab
+
+https://github.com/habamax/vim-dir 9f9aff84d664906f6224b80233910ec5bd498060
+https://github.com/girishji/vimcomplete 9ee70e58373bb7fa0219db8cb04dddfec149db4f
+https://github.com/mao-yining/undotree.vim 3e6fbbb8b518a2ffe5db2de497ebd503cfa96732
+
+# A file of legacy script beside the Vim9 ones.
+https://github.com/monkoose/vim9-stargate b87f9e6f534de5cc261205f6fc7716ec1af28e3a
+
+# Classes and enums.
+https://github.com/yegappan/tetris dfc82aba0e2ec4d4e98445934e4a68fdfbb4eb70

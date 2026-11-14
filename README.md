@@ -211,7 +211,9 @@ tab_vars = true
 `exports_are_api` is true by default. Ghostcode then treats an exported
 symbol as public API and never reports it. Vim9 cannot export a method
 or a field by itself, so every method and field of an exported class
-counts as exported too, unless its name starts with an underscore.
+counts as exported too, unless its name starts with an underscore. A
+global function, `def g:Name`, counts as exported, because any user or
+plugin can call it.
 
 Set it to false for a plugin whose exports serve only its own files, as
 in an application. Ghostcode then reports an export that nothing in the
@@ -320,6 +322,7 @@ hidden directories, as Vim's own `globpath` does; name a file in
 - `class` and `export class`, including `extends` and `implements`
 - `enum` and `export enum`, and enum values (`Color.Red`)
 - `interface` and `export interface` declarations
+- `type` and `export type` aliases, and the types an alias names
 - class methods, static methods, and fields
 - module-level script variables and class fields
 - a `var` or a `const` of a function body that nothing in that body
@@ -347,7 +350,8 @@ hidden directories, as Vim's own `globpath` does; name a file in
 - top-level code in scripts that Vim sources directly (`plugin/`,
   `ftplugin/`, `ftdetect/`, `syntax/`, `indent/`, `compiler/`,
   `colors/`, `keymap/`, `lang/`, and their `after/` copies) and in
-  `tests/`, all treated as entry points that need no call site
+  `tests/` or `test/`, all treated as entry points that need no call
+  site
 
 ## What Ghostcode doesn't detect
 
@@ -370,6 +374,8 @@ hidden directories, as Vim's own `globpath` does; name a file in
   reads. A write counts as a use there. Inside a function body it does
   not, so a local the code only assigns to is reported with the other
   locals
+- a legacy `function` that nothing calls. Only a `def` is a symbol. A
+  call from the body of a legacy function still counts as a use
 
 Ghostcode is conservative by design: anything it can't prove is
 unreferenced is left alone rather than reported.
@@ -417,6 +423,12 @@ above the verdict. Read those names: a skip is a test that did not run.
 
 `doc/ghostcode.txt` is generated from this README by
 `.github/workflows/vimdoc.yml`. Edit the README, not the help file.
+
+`tools/survey` clones the Vim9 plugins of other projects that
+`tools/survey.txt` lists, scans each, and prints a table of the counts.
+The findings and the unplaced names of each scan go to
+`target/survey/report`, for evaluation. No check runs it, and
+`tools/survey --clean` removes what it wrote.
 
 <!-- vimdoc-ignore-end -->
 

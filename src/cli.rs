@@ -79,6 +79,12 @@ pub struct Args {
 
     #[command(flatten)]
     pub findings: FindingArgs,
+
+    // Hidden because it serves a survey of the analyzer, not a user:
+    // what it lists measures the analyzer, and no finding comes of it.
+    // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/84
+    #[arg(long = "unplaced", hide = true)]
+    pub unplaced: bool,
 }
 
 impl Args {
