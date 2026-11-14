@@ -535,13 +535,31 @@ pub fn unpacked_at(stmt: &[Tok]) -> Vec<usize> {
 }
 
 /// FUNCTION: The name and type of an annotated declaration, `x: Foo`,
-/// taking the outermost type of `list<Foo>` as the type itself.
+/// taking the outermost type of `list<Foo>` as the type itself. A type
+/// written behind the alias of its import, `k: types.Kind`, is the
+/// type behind the dot. Where the name is the alias itself, as in
+/// `var board: board.Board`, the alias stays the type: the annotation
+/// is read with the name in scope, and the type `Board` there would
+/// place `board.Board` in the class rather than in the import.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/99
 fn annotated(toks: &[Tok]) -> Option<(String, String)> {
     let name = toks.first().filter(|t| t.kind == TokKind::Ident)?;
     if toks.get(1).map(|t| t.text.as_str()) != Some(":") {
         return None;
     }
     let ty = toks.get(2).filter(|t| t.kind == TokKind::Ident)?;
+    let ty = match (toks.get(3), toks.get(4)) {
+        (Some(dot), Some(behind))
+            if dot.text == "."
+                && dot.glued
+                && behind.glued
+                && behind.kind == TokKind::Ident
+                && ty.text != name.text =>
+        {
+            behind
+        }
+        _ => ty,
+    };
 
     Some((name.text.clone(), ty.text.clone()))
 }
@@ -653,6 +671,19 @@ pub fn recv_type(
 
     if before.text == "this" {
         return owner.map(str::to_string);
+    }
+
+    // A word behind a dot of its own is a field or a key of what stands
+    // before it, as `doc` is in `w.doc.lines`, and says no type, though
+    // an import alias may share its spelling. Only a class names itself
+    // there, as `Menu` does in `M.Menu.new()`, and Vim gives every class
+    // a capital first.
+    // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/98
+    if at >= 3
+        && stmt[at - 3].text == "."
+        && !before.text.starts_with(|c: char| c.is_ascii_uppercase())
+    {
+        return None;
     }
 
     if let Some(ty) = locals.get(&before.text) {
