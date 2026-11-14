@@ -655,6 +655,19 @@ pub fn recv_type(
         return owner.map(str::to_string);
     }
 
+    // A word behind a dot of its own is a field or a key of what stands
+    // before it, as `doc` is in `w.doc.lines`, and says no type, though
+    // an import alias may share its spelling. Only a class names itself
+    // there, as `Menu` does in `M.Menu.new()`, and Vim gives every class
+    // a capital first.
+    // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/98
+    if at >= 3
+        && stmt[at - 3].text == "."
+        && !before.text.starts_with(|c: char| c.is_ascii_uppercase())
+    {
+        return None;
+    }
+
     if let Some(ty) = locals.get(&before.text) {
         return (!ty.is_empty()).then(|| ty.to_string());
     }

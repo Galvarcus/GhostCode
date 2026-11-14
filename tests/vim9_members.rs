@@ -140,3 +140,19 @@ fn a_variable_named_new_is_not_marked() {
 
     assert!(!one(text, "new").owned);
 }
+
+/// A word behind a dot that itself stands behind a dot is a field or a
+/// key, whatever import alias shares its spelling.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/98
+#[test]
+fn a_field_with_the_name_of_an_import_alias_has_no_type() {
+    let text =
+        "vim9script\nimport autoload 'x/doc.vim'\nvar w = {doc: {lines: []}}\necho w.doc.lines\n";
+    assert_eq!(one(text, "lines").recv, None);
+}
+
+#[test]
+fn a_class_behind_an_import_alias_still_names_itself() {
+    let text = "vim9script\nimport autoload 'x/m.vim' as M\nM.Menu.new()\n";
+    assert_eq!(one(text, "new").recv.as_deref(), Some("Menu"));
+}
