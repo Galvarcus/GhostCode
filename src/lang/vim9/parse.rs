@@ -1361,7 +1361,7 @@ impl Collect<'_> {
     /// METHOD: Read one statement, from the token after its own name.
     fn statement(&mut self, stmt: &[Tok], skip: &[usize]) {
         let heads = heads(stmt);
-        let owned = command_at(stmt).and_then(|at| autocmd::owned(stmt, at));
+        let owned = autocmd_words(stmt, &heads);
 
         for (i, tok) in stmt.iter().enumerate() {
             if skip.contains(&i) {
@@ -1369,7 +1369,7 @@ impl Collect<'_> {
             }
 
             match tok.kind {
-                TokKind::Ident => self.ident(stmt, i, tok, &heads, owned.as_ref()),
+                TokKind::Ident => self.ident(stmt, i, tok, &heads, &owned),
                 TokKind::Str => self.text(stmt, i, tok),
                 _ => {}
             }
@@ -1384,7 +1384,7 @@ impl Collect<'_> {
         i: usize,
         tok: &Tok,
         heads: &[usize],
-        owned: Option<&Range<usize>>,
+        owned: &[Range<usize>],
     ) {
         if KEYWORDS.contains(&tok.text.as_str()) {
             return;
@@ -1394,8 +1394,7 @@ impl Collect<'_> {
             return;
         }
 
-        if in_notation(stmt, i) || in_augroup(stmt, i) || owned.is_some_and(|own| own.contains(&i))
-        {
+        if in_notation(stmt, i) || in_augroup(stmt, i) || owned.iter().any(|own| own.contains(&i)) {
             return;
         }
 
@@ -2562,8 +2561,11 @@ pub(super) fn heads(stmt: &[Tok]) -> Vec<usize> {
 
     let mut at: Vec<usize> = (0..=first).collect();
 
+    // The command an autocommand runs may open with modifiers, as
+    // `silent! doautocmd` does.
+    // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/128
     if let Some(body) = autocmd::body(stmt, first) {
-        at.push(body);
+        at.extend(body..=command_from(stmt, body).unwrap_or(body));
     }
 
     // The body of a `:command` definition is a command of its own,
@@ -2590,6 +2592,18 @@ pub(super) fn heads(stmt: &[Tok]) -> Vec<usize> {
     }
 
     at
+}
+
+/// FUNCTION: The words each autocommand of a statement owns, from
+/// every head that opens one: the statement's own command, the one
+/// behind a bar, as in `augroup Grp | autocmd! * <buffer>`, and the
+/// one that an autocommand runs.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/128
+pub(super) fn autocmd_words(stmt: &[Tok], heads: &[usize]) -> Vec<Range<usize>> {
+    heads
+        .iter()
+        .filter_map(|at| autocmd::owned(stmt, *at))
+        .collect()
 }
 
 /// FUNCTION: Every index at which a line of a lambda block opens.

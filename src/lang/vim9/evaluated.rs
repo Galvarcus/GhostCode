@@ -6,7 +6,6 @@
 
 use std::collections::HashSet;
 
-use super::autocmd;
 use super::builtins;
 use super::excmds;
 use super::lex;
@@ -218,7 +217,7 @@ fn vims_words(stmts: &[Vec<lex::Tok>]) -> HashSet<String> {
 
     for stmt in stmts {
         let heads = parse::heads(stmt);
-        let owned = parse::command_at(stmt).and_then(|at| autocmd::owned(stmt, at));
+        let owned = parse::autocmd_words(stmt, &heads);
 
         if parse::owns_line(stmt) {
             out.extend(
@@ -246,7 +245,7 @@ fn vims_words(stmts: &[Vec<lex::Tok>]) -> HashSet<String> {
                 || parse::text_args(stmt, i, &heads)
                 || parse::map_args(stmt, i)
                 || parse::in_command_def(stmt, i)
-                || owned.as_ref().is_some_and(|own| own.contains(&i));
+                || owned.iter().any(|own| own.contains(&i));
 
             if vims {
                 out.insert(tok.text.clone());
