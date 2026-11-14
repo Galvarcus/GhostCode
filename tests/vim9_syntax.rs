@@ -180,3 +180,17 @@ fn a_dict_argument_after_a_block_lambda_with_an_if_is_a_dict() {
 
     assert!(!names.iter().any(|n| n == "repeat"), "{names:?}");
 }
+
+/// Vim9 requires a space after the colon of a key, so a name glued to
+/// `v:` is a variable of Vim's, inside a dict as well.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/97
+#[test]
+fn a_v_variable_after_a_dict_key_is_no_reference() {
+    let text = "vim9script\nvar d = {id: 1, error: {code: 2,\n  message: v:exception}}\nvar e = {message: v:progpath}\necho d e\n";
+    let names: Vec<String> = refs(text).into_iter().map(|r| r.name).collect();
+
+    assert!(
+        !names.iter().any(|n| n == "exception" || n == "progpath"),
+        "{names:?}"
+    );
+}

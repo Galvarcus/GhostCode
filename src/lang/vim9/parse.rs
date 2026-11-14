@@ -1985,7 +1985,13 @@ fn scoped(stmt: &[Tok], i: usize, word: &str) -> bool {
         return true;
     }
 
-    i >= 2 && stmt[i - 1].text == ":" && stmt[i - 2].text == "v" && is_type_position(stmt, i)
+    // Vim9 requires a space after the colon of a key, so a name glued
+    // to `v:` is a variable of Vim's inside a dict as well.
+    // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/97
+    i >= 2
+        && stmt[i - 1].text == ":"
+        && stmt[i - 2].text == "v"
+        && (is_type_position(stmt, i) || (stmt[i].glued && stmt[i - 1].glued))
 }
 
 /// FUNCTION: Whether a name stands behind `a:` or `l:`, which hold
