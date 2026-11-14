@@ -23,7 +23,7 @@
 const MIN_ABBREV: usize = 2;
 
 /// Every command Vim defines, in order, so that a lookup is a binary
-/// search of 568 names rather than a walk of them. The number is how
+/// search of 574 names rather than a walk of them. The number is how
 /// many of a name's first characters Vim accepts, read from the bracket
 /// form of the help file: `au[tocmd]` takes two.
 const NAMES: &[(&str, usize)] = &[
@@ -324,6 +324,7 @@ const NAMES: &[(&str, usize)] = &[
     ("marks", 5),
     ("match", 3),
     ("menu", 2),
+    ("menutranslate", 5),
     ("messages", 3),
     ("mkexrc", 2),
     ("mksession", 3),
@@ -415,6 +416,8 @@ const NAMES: &[(&str, usize)] = &[
     ("redo", 3),
     ("redraw", 4),
     ("redrawstatus", 7),
+    ("redrawtabline", 7),
+    ("redrawtabpanel", 10),
     ("registers", 3),
     ("resize", 3),
     ("retab", 3),
@@ -440,7 +443,9 @@ const NAMES: &[(&str, usize)] = &[
     ("sbprevious", 3),
     ("sbrewind", 3),
     ("sbuffer", 2),
+    ("scriptencoding", 7),
     ("scriptnames", 3),
+    ("scriptversion", 7),
     ("scscope", 3),
     ("set", 2),
     ("setfiletype", 4),
@@ -476,6 +481,7 @@ const NAMES: &[(&str, usize)] = &[
     ("sprevious", 3),
     ("srewind", 3),
     ("stag", 3),
+    ("startgreplace", 6),
     ("startinsert", 4),
     ("startreplace", 6),
     ("static", 6),

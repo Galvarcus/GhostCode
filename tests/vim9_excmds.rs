@@ -494,3 +494,21 @@ fn a_command_behind_a_modifier_a_colon_and_a_range_is_found() {
     assert_eq!(count(text, "delete"), 0);
     assert!(one(text, "_").owned);
 }
+
+/// The table missed six commands whose row in the help index has spaces
+/// in place of a tab, `:scriptencoding` among them.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/110
+#[test]
+fn scriptencoding_is_a_command_and_its_argument_is_vims() {
+    let text = "vim9script\nscriptencoding utf-8\n";
+
+    assert_eq!(count(text, "scriptencoding"), 0);
+    assert!(one(text, "utf").owned);
+}
+
+#[test]
+fn the_argument_of_vim9script_is_vims() {
+    let text = "vim9script noclear\necho 1\n";
+
+    assert!(one(text, "noclear").owned);
+}
