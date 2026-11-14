@@ -84,6 +84,20 @@ pub struct Note {
     pub scope: String,
 }
 
+/// A reference that named nothing the project declares, which is one
+/// of the names `Summary::unplaced_names` counts.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/84
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Unplaced {
+    pub name: String,
+    /// The type of the receiver, where the name stood behind a dot
+    /// and the type was known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recv: Option<String>,
+    pub file: PathBuf,
+    pub line: u32,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Report {
     pub schema: u32,
@@ -92,6 +106,13 @@ pub struct Report {
     pub findings: Vec<Finding>,
     pub skipped: Vec<Dropped>,
     pub notes: Vec<Note>,
+
+    /// Each unplaced name, where the run asked for them. A run that
+    /// did not ask writes no field, so its report keeps the shape that
+    /// every reader knows.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/84
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub unplaced: Vec<Unplaced>,
 }
 
 /// FUNCTION: One run, from a root to a report: discover the files,
@@ -155,6 +176,10 @@ pub fn analyze(root: &Path, cfg: &Config) -> anyhow::Result<Report> {
     let blind = unplaced_names_by_file(&a, &resolved);
     let mut report = build(root, &a, &reached, &blind, resolved.unplaced, cfg);
     report.notes = notes(&a, &reached, cfg);
+
+    if cfg.unplaced {
+        report.unplaced = unplaced(&a, &resolved);
+    }
 
     report.skipped = found
         .skipped
@@ -378,6 +403,7 @@ pub fn build(
         findings,
         skipped: Vec::new(),
         notes: Vec::new(),
+        unplaced: Vec::new(),
     }
 }
 
@@ -481,6 +507,25 @@ fn unplaced_names_by_file<'a>(
         .filter(|(at, re)| !re.owned && !re.member && !r.targets.contains_key(at))
         .map(|(_, re)| (re.file.as_path(), re.name.as_str()))
         .collect()
+}
+
+/// FUNCTION: Each reference that named nothing, by file and line.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/84
+fn unplaced(a: &Analysis, r: &crate::resolve::Resolved) -> Vec<Unplaced> {
+    let mut out: Vec<Unplaced> = r
+        .misses
+        .iter()
+        .map(|&at| &a.refs[at])
+        .map(|re| Unplaced {
+            name: re.name.clone(),
+            recv: re.recv.clone(),
+            file: re.file.clone(),
+            line: re.line,
+        })
+        .collect();
+
+    out.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
+    out
 }
 
 /// FUNCTION: How many findings carry one class.

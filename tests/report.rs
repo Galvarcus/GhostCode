@@ -214,6 +214,7 @@ fn text_prints_file_line_col_then_the_tagged_kind_and_name() {
         }],
         skipped: Vec::new(),
         notes: Vec::new(),
+        unplaced: Vec::new(),
     };
 
     assert_eq!(
@@ -239,6 +240,7 @@ fn a_write_only_finding_prints_its_own_tag_not_ghost() {
         }],
         skipped: Vec::new(),
         notes: Vec::new(),
+        unplaced: Vec::new(),
     };
 
     assert_eq!(
@@ -318,4 +320,21 @@ fn an_entry_script_is_not_needed_for_a_file_outside_the_entry_directories() {
     let r = run(&dir);
     assert_eq!(r.findings.len(), 1, "nothing roots autoload on its own");
     assert_eq!(r.findings[0].file, Path::new("autoload/lib.vim"));
+}
+
+/// The list and the count come from one pass, so they cannot disagree.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/84
+#[test]
+fn the_unplaced_list_holds_as_many_names_as_the_count() {
+    let dir = TempDir::new("unplaced-count");
+    dir.write("plugin/p.vim", "vim9script\nNope()\nAlso()\nNope()\n");
+
+    let cfg = ghostcode::config::Config {
+        unplaced: true,
+        ..common::cfg(false)
+    };
+    let r = report::analyze(dir.path(), &cfg).expect("the scan runs");
+
+    assert_eq!(r.unplaced.len(), 3, "{:?}", r.unplaced);
+    assert_eq!(r.unplaced.len(), r.summary.unplaced_names);
 }

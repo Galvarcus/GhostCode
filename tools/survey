@@ -1,0 +1,279 @@
+#!/usr/bin/env python3
+
+"""tools/survey: scan Vim9 plugins of other projects, for evaluation.
+
+Run it from anywhere in the repository.
+
+    tools/survey                        # every plugin in tools/survey.txt
+    tools/survey URL [COMMIT]           # one plugin, listed or not
+    tools/survey --clean                # remove every clone and report
+    tools/survey --clean URL            # remove one clone and its reports
+
+The corpora come from one code style, and a rule that fits that style
+can fail on another. This scans other projects to find where. Each
+plugin is a shallow clone under target/survey, which git ignores, and is
+scanned twice: with the defaults, as a user of the plugin gets, and
+strict, which reaches the most rules. A table goes to stdout, and the
+findings, the unplaced names, the notes and stderr of each scan go to a
+file under target/survey/report for reading. The survey reports what it
+sees and sets no pass or fail: a finding here is a question, not a
+fault, until someone reads it.
+
+License: GNU GPL 3.0
+"""
+
+import argparse
+import json
+import re
+import shutil
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+LIST = ROOT / "tools" / "survey.txt"
+DEST = ROOT / "target" / "survey"
+REPORTS = DEST / "report"
+BINARY = ROOT / "target" / "release" / "ghostcode"
+EXT = ".vim"
+
+# The two scans of each plugin, by name. Flags alone, so that nothing is
+# written into a clone.
+SCANS = [
+    ("default", []),
+    (
+        "strict",
+        [
+            "--exports-are-api", "false",
+            "--locals", "true",
+            "--globals", "true",
+            "--buffer-vars", "true",
+            "--window-vars", "true",
+            "--tab-vars", "true",
+        ],
+    ),
+]
+# What every scan passes, whichever settings it takes.
+# REFERENCE: https://github.com/Galvarcus/GhostCode/issues/84
+COMMON = ["--format=json", "--unplaced"]
+
+COLUMNS = [
+    "plugin", "scan", "commit", "files", "symbols", "ghost", "local",
+    "unplaced", "notes", "skipped", "secs", "status",
+]
+SHORT = 12
+# The characters a directory name of a plugin may keep. Anything else
+# in a URL becomes a dash, so that no name can reach outside DEST.
+SAFE = re.compile(r"[^A-Za-z0-9_.]+")
+
+
+def name_of(url):
+    """FUNCTION: The directory name of a plugin, owner-repo, from its
+    URL."""
+    parts = url.rstrip("/").removesuffix(".git").split("/")[-2:]
+    name = SAFE.sub("-", "-".join(parts)).strip("-.")
+
+    if not name:
+        sys.exit(f"survey: no plugin name in {url}")
+
+    return name
+
+
+def read_list():
+    """FUNCTION: Each plugin of the list, as a URL and a commit or
+    None."""
+    out = []
+
+    for line in LIST.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+
+        if not line or line.startswith("#"):
+            continue
+
+        words = line.split()
+        out.append((words[0], words[1] if len(words) > 1 else None))
+
+    return out
+
+
+def git(*args, cwd=None):
+    """FUNCTION: Run git and return its result, failing or not."""
+    return subprocess.run(
+        ["git", *args], cwd=cwd, capture_output=True, text=True
+    )
+
+
+def fetch(url, commit, clone):
+    """FUNCTION: Bring the clone of one plugin to the commit asked for,
+    or to the head of its default branch. A clone already at the
+    commit is used as it is, and one with no pin is used as it is, so
+    that a second run needs no network. Returns the commit read, or an
+    error."""
+    new = not clone.is_dir()
+
+    if new:
+        clone.mkdir(parents=True)
+        git("init", "-q", cwd=clone)
+        git("remote", "add", "origin", url, cwd=clone)
+    else:
+        head = git("rev-parse", "HEAD", cwd=clone).stdout.strip()
+
+        if head and (commit is None or head.startswith(commit)):
+            return head, None
+
+    got = git("fetch", "-q", "--depth", "1", "origin", commit or "HEAD", cwd=clone)
+
+    # A clone that never held a commit is removed, so that it does not
+    # stand in the directory as a plugin.
+    if got.returncode != 0:
+        if new:
+            shutil.rmtree(clone, ignore_errors=True)
+        return None, got.stderr.strip()
+
+    git("checkout", "-q", "--detach", "FETCH_HEAD", cwd=clone)
+
+    return git("rev-parse", "HEAD", cwd=clone).stdout.strip(), None
+
+
+def files_of(clone):
+    """FUNCTION: How many Vim script files a clone holds, outside .git."""
+    return sum(1 for p in clone.rglob(f"*{EXT}") if ".git" not in p.parts)
+
+
+def scan(clone, flags):
+    """FUNCTION: One scan of a clone: the parsed report or None, its
+    stderr, its exit status, and the seconds it took."""
+    start = time.monotonic()
+    run = subprocess.run(
+        [str(BINARY), *COMMON, *flags, str(clone)], capture_output=True, text=True
+    )
+    secs = time.monotonic() - start
+
+    try:
+        report = json.loads(run.stdout)
+    except json.JSONDecodeError:
+        report = None
+
+    return report, run.stderr, run.returncode, secs
+
+
+def write_report(path, url, commit, scan_name, report, stderr):
+    """FUNCTION: The full record of one scan, for a reader."""
+    lines = [f"# {url} {commit} ({scan_name})", ""]
+
+    if report is not None:
+        lines.append("## Findings")
+        lines += [
+            f"{f['file']}:{f['line']}:{f['col']}:[{f['class']}] {f['kind']} {f['name']}"
+            for f in report["findings"]
+        ]
+        lines += ["", "## Unplaced names"]
+        lines += [
+            f"{u['file']}:{u['line']}: "
+            + (f"{u['recv']}." if "recv" in u else "")
+            + u["name"]
+            for u in report.get("unplaced", [])
+        ]
+        lines += ["", "## Notes"]
+        lines += [f"{n['file']}:{n['line']}: {n['scope']}" for n in report["notes"]]
+        lines += ["", "## Skipped"]
+        lines += [f"{s['file']}: {s['why']}" for s in report["skipped"]]
+        lines.append("")
+
+    lines += ["## Stderr", stderr]
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def survey(plugins):
+    """FUNCTION: Fetch and scan each plugin, and print one row for each
+    plugin and scan. A plugin that fails gives a row that says so, and
+    the run goes on to the next."""
+    REPORTS.mkdir(parents=True, exist_ok=True)
+    rows = [COLUMNS]
+
+    for url, pin in plugins:
+        name = name_of(url)
+        clone = DEST / name
+        commit, error = fetch(url, pin, clone)
+
+        if error is not None:
+            rows.append([name, "-", pin[:SHORT] if pin else "-"] + ["-"] * 8 + ["fetch failed"])
+            print(f"survey: {name}: {error}", file=sys.stderr)
+            continue
+
+        files = files_of(clone)
+
+        for scan_name, flags in SCANS:
+            report, stderr, status, secs = scan(clone, flags)
+            write_report(
+                REPORTS / f"{name}-{scan_name}.txt", url, commit, scan_name, report, stderr
+            )
+
+            if report is None:
+                rows.append(
+                    [name, scan_name, commit[:SHORT], str(files)]
+                    + ["-"] * 6
+                    + [f"{secs:.2f}", f"exit {status}"]
+                )
+                continue
+
+            s = report["summary"]
+            rows.append(
+                [
+                    name, scan_name, commit[:SHORT], str(files),
+                    str(s["symbols"]), str(s["ghost"]), str(s["local"]),
+                    str(s["unplaced_names"]), str(len(report["notes"])),
+                    str(len(report["skipped"])), f"{secs:.2f}", f"exit {status}",
+                ]
+            )
+
+    widths = [max(len(r[i]) for r in rows) for i in range(len(COLUMNS))]
+
+    for row in rows:
+        print("  ".join(cell.ljust(w) for cell, w in zip(row, widths)).rstrip())
+
+    print(f"\nreports: {REPORTS.relative_to(ROOT)}")
+
+
+def clean(url):
+    """FUNCTION: Remove one clone and its reports, or everything the
+    survey wrote."""
+    if url is None:
+        shutil.rmtree(DEST, ignore_errors=True)
+        return
+
+    name = name_of(url)
+    shutil.rmtree(DEST / name, ignore_errors=True)
+
+    for path in REPORTS.glob(f"{name}-*.txt"):
+        path.unlink()
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        prog="tools/survey",
+        description="Scan Vim9 plugins of other projects, for evaluation.",
+    )
+    parser.add_argument("--clean", action="store_true",
+                        help="remove the clones and reports, or those of one plugin")
+    parser.add_argument("url", nargs="?", help="one plugin, in place of the list")
+    parser.add_argument("commit", nargs="?", help="the commit of that plugin to read")
+    args = parser.parse_args()
+
+    if args.clean:
+        if args.commit:
+            parser.error("--clean takes a URL and no commit")
+        clean(args.url)
+        return
+
+    # A scan must never run a build older than the source.
+    built = subprocess.run(["cargo", "build", "--release", "-q"], cwd=ROOT)
+    if built.returncode != 0:
+        sys.exit("survey: the release build failed")
+
+    survey([(args.url, args.commit)] if args.url else read_list())
+
+
+if __name__ == "__main__":
+    main()

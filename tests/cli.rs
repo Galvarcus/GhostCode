@@ -179,3 +179,51 @@ fn a_note_is_printed_to_stderr_and_not_to_stdout() {
     );
     assert!(out.stdout.is_empty(), "{:?}", out.stdout);
 }
+
+/// FUNCTION: The JSON report of a root of one file that calls a
+/// function nothing declares and a method its class lacks, with the
+/// given flags.
+fn unplaced_json(tag: &str, flags: &[&str]) -> serde_json::Value {
+    let dir = TempDir::new(tag);
+    dir.write(
+        "plugin/p.vim",
+        "vim9script\nNope()\nclass C\nendclass\nC.Gone()\n",
+    );
+
+    let out = Command::new(env!("CARGO_BIN_EXE_ghostcode"))
+        .args(flags)
+        .arg(dir.path())
+        .output()
+        .expect("run the built binary");
+
+    serde_json::from_slice(&out.stdout).expect("the report is JSON")
+}
+
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/84
+#[test]
+fn the_unplaced_flag_names_each_unplaced_name_with_its_place() {
+    let v = unplaced_json("unplaced-on", &["--unplaced"]);
+
+    assert_eq!(
+        v["unplaced"],
+        serde_json::json!([
+            {"name": "Nope", "file": "plugin/p.vim", "line": 2},
+            {"name": "Gone", "recv": "C", "file": "plugin/p.vim", "line": 5},
+        ]),
+        "{v}"
+    );
+}
+
+#[test]
+fn without_the_unplaced_flag_the_report_has_no_unplaced_field() {
+    let v = unplaced_json("unplaced-off", &[]);
+
+    assert!(v.get("unplaced").is_none(), "{v}");
+}
+
+/// The flag serves a survey of the analyzer, not a user, so the help
+/// does not offer it.
+#[test]
+fn the_unplaced_flag_is_not_in_the_help() {
+    assert!(!help().contains("--unplaced"), "{}", help());
+}
