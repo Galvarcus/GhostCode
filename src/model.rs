@@ -26,6 +26,9 @@ pub enum Kind {
     EnumValue,
     Field,
     Variable,
+    /// A type alias, `type Name = list<string>`.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/88
+    Type,
 }
 
 impl fmt::Display for Kind {
@@ -39,6 +42,7 @@ impl fmt::Display for Kind {
             Self::EnumValue => "enum_value",
             Self::Field => "field",
             Self::Variable => "variable",
+            Self::Type => "type",
         };
         f.write_str(word)
     }
@@ -341,6 +345,7 @@ mod tests {
             Kind::EnumValue,
             Kind::Field,
             Kind::Variable,
+            Kind::Type,
         ]
         .iter()
         .map(|k| k.to_string())
@@ -357,6 +362,7 @@ mod tests {
                 "enum_value",
                 "field",
                 "variable",
+                "type",
             ]
         );
     }

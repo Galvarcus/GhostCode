@@ -392,3 +392,26 @@ fn a_global_function_counts_as_exported() {
         .collect();
     assert_eq!(exported, vec![("Api", true), ("Local", false)]);
 }
+
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/88
+#[test]
+fn type_and_export_type_declare_aliases() {
+    let a = scan(
+        "autoload/p.vim",
+        "vim9script\ntype Amount = number\nexport type Lines = list<string>\n",
+    );
+
+    assert_eq!(decls(&a), vec!["type Amount", "type Lines"]);
+    assert!(!a.syms[0].exported);
+    assert!(a.syms[1].exported);
+}
+
+#[test]
+fn a_call_of_the_type_function_declares_nothing() {
+    let a = scan(
+        "autoload/p.vim",
+        "vim9script\nvar t = type(1)\necho type(t)\n",
+    );
+
+    assert_eq!(decls(&a), vec!["variable t"]);
+}
