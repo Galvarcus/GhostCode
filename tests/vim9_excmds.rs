@@ -555,3 +555,22 @@ fn the_variable_of_a_for_in_a_command_body_is_bound() {
 
     assert_eq!(count(text, "w"), 0);
 }
+
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/127
+#[test]
+fn a_command_whose_argument_opens_with_a_dot_is_a_command() {
+    let text = "vim9script\ndef F()\n  edit ./main.rs\nenddef\n";
+
+    assert_eq!(count(text, "edit"), 0);
+    assert!(refs(text)
+        .iter()
+        .filter(|r| r.name == "main")
+        .all(|r| r.owned));
+}
+
+#[test]
+fn a_dot_glued_to_a_word_named_like_a_command_reaches_into_it() {
+    let text = "vim9script\nvar edit = {main: 1}\nedit.main = 2\n";
+
+    assert!(refs(text).iter().any(|r| r.name == "main" && r.member));
+}
