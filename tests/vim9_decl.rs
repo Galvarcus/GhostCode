@@ -339,6 +339,43 @@ fn a_class_that_extends_nothing_states_nothing() {
     assert!(heirs(&a).is_empty());
 }
 
+/// FUNCTION: The id of each root a scan of one file gives, as text.
+fn roots(a: &Analysis) -> Vec<String> {
+    a.roots.iter().map(|r| r.to_string()).collect()
+}
+
+/// A runner finds each test by its name, as Vim's own tests are found.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/101
+#[test]
+fn a_test_function_in_a_test_directory_is_a_root() {
+    let a = scan(
+        "test/t.vim",
+        "vim9script\ndef Test_one()\nenddef\ndef g:Test_two()\nenddef\ndef Helper()\nenddef\n",
+    );
+
+    assert_eq!(
+        roots(&a),
+        vec!["test/t.vim::Test_one", "test/t.vim::Test_two"]
+    );
+}
+
+#[test]
+fn a_test_function_outside_a_test_directory_is_no_root() {
+    let a = scan("autoload/t.vim", "vim9script\ndef Test_one()\nenddef\n");
+
+    assert!(roots(&a).is_empty(), "{:?}", roots(&a));
+}
+
+#[test]
+fn a_method_named_as_a_test_is_no_root() {
+    let a = scan(
+        "tests/t.vim",
+        "vim9script\nclass C\n  def Test_one()\n  enddef\nendclass\n",
+    );
+
+    assert!(roots(&a).is_empty(), "{:?}", roots(&a));
+}
+
 /// Any user or plugin can call a global function, as it can an export.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/102
 #[test]

@@ -16,4 +16,14 @@ def Unused(): number
   return 2
 enddef
 
+# LIVE
+def Checked(): number
+  return 3
+enddef
+
+# LIVE
+def g:Test_runs_from_tests()
+  assert_equal(3, Checked())
+enddef
+
 echomsg Helper()

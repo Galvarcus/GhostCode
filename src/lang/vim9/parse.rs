@@ -15,6 +15,7 @@ use crate::lang::vim9::excmds;
 use crate::lang::vim9::exists;
 use crate::lang::vim9::lex::Tok;
 use crate::lang::vim9::lex::TokKind;
+use crate::lang::vim9::rules;
 use crate::lang::vim9::shared;
 use crate::lang::vim9::types;
 use crate::lang::vim9::types::Blocks;
@@ -353,9 +354,16 @@ fn function(
     // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/102
     let exported = exported || def_global(stmt, rest);
     let (kind, exported) = member_kind(scope, Kind::Function, Kind::Method, name, exported);
+    let id = SymbolId::of(file, scope.owner.as_deref(), name);
+
+    // A runner calls a test by its name, which no parser sees.
+    // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/101
+    if rules::is_test(file, scope.owner.as_deref(), name) {
+        out.root(id.clone());
+    }
 
     out.sym(Symbol {
-        id: SymbolId::of(file, scope.owner.as_deref(), name),
+        id,
         kind,
         name: (*name).to_string(),
         file: file.to_path_buf(),
