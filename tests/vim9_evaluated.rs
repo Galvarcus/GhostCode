@@ -162,3 +162,20 @@ fn a_name_behind_a_dot_after_a_gap_of_an_evaluated_string_stays_bare() {
 
     assert!(!one(text, "Completor").member);
 }
+
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/126
+#[test]
+fn a_string_after_a_dict_key_named_function_is_text() {
+    let text = "vim9script\nconst M = {\n  def: 'E1057: Missing :enddef', function: 'E126: Missing :endfunction',\n}\necho M\n";
+
+    for name in ["E126", "Missing", "endfunction"] {
+        assert_eq!(count(text, name), 0, "{name}");
+    }
+}
+
+#[test]
+fn a_string_in_the_brackets_of_function_still_names_a_function() {
+    let text = "vim9script\ndef Helper()\nenddef\necho function('Helper')\n";
+
+    assert_eq!(count(text, "Helper"), 1);
+}
