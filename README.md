@@ -370,6 +370,8 @@ hidden directories, as Vim's own `globpath` does; name a file in
   reads. A write counts as a use there. Inside a function body it does
   not, so a local the code only assigns to is reported with the other
   locals
+- a legacy `function` that nothing calls. Only a `def` is a symbol. A
+  call from the body of a legacy function still counts as a use
 
 Ghostcode is conservative by design: anything it can't prove is
 unreferenced is left alone rather than reported.

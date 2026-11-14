@@ -43,4 +43,29 @@ findings in the default setting and 102 in strict, covering the
 `class`, `field`, `function`, `method` and `variable` kinds.
 
 No corpus covers the `enum`, `enum value` or `interface` kinds, because
-no upstream project uses them. The semantic tests cover those.
+no upstream project uses them. The semantic tests and the truth families
+cover those.
+
+## The truth families
+
+A corpus proves that the findings stay as they were. It cannot prove
+that a finding is a ghost, or that no ghost is missed, because nothing in
+it states which symbol is which. Each directory under `truth/` is a small
+project of one family of constructs that does. The line above each
+declaration is a marker:
+
+| Marker | The symbol | A finding names it |
+| --- | --- | --- |
+| `# GHOST` | has no use | yes |
+| `# LIVE` | has a use | no |
+| `# MISSED` | has no use, and the readme states the limit | no |
+
+`tests/truth.rs` scans each family with the settings in its own
+`ghostcode.toml` and fails where a finding and a marker disagree, where a
+symbol has no marker, and where a `# GHOST` or `# LIVE` marker sits above
+a line that declares no symbol. `tests/test_truth.vim` proves that Vim
+sources and compiles each file, so that a family holds only what Vim
+accepts.
+
+A new family is a new directory, with no change to either test. A case
+that shows a fault of the analyzer enters with the fix of that fault.
