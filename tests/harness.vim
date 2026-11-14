@@ -22,10 +22,12 @@ delete('tests/results.txt')
 import './skip.vim' as S
 import './test_frontend.vim' as TF
 import './test_helptags.vim' as TH
+import './test_truth.vim' as TT
 
 var suites: list<func> = [
   TF.RunAll,
   TH.RunAll,
+  TT.RunAll,
 ]
 
 for RunSuite in suites
