@@ -833,6 +833,10 @@ const DISCARD: &str = "_";
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 const DOT: &str = ".";
 
+/// The command that defines a user command.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/112
+const DEFINES_COMMAND: &str = "command";
+
 /// The words that open a type alias, `export type Name = ...`.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/88
 const EXPORT: &str = "export";
@@ -865,35 +869,68 @@ const DICT: &str = "dict";
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 const SET_FAMILY: &[&str] = &["set", "setlocal", "setglobal"];
 
-// The commands whose arguments are text Vim keeps for itself from the
-// command to its end: a highlight group, an attribute and its value,
-// a keyword of the command, the words of a pattern, the path of a
-// menu, a color scheme, a locale with its category, and a filetype.
-// `canonical` reaches each from an abbreviation, as it does a set
-// command.
+// The commands whose arguments are code: an expression, a command to
+// run, or a statement that the parser reads by its own rules. Every
+// other command of Vim takes text that Vim keeps for itself from the
+// command to its end: a file, a keyword, a group, a pattern, a
+// register, an event. The list of code is closed and short, where a
+// list of text would grow with each plugin. A word marked as text
+// still credits a symbol of its spelling, so a command missing here
+// costs a count and never a finding.
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-//
-// `:sleep` takes a count with its unit, `:vimgrep` a pattern, its
-// flags and file names, `:messages` a keyword or a count, and
-// `:source` a file name.
-const TEXT_FAMILY: &[&str] = &[
-    "highlight",
-    "syntax",
-    "echohl",
-    "colorscheme",
-    "language",
-    "setfiletype",
-    "sleep",
-    "vimgrep",
-    "messages",
-    "source",
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/108
+const CODE_ARGS: &[&str] = &[
+    // An expression.
+    "echo",
+    "echon",
+    "echomsg",
+    "echoerr",
+    "echoconsole",
+    "echowindow",
+    "execute",
+    "call",
+    "eval",
+    "if",
+    "elseif",
+    "while",
+    "for",
+    "return",
+    "throw",
+    "var",
+    "const",
+    "final",
+    "let",
+    "unlet",
+    "lockvar",
+    "unlockvar",
+    // A command to run.
+    "windo",
+    "bufdo",
+    "tabdo",
+    "argdo",
+    "cdo",
+    "ldo",
+    "cfdo",
+    "lfdo",
+    "folddoopen",
+    "folddoclosed",
+    "global",
+    "vglobal",
+    "vim9cmd",
+    "legacy",
+    // A statement with rules of its own.
+    "autocmd",
+    "command",
+    "substitute",
+    "def",
+    "function",
+    "class",
+    "enum",
+    "interface",
+    "type",
+    "import",
+    "export",
 ];
-
-// What the name of every menu command ends with: `amenu`, `emenu`,
-// `nnoremenu`, `aunmenu`. Each takes a priority, a keyword or a path,
-// and the keys the entry runs.
-// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-const MENU: &str = "menu";
 
 // The command that runs its argument as keys. It is apart from the
 // family above because it takes a bar as one of those keys, so
@@ -1139,6 +1176,13 @@ pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
         // its variables for the statements the loop holds.
         locals.declare(stmt);
         locals.bind_loop(stmt);
+
+        // A loop that opens the body of a `:command` binds its
+        // variables for the rest of the line, as a loop does.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/112
+        if let Some((_, body)) = command_body_at(stmt) {
+            locals.bind_loop(&stmt[body..]);
+        }
 
         // A declaration's own name is not a use of itself, so the
         // statement is read from after it: a def's parameter types and
@@ -1408,7 +1452,7 @@ impl Collect<'_> {
         // reached into or assigned to, and `in_command` refuses those.
         let vims = recv.is_none()
             && in_command(stmt, i, heads)
-            && (excmds::canonical(word).is_some() || user_command(word));
+            && (excmds::canonical(word).is_some() || user_command(word) || short_command(stmt, i));
 
         if vims && excmds::has(word) {
             return;
@@ -1965,9 +2009,8 @@ fn legacy_signature(stmt: &[Tok], i: usize) -> bool {
 /// dropping a name the project owns.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 fn command_name_at(stmt: &[Tok]) -> Option<usize> {
-    let head_at = stmt
-        .iter()
-        .position(|t| t.text != "!" && !modifier(&t.text))?;
+    // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/112
+    let head_at = command_at(stmt)?;
 
     let mut i = head_at + 1;
     while let Some(tok) = stmt.get(i) {
@@ -1991,6 +2034,19 @@ fn command_name_at(stmt: &[Tok]) -> Option<usize> {
     }
 
     None
+}
+
+/// FUNCTION: Where the name of a `:command` definition stands, and the
+/// command word that opens its body, past any modifier.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/112
+fn command_body_at(stmt: &[Tok]) -> Option<(usize, usize)> {
+    if head(stmt).and_then(excmds::canonical) != Some(DEFINES_COMMAND) {
+        return None;
+    }
+
+    let name = command_name_at(stmt)?;
+
+    Some((name, command_from(stmt, name + 1)?))
 }
 
 /// FUNCTION: Whether a token of a `:command` or `:delcommand`
@@ -2154,22 +2210,65 @@ fn ends_command(stmt: &[Tok], k: usize) -> bool {
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 pub(super) fn text_args(stmt: &[Tok], i: usize, heads: &[usize]) -> bool {
     heads.iter().copied().filter(|at| *at < i).any(|at| {
-        let Some(name) = excmds::canonical(&stmt[at].text) else {
-            return false;
-        };
-
         if !reads_command(stmt, at) {
             return false;
         }
 
-        name == NORMAL || (text_family(name) && (at + 1..i).all(|k| !ends_command(stmt, k)))
+        let open = (at + 1..i).all(|k| !ends_command(stmt, k));
+
+        let word = uncounted(&stmt[at].text);
+
+        // A user command takes text, which its body gets as <args>.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/111
+        if short_command(stmt, at) || user_command(word) {
+            return open;
+        }
+
+        let Some(name) = excmds::canonical(word) else {
+            return false;
+        };
+
+        name == NORMAL || (text_family(name) && open)
     })
 }
 
+/// FUNCTION: A command word without the count that the lexer glues to
+/// it, as the `2` of `:2Diag prev`.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/111
+fn uncounted(word: &str) -> &str {
+    word.trim_start_matches(|c: char| c.is_ascii_digit())
+}
+
+/// FUNCTION: Whether the word at `at` is a command of one letter, as
+/// the `d` of `:%d _` is. The table answers no word that short, so
+/// that `g:flag` keeps its reference, but behind the colon of a
+/// command and its range a word can be nothing but a command. Its
+/// arguments are then text: a mark still credits a symbol of its
+/// spelling, so `:s` and `:g`, which take code, cost a count at most.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/109
+fn short_command(stmt: &[Tok], at: usize) -> bool {
+    let word = &stmt[at];
+
+    if word.kind != TokKind::Ident || word.text.len() != 1 {
+        return false;
+    }
+
+    stmt[..at]
+        .iter()
+        .rev()
+        .find(|t| !in_range(&t.text))
+        .is_some_and(|t| t.text == COLON)
+}
+
 /// FUNCTION: Whether a command keeps its arguments as text of Vim's
-/// own from the command to its end.
+/// own from the command to its end: every command but one whose
+/// arguments are code, a modifier, and the commands whose arguments
+/// have rules of their own.
 fn text_family(name: &str) -> bool {
-    TEXT_FAMILY.contains(&name) || name.ends_with(MENU)
+    !CODE_ARGS.contains(&name)
+        && !MODS.contains(&name)
+        && !SET_FAMILY.contains(&name)
+        && !name.ends_with(MAP)
 }
 
 /// FUNCTION: Whether the last command of a statement takes the rest
@@ -2185,8 +2284,13 @@ pub(super) fn owns_line(stmt: &[Tok]) -> bool {
         .filter(|at| stmt.get(*at).is_some_and(|t| !modifier(&t.text)))
         .max()
         .filter(|at| reads_command(stmt, *at))
-        .and_then(|at| excmds::canonical(&stmt[at].text))
-        .is_some_and(|name| name == NORMAL || text_family(name) || name.ends_with(MAP))
+        .is_some_and(|at| {
+            let word = uncounted(&stmt[at].text);
+
+            user_command(word)
+                || excmds::canonical(word)
+                    .is_some_and(|name| name == NORMAL || text_family(name) || name.ends_with(MAP))
+        })
 }
 
 /// FUNCTION: Whether the token at `i` is a key of a mapping or an
@@ -2308,6 +2412,13 @@ pub(super) fn heads(stmt: &[Tok]) -> Vec<usize> {
         at.push(body);
     }
 
+    // The body of a `:command` definition is a command of its own,
+    // past any modifier it opens with.
+    // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/112
+    if let Some((name, body)) = command_body_at(stmt) {
+        at.extend(name + 1..=body);
+    }
+
     // A bar ends one command and starts the next, which the lexer
     // keeps in the statement it opened: `if x | echo 1 | endif` is
     // three commands on one line.
@@ -2422,21 +2533,26 @@ pub(super) fn command_at(stmt: &[Tok]) -> Option<usize> {
 
 /// FUNCTION: Where the command word of the command that opens at
 /// `from` stands, past any modifier and past a colon with its range.
+/// The two can take turns, as in `:silent! :%d _`, where the modifier
+/// has a colon of its own.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/109
 fn command_from(stmt: &[Tok], from: usize) -> Option<usize> {
-    let at = from
-        + stmt
-            .get(from..)?
-            .iter()
-            .position(|t| t.text != "!" && !modifier(&t.text))?;
+    let mut at = from;
 
-    if stmt[at].text != COLON {
-        return Some(at);
+    loop {
+        let text = stmt.get(at)?.text.as_str();
+
+        if text == "!" || modifier(text) {
+            at += 1;
+        } else if text == COLON {
+            at += 1 + stmt
+                .get(at + 1..)?
+                .iter()
+                .position(|t| !in_range(&t.text))?;
+        } else {
+            return Some(at);
+        }
     }
-
-    stmt[at + 1..]
-        .iter()
-        .position(|t| !in_range(&t.text))
-        .map(|past| at + 1 + past)
 }
 
 /// FUNCTION: Whether a token is part of a range: the whole buffer, a

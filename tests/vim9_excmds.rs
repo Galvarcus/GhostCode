@@ -444,3 +444,114 @@ fn an_argument_of_the_function_builtin_is_not_marked() {
 
     assert!(!one(text, "Width").owned);
 }
+
+/// Most commands of Vim take text and no expression, so their
+/// arguments are Vim's: a file, a keyword, a register, an event.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/108
+#[test]
+fn the_arguments_of_a_command_that_takes_text_are_marked_as_vims() {
+    let text =
+        "vim9script\nedit foo.txt\nfiletype plugin on\nwincmd p\nredir END\npackadd matchit\n";
+
+    for word in ["foo", "plugin", "on", "p", "END", "matchit"] {
+        assert!(one(text, word).owned, "{word}");
+    }
+}
+
+#[test]
+fn the_argument_of_a_command_that_takes_an_expression_is_still_a_name() {
+    let text = "vim9script\nreturn Helper\n";
+
+    assert!(!one(text, "Helper").owned);
+}
+
+#[test]
+fn the_command_a_command_runs_is_still_read_as_one() {
+    let text = "vim9script\nwindo Helper()\n";
+
+    assert!(!one(text, "Helper").owned);
+}
+
+/// The pattern of `:catch` is text that Vim matches, not code.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/92
+#[test]
+fn the_pattern_of_a_catch_command_is_marked_as_vims() {
+    let text = "vim9script\ntry\n  echo 1\ncatch /^Vim\\%((\\a\\+)\\)\\?:E11/\nendtry\n";
+
+    for word in ["Vim", "a", "E11"] {
+        assert!(one(text, word).owned, "{word}");
+    }
+}
+
+/// A modifier may stand before the colon and the range of the command
+/// it modifies, and Vim reads the command behind both.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/109
+#[test]
+fn a_command_behind_a_modifier_a_colon_and_a_range_is_found() {
+    let text = "vim9script\n:silent! :%d _\n:silent :1,$delete\n";
+
+    assert!(one(text, "d").owned);
+    assert_eq!(count(text, "delete"), 0);
+    assert!(one(text, "_").owned);
+}
+
+/// The table missed six commands whose row in the help index has spaces
+/// in place of a tab, `:scriptencoding` among them.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/110
+#[test]
+fn scriptencoding_is_a_command_and_its_argument_is_vims() {
+    let text = "vim9script\nscriptencoding utf-8\n";
+
+    assert_eq!(count(text, "scriptencoding"), 0);
+    assert!(one(text, "utf").owned);
+}
+
+#[test]
+fn the_argument_of_vim9script_is_vims() {
+    let text = "vim9script noclear\necho 1\n";
+
+    assert!(one(text, "noclear").owned);
+}
+
+/// The body of a user command gets its arguments as `<args>`. They can
+/// be an expression there, but a mark still credits a symbol of its
+/// spelling, so no finding is lost.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/111
+#[test]
+fn the_arguments_of_a_user_command_are_marked_as_vims() {
+    let text = "vim9script\nDiag next\n:2Diag prev\n";
+
+    assert!(one(text, "next").owned);
+    assert!(one(text, "prev").owned);
+}
+
+#[test]
+fn the_arguments_of_a_user_command_in_an_executed_string_are_marked_as_vims() {
+    let text = "vim9script\nexecute('Diag show')\n";
+
+    assert!(one(text, "show").owned);
+}
+
+#[test]
+fn a_bar_ends_the_arguments_of_a_user_command() {
+    let text = "vim9script\nDiag next | echo Helper\n";
+
+    assert!(!one(text, "Helper").owned);
+}
+
+/// A definition behind a colon is a definition, and the name it gives
+/// is no use.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/112
+#[test]
+fn a_command_definition_behind_a_colon_declares_its_name() {
+    let text = "vim9script\n:command -buffer MyRefresh echo 1\n";
+
+    assert!(refs(text).iter().all(|r| r.owned), "{:?}", refs(text));
+}
+
+#[test]
+fn the_variable_of_a_for_in_a_command_body_is_bound() {
+    let text = "vim9script\ncommand! -nargs=0 ShowAll for w in ['a'] | echo w | endfor\n";
+
+    assert_eq!(count(text, "w"), 0);
+}
