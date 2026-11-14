@@ -160,3 +160,23 @@ fn a_dict_key_named_as_a_block_word_keeps_its_dict_whole() {
         assert!(!names.iter().any(|n| n == "other_key"), "{key}: {names:?}");
     }
 }
+
+/// A block word inside a block lambda starts a statement of its own,
+/// and the brace that closes the lambda returns to the dict or the call
+/// around it, whose keys are keys again.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/96
+#[test]
+fn a_dict_key_after_a_block_lambda_with_an_if_is_a_key() {
+    let text = "vim9script\nvar o = {\n  out_cb: (ch, msg) => {\n    if msg == \"\"\n      echo 1\n    endif\n  },\n  err_msg: 0,\n}\necho o\n";
+    let names: Vec<String> = refs(text).into_iter().map(|r| r.name).collect();
+
+    assert!(!names.iter().any(|n| n == "err_msg"), "{names:?}");
+}
+
+#[test]
+fn a_dict_argument_after_a_block_lambda_with_an_if_is_a_dict() {
+    let text = "vim9script\nvar t = timer_start(20, (_) => {\n  if 1\n    echo 1\n  endif\n}, {repeat: 0})\n";
+    let names: Vec<String> = refs(text).into_iter().map(|r| r.name).collect();
+
+    assert!(!names.iter().any(|n| n == "repeat"), "{names:?}");
+}

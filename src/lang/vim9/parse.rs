@@ -2717,17 +2717,24 @@ fn class_in_types(stmt: &[Tok], at: usize) -> bool {
 
 /// FUNCTION: True when a colon after a name introduces a type rather
 /// than separating a key from its value, as `var x: Config` does and
-/// `{callback: OnDone}` does not.
+/// `{callback: OnDone}` does not. A brace that closes one opened
+/// before the statement, as the `}` that ends a block lambda in
+/// `}, {repeat: 0})`, leaves the name inside a dict as well.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/96
 fn is_type_position(stmt: &[Tok], i: usize) -> bool {
-    let mut depth = 0i32;
+    let mut open = 0u32;
+    let mut closed_outside = false;
+
     for tok in &stmt[..i] {
         match tok.text.as_str() {
-            "{" => depth += 1,
-            "}" => depth -= 1,
+            "{" => open += 1,
+            "}" if open > 0 => open -= 1,
+            "}" => closed_outside = true,
             _ => {}
         }
     }
-    depth == 0
+
+    open == 0 && !closed_outside
 }
 
 /// FUNCTION: Every identifier inside a piece of text.
