@@ -327,3 +327,20 @@ fn a_class_that_extends_nothing_states_nothing() {
 
     assert!(heirs(&a).is_empty());
 }
+
+/// Any user or plugin can call a global function, as it can an export.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/102
+#[test]
+fn a_global_function_counts_as_exported() {
+    let a = scan(
+        "plugin/p.vim",
+        "vim9script\ndef g:Api()\nenddef\ndef Local()\nenddef\n",
+    );
+
+    let exported: Vec<(&str, bool)> = a
+        .syms
+        .iter()
+        .map(|s| (s.name.as_str(), s.exported))
+        .collect();
+    assert_eq!(exported, vec![("Api", true), ("Local", false)]);
+}
