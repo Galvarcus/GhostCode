@@ -1625,6 +1625,7 @@ impl Collect<'_> {
         };
 
         let arg = unquote(&tok.text);
+        let gapped = evaluated::in_gaps(&arg);
 
         // `exists()` takes Vim's own syntax rather than a bare name: a
         // scope prefix, an option, a feature, an autocommand group.
@@ -1660,9 +1661,12 @@ impl Collect<'_> {
             // the code around the string is dropped there. This is
             // the second reading of the same name, and it has to
             // agree. It goes by spelling, so a word of the text that
-            // matches such a variable is dropped with it.
+            // matches such a variable is dropped with it. Whatever
+            // reads the string, a name inside its braces is such a
+            // second reading.
             // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-            if EXECUTE.contains(&gate) && self.local(&name) {
+            // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/125
+            if (EXECUTE.contains(&gate) || gapped.contains(&name)) && self.local(&name) {
                 continue;
             }
 
