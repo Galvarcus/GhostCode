@@ -833,6 +833,10 @@ const DISCARD: &str = "_";
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 const DOT: &str = ".";
 
+/// The command that defines a user command.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/112
+const DEFINES_COMMAND: &str = "command";
+
 /// The words that open a type alias, `export type Name = ...`.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/88
 const EXPORT: &str = "export";
@@ -1172,6 +1176,13 @@ pub fn references(file: &Path, stmts: &[Vec<Tok>], out: &mut dyn Sink) {
         // its variables for the statements the loop holds.
         locals.declare(stmt);
         locals.bind_loop(stmt);
+
+        // A loop that opens the body of a `:command` binds its
+        // variables for the rest of the line, as a loop does.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/112
+        if let Some((_, body)) = command_body_at(stmt) {
+            locals.bind_loop(&stmt[body..]);
+        }
 
         // A declaration's own name is not a use of itself, so the
         // statement is read from after it: a def's parameter types and
@@ -1998,9 +2009,8 @@ fn legacy_signature(stmt: &[Tok], i: usize) -> bool {
 /// dropping a name the project owns.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 fn command_name_at(stmt: &[Tok]) -> Option<usize> {
-    let head_at = stmt
-        .iter()
-        .position(|t| t.text != "!" && !modifier(&t.text))?;
+    // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/112
+    let head_at = command_at(stmt)?;
 
     let mut i = head_at + 1;
     while let Some(tok) = stmt.get(i) {
@@ -2024,6 +2034,19 @@ fn command_name_at(stmt: &[Tok]) -> Option<usize> {
     }
 
     None
+}
+
+/// FUNCTION: Where the name of a `:command` definition stands, and the
+/// command word that opens its body, past any modifier.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/112
+fn command_body_at(stmt: &[Tok]) -> Option<(usize, usize)> {
+    if head(stmt).and_then(excmds::canonical) != Some(DEFINES_COMMAND) {
+        return None;
+    }
+
+    let name = command_name_at(stmt)?;
+
+    Some((name, command_from(stmt, name + 1)?))
 }
 
 /// FUNCTION: Whether a token of a `:command` or `:delcommand`
@@ -2387,6 +2410,13 @@ pub(super) fn heads(stmt: &[Tok]) -> Vec<usize> {
 
     if let Some(body) = autocmd::body(stmt, first) {
         at.push(body);
+    }
+
+    // The body of a `:command` definition is a command of its own,
+    // past any modifier it opens with.
+    // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/112
+    if let Some((name, body)) = command_body_at(stmt) {
+        at.extend(name + 1..=body);
     }
 
     // A bar ends one command and starts the next, which the lexer

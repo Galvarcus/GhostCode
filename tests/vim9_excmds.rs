@@ -538,3 +538,20 @@ fn a_bar_ends_the_arguments_of_a_user_command() {
 
     assert!(!one(text, "Helper").owned);
 }
+
+/// A definition behind a colon is a definition, and the name it gives
+/// is no use.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/112
+#[test]
+fn a_command_definition_behind_a_colon_declares_its_name() {
+    let text = "vim9script\n:command -buffer MyRefresh echo 1\n";
+
+    assert!(refs(text).iter().all(|r| r.owned), "{:?}", refs(text));
+}
+
+#[test]
+fn the_variable_of_a_for_in_a_command_body_is_bound() {
+    let text = "vim9script\ncommand! -nargs=0 ShowAll for w in ['a'] | echo w | endfor\n";
+
+    assert_eq!(count(text, "w"), 0);
+}
