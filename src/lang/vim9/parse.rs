@@ -2079,8 +2079,11 @@ fn legacy_signature(stmt: &[Tok], i: usize) -> bool {
 /// `-complete=customlist,Func`, where the word after the comma names
 /// a function of the project's. A shape this does not expect ends the
 /// walk, which leaves the rest of the line counted rather than
-/// dropping a name the project owns.
+/// dropping a name the project owns. A line that ends among the
+/// attributes holds no name, and the end stands for it, as in the
+/// text `'command -nargs=* -bang'` whose name a gap adds.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/124
 fn command_name_at(stmt: &[Tok]) -> Option<usize> {
     // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/112
     let head_at = command_at(stmt)?;
@@ -2106,7 +2109,7 @@ fn command_name_at(stmt: &[Tok]) -> Option<usize> {
         }
     }
 
-    None
+    Some(i.min(stmt.len()))
 }
 
 /// FUNCTION: Where the name of a `:command` definition stands, and the
@@ -2132,7 +2135,7 @@ fn command_body_at(stmt: &[Tok]) -> Option<(usize, usize)> {
 /// handler after the name, and both are left alone: the handler is
 /// often the only caller the function has.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
-fn in_command_def(stmt: &[Tok], i: usize) -> bool {
+pub(super) fn in_command_def(stmt: &[Tok], i: usize) -> bool {
     if !matches!(
         head(stmt).and_then(excmds::canonical),
         Some("command" | "delcommand")
@@ -2705,7 +2708,7 @@ fn command_from(stmt: &[Tok], from: usize) -> Option<usize> {
 /// FUNCTION: Whether a token is part of a range: the whole buffer, a
 /// line number, the current or the last line, an offset, or the
 /// separator between two addresses.
-fn in_range(text: &str) -> bool {
+pub(super) fn in_range(text: &str) -> bool {
     RANGE.contains(&text) || text.bytes().all(|b| b.is_ascii_digit())
 }
 
