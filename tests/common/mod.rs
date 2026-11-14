@@ -129,5 +129,6 @@ pub fn cfg(exports_are_api: bool) -> ghostcode::config::Config {
         external: Vec::new(),
         no_ignore: false,
         findings: ghostcode::config::FindingFlags::default(),
+        unplaced: false,
     }
 }

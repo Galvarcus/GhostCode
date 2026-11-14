@@ -25,6 +25,10 @@ use crate::model::SymbolId;
 pub struct Resolved {
     pub targets: HashMap<usize, Vec<SymbolId>>,
     pub unplaced: usize,
+    /// The index of each reference that `unplaced` counts, in the
+    /// order of the references.
+    /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/84
+    pub misses: Vec<usize>,
 }
 
 /// Every way a reference can be looked up, each built once.
@@ -393,6 +397,7 @@ pub fn all(a: &Analysis) -> Resolved {
             // autoload function of a file the project does not hold.
             if !r.owned && !idx.knows(r) && !idx.keyed(r) && !idx.foreign(r) {
                 out.unplaced += 1;
+                out.misses.push(i);
             }
 
             continue;
