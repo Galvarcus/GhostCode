@@ -2468,9 +2468,10 @@ fn sides(stmt: &[Tok], at: usize) -> Option<Sides> {
 
 /// FUNCTION: Where each command line that the right side of a mapping
 /// runs reads a command: behind `<ScriptCmd>` or `<Cmd>`, and behind
-/// the colon that opens a command line, past any modifier. The colon
-/// of a scope, as in `g:x`, opens none. The right side of an `<expr>`
-/// mapping is an expression and runs no command line.
+/// the colon that opens a command line, past any key name and any
+/// modifier. The colon of a scope, as in `g:x`, opens none. The right
+/// side of an `<expr>` mapping is an expression and runs no command
+/// line.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/131
 fn map_lines(stmt: &[Tok], at: usize) -> Vec<usize> {
     let mut out = Vec::new();
@@ -2499,11 +2500,40 @@ fn map_lines(stmt: &[Tok], at: usize) -> Vec<usize> {
             stmt[k - 1].text == COLON && !(stmt[k - 1].glued && stmt[k - 2].kind == TokKind::Ident);
 
         if runs || colon {
-            out.extend(k..=command_from(stmt, k).unwrap_or(k));
+            let head = if colon { past_keys(stmt, k) } else { k };
+
+            out.extend(head..=command_from(stmt, head).unwrap_or(head));
         }
     }
 
     out
+}
+
+/// FUNCTION: Where a command line that opens at `from` reads its
+/// command, past the key names typed before it: `:<C-u>call` clears
+/// the range that a count or a selection puts on the line, then reads
+/// `call`. A key name with nothing behind it ends the line and stays.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/141
+fn past_keys(stmt: &[Tok], from: usize) -> usize {
+    let mut at = from;
+
+    while stmt.get(at).is_some_and(|t| t.text == "<") {
+        let Some(len) = stmt[at + 1..]
+            .iter()
+            .position(|t| !t.glued || t.text == ">")
+        else {
+            break;
+        };
+        let end = at + 1 + len;
+
+        if stmt[end].text != ">" || !stmt[end].glued || end + 1 == stmt.len() {
+            break;
+        }
+
+        at = end + 1;
+    }
+
+    at
 }
 
 /// FUNCTION: Whether a word is one of a list of key names, which Vim
