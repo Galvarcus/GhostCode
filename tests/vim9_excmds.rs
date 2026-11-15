@@ -549,6 +549,24 @@ fn a_command_definition_behind_a_colon_declares_its_name() {
     assert!(refs(text).iter().all(|r| r.owned), "{:?}", refs(text));
 }
 
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/146
+#[test]
+fn a_command_definition_behind_a_colon_in_a_lambda_block_declares_its_name() {
+    let text = "vim9script\ndef Do(...a: list<string>)\nenddef\nvar h: list<func> = []\nh->add(() => {\n    :command! -nargs=* VSFind Do(<f-args>)\n})\n";
+
+    for name in ["nargs", "VSFind", "f", "args"] {
+        assert!(
+            refs(text)
+                .iter()
+                .filter(|r| r.name == name)
+                .all(|r| r.owned),
+            "{name}"
+        );
+    }
+
+    assert!(!one(text, "Do").owned);
+}
+
 #[test]
 fn the_variable_of_a_for_in_a_command_body_is_bound() {
     let text = "vim9script\ncommand! -nargs=0 ShowAll for w in ['a'] | echo w | endfor\n";
