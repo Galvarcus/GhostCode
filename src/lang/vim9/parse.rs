@@ -2303,6 +2303,13 @@ pub(super) fn text_args(stmt: &[Tok], i: usize, heads: &[usize]) -> bool {
             return false;
         }
 
+        // A line of a lambda block opens a command of its own, so the
+        // text of a command ends with its line, where no bar ends it.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/155
+        if (at + 1..=i).any(|k| opens_block_line(stmt, k, heads)) {
+            return false;
+        }
+
         if shell(stmt, at) {
             return shell_text(stmt, at, i, heads);
         }
@@ -2323,6 +2330,16 @@ pub(super) fn text_args(stmt: &[Tok], i: usize, heads: &[usize]) -> bool {
 
         name == NORMAL || (text_family(name) && open)
     })
+}
+
+/// FUNCTION: Whether the token at `k` opens a line of a lambda block:
+/// a head on a line that the token before it does not share, as
+/// `block_lines` gives. A head that a backslash carries on to a line
+/// of its own ends the text as well, which leaves a word counted and
+/// drops none.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/155
+fn opens_block_line(stmt: &[Tok], k: usize, heads: &[usize]) -> bool {
+    k > 0 && stmt[k].line != stmt[k - 1].line && heads.contains(&k)
 }
 
 /// FUNCTION: A command word without the count that the lexer glues to

@@ -638,3 +638,26 @@ fn a_call_behind_the_bang_of_a_modifier_keeps_its_credit() {
 
     assert!(!one(text, "Helper").owned);
 }
+
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/155
+#[test]
+fn the_text_arguments_of_a_command_in_a_lambda_block_end_with_its_line() {
+    let text = "vim9script\nvar F = () => {\n    edit foo\n    Missing()\n    highlight Foo guifg=red\n    Missing()\n    normal! gg\n    Missing()\n}\n";
+    let missing: Vec<Reference> = refs(text)
+        .into_iter()
+        .filter(|r| r.name == "Missing")
+        .collect();
+
+    assert_eq!(missing.len(), 3, "{missing:?}");
+    assert!(missing.iter().all(|r| !r.owned), "{missing:?}");
+
+    for name in ["foo", "Foo", "guifg", "red", "gg"] {
+        assert!(
+            refs(text)
+                .iter()
+                .filter(|r| r.name == name)
+                .all(|r| r.owned),
+            "{name}"
+        );
+    }
+}
