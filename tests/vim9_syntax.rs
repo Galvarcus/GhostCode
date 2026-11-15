@@ -215,6 +215,15 @@ fn a_lambda_parameter_read_on_the_next_line_is_no_reference() {
     assert!(!names.iter().any(|n| n == "lnum"), "{names:?}");
 }
 
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/151
+#[test]
+fn a_lambda_parameter_read_after_a_comment_behind_the_arrow_is_no_reference() {
+    let text = "vim9script\nvar Add = (lnum: number) => # one more\n  lnum + 1\necho Add(1)\n";
+    let names: Vec<String> = refs(text).into_iter().map(|r| r.name).collect();
+
+    assert!(!names.iter().any(|n| n == "lnum"), "{names:?}");
+}
+
 /// A string inside the braces of an interpolated string belongs to the
 /// code there, and its quotes end nothing.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/95
