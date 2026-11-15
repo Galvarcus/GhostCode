@@ -264,3 +264,22 @@ fn a_project_function_in_a_call_string_is_still_a_name() {
 
     assert_eq!(marks, vec![false]);
 }
+
+/// Vim9 allows no space behind the dot of a member, and the end of a
+/// line is one, so a dot that ends a line reaches into nothing.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/153
+#[test]
+fn a_dot_that_ends_a_line_of_a_lambda_block_reaches_into_nothing() {
+    let text = "vim9script\nvar F = () => {\n    :!ctags -R .\n    Missing()\n}\n";
+    let missing = one(text, "Missing");
+
+    assert!(!missing.member && missing.recv.is_none(), "{missing:?}");
+}
+
+#[test]
+fn a_dot_that_opens_a_line_still_reaches_into_the_line_before() {
+    let text =
+        "vim9script\ndef Make(): dict<any>\n  return {}\nenddef\nvar x = Make()\n    .Value()\n";
+
+    assert!(one(text, "Value").member);
+}

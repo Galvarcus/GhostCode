@@ -1516,7 +1516,7 @@ impl Collect<'_> {
             return;
         }
 
-        let member = i > 0 && stmt[i - 1].text == DOT;
+        let member = types::behind_dot(stmt, i);
 
         let owned = vims
             || (member && word == NEW)

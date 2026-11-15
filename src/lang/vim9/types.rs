@@ -640,6 +640,15 @@ fn idents(stmt: &[Tok]) -> Vec<&str> {
         .collect()
 }
 
+/// FUNCTION: Whether the word at `at` stands behind the dot of a
+/// member. Vim9 allows no space behind that dot, and the end of a
+/// line is one, so a dot that ends a line reaches into nothing on the
+/// next, as the `.` of `:!ctags -R .` on a line of a lambda block.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/153
+pub fn behind_dot(stmt: &[Tok], at: usize) -> bool {
+    at > 0 && stmt[at - 1].text == "." && stmt[at - 1].line == stmt[at].line
+}
+
 /// FUNCTION: The type of the receiver of a member access at a
 /// position, or none when nothing in scope gives it one.
 ///
@@ -652,7 +661,7 @@ pub fn recv_type(
     locals: &Locals,
     types: &Types,
 ) -> Option<String> {
-    if at < 2 || stmt[at - 1].text != "." {
+    if at < 2 || !behind_dot(stmt, at) {
         return None;
     }
 
