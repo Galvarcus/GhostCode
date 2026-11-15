@@ -258,7 +258,7 @@ pub fn tokens(text: &str) -> Vec<Tok> {
 
         // A line that ends by opening a block lambda leaves its depth
         // behind, and a lambda that closed takes its own away.
-        if opens_lambda(&toks[from..]) {
+        if code_ends(&toks[from..], &[ARROW, BLOCK_OPEN]) {
             lambdas.push(depth);
         }
         while lambdas.last().is_some_and(|open| depth < *open) && set_aside.len() < lambdas.len() {
@@ -272,7 +272,7 @@ pub fn tokens(text: &str) -> Vec<Tok> {
         if depth <= 0 {
             depth = 0;
 
-            if !rest.trim_end().ends_with(ARROW) {
+            if !code_ends(&toks[from..], &[ARROW]) {
                 push_newline(&mut toks, line);
             }
         }
@@ -282,15 +282,18 @@ pub fn tokens(text: &str) -> Vec<Tok> {
     toks
 }
 
-/// FUNCTION: Whether the tokens of a line end by opening a block
-/// lambda: the arrow, then the brace, with nothing behind them but a
-/// comment.
+/// FUNCTION: Whether the code of a line ends with these tokens, in
+/// order, with nothing behind them but a comment: the arrow of a
+/// lambda whose body stands on the next line, or the arrow and the
+/// brace that open a block lambda.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/147
-fn opens_lambda(line: &[Tok]) -> bool {
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/151
+fn code_ends(line: &[Tok], tail: &[&str]) -> bool {
     let mut code = line.iter().rev().filter(|t| t.kind != TokKind::Comment);
 
-    code.next().is_some_and(|t| t.text == BLOCK_OPEN)
-        && code.next().is_some_and(|t| t.text == ARROW)
+    tail.iter()
+        .rev()
+        .all(|want| code.next().is_some_and(|t| t.text == *want))
 }
 
 /// FUNCTION: True when a line opens or closes a block, which ends any
