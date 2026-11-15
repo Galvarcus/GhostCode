@@ -319,6 +319,18 @@ fn the_arguments_of_the_command_line_a_mapping_runs_are_vims() {
     }
 }
 
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/141
+#[test]
+fn a_key_between_the_colon_and_the_command_of_a_mapping_is_passed() {
+    let text = "vim9script\nvnoremap <Plug>X :<C-u>call Foo()<CR>\nnnoremap <Plug>Y :<c-u><C-U>silent! wincmd p<CR>\n";
+
+    for word in ["call", "silent", "wincmd", "p"] {
+        assert!(vims_or_none(text, word), "{word}");
+    }
+
+    assert!(!one(text, "Foo").owned);
+}
+
 #[test]
 fn a_call_on_the_command_line_a_mapping_runs_keeps_its_credit() {
     let text =
