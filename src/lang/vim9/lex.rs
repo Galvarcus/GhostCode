@@ -74,6 +74,10 @@ const ARROW: &str = "=>";
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/116
 const KEY_COLON: char = ':';
 
+// What may open a command line before its command, as in `:command!`.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/146
+const COMMAND_COLON: char = ':';
+
 // The words that open or close a block. A bracket left unclosed by a
 // broken line must not swallow the file, so one of these at the start
 // of a line ends the statement before it, whatever the bracket depth.
@@ -281,12 +285,17 @@ pub fn tokens(text: &str) -> Vec<Tok> {
 /// FUNCTION: True when a line opens or closes a block, which ends any
 /// statement a broken line left open. A word with a colon against it
 /// is the key of a dictionary, as `command: 'x',` is, and opens
-/// nothing.
+/// nothing. A colon before the word changes nothing, as `:command!`
+/// is `command!`.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/116
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/146
 fn opens_block(line: &str) -> bool {
-    RESYNC.iter().any(|word| {
-        opens_with(line, word) && !line.trim_start()[word.len()..].starts_with(KEY_COLON)
-    })
+    let line = line.trim_start();
+    let line = line.strip_prefix(COMMAND_COLON).unwrap_or(line);
+
+    RESYNC
+        .iter()
+        .any(|word| opens_with(line, word) && !line[word.len()..].starts_with(KEY_COLON))
 }
 
 /// The kind of body a line stands in.
