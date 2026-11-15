@@ -179,3 +179,19 @@ fn a_string_in_the_brackets_of_function_still_names_a_function() {
 
     assert_eq!(count(text, "Helper"), 1);
 }
+
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/142
+#[test]
+fn the_shell_command_of_an_executed_bang_is_vims() {
+    let text = "vim9script\ndef Open(url: string)\n  execute '!xdg-open ' .. url\nenddef\n";
+
+    for name in ["xdg", "open"] {
+        assert!(
+            refs(text)
+                .iter()
+                .filter(|r| r.name == name)
+                .all(|r| r.owned),
+            "{name}"
+        );
+    }
+}
