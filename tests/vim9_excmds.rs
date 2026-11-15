@@ -574,3 +574,26 @@ fn a_dot_glued_to_a_word_named_like_a_command_reaches_into_it() {
 
     assert!(refs(text).iter().any(|r| r.name == "main" && r.member));
 }
+
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/142
+#[test]
+fn the_shell_command_of_a_bang_is_vims() {
+    let text = "vim9script\n!xdg-open foo\nsilent !xdg-open bar\n:!xdg-open baz\n";
+
+    for name in ["xdg", "open", "foo", "bar", "baz"] {
+        assert!(
+            refs(text)
+                .iter()
+                .filter(|r| r.name == name)
+                .all(|r| r.owned),
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn a_call_behind_the_bang_of_a_modifier_keeps_its_credit() {
+    let text = "vim9script\ndef Helper()\nenddef\nsilent! Helper()\n";
+
+    assert!(!one(text, "Helper").owned);
+}

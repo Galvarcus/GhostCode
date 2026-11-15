@@ -967,6 +967,11 @@ const CODE_ARGS: &[&str] = &[
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 const NORMAL: &str = "normal";
 
+// The command that hands the rest of its line to the shell, bars
+// included, and the bang that a modifier takes, as in `silent!`.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/142
+const SHELL: &str = "!";
+
 // What the name of every mapping and unmapping command ends with:
 // `nnoremap`, `xmap`, `iunmap`.
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
@@ -2288,12 +2293,18 @@ fn ends_command(stmt: &[Tok], k: usize) -> bool {
 /// An escaped bar ends nothing, because that is how a pattern writes
 /// its alternation. `heads` still lists the word behind one, so the
 /// nearest head cannot be trusted here and every head before the
-/// token is asked. `:normal` takes every bar as a key.
+/// token is asked. `:normal` takes every bar as a key, and `:!` hands
+/// every bar to the shell.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/142
 pub(super) fn text_args(stmt: &[Tok], i: usize, heads: &[usize]) -> bool {
     heads.iter().copied().filter(|at| *at < i).any(|at| {
         if !reads_command(stmt, at) {
             return false;
+        }
+
+        if shell(stmt, at) {
+            return true;
         }
 
         let open = (at + 1..i).all(|k| !ends_command(stmt, k));
@@ -2355,7 +2366,7 @@ fn text_family(name: &str) -> bool {
 
 /// FUNCTION: Whether the last command of a statement takes the rest
 /// of its line as text or as keys: a command of the text family,
-/// `:normal`, or a mapping command.
+/// `:normal`, `:!`, or a mapping command.
 ///
 /// The reader of a command line asks, because the words past a gap
 /// in such a line are Vim's whatever the gap holds.
@@ -2369,7 +2380,8 @@ pub(super) fn owns_line(stmt: &[Tok]) -> bool {
         .is_some_and(|at| {
             let word = uncounted(&stmt[at].text);
 
-            user_command(word)
+            shell(stmt, at)
+                || user_command(word)
                 || excmds::canonical(word)
                     .is_some_and(|name| name == NORMAL || text_family(name) || name.ends_with(MAP))
         })
@@ -2809,7 +2821,7 @@ fn command_from(stmt: &[Tok], from: usize) -> Option<usize> {
     loop {
         let text = stmt.get(at)?.text.as_str();
 
-        if text == "!" || modifier(text) {
+        if (text == SHELL && !shell(stmt, at)) || modifier(text) {
             at += 1;
         } else if text == COLON {
             at += 1 + stmt
@@ -2820,6 +2832,14 @@ fn command_from(stmt: &[Tok], from: usize) -> Option<usize> {
             return Some(at);
         }
     }
+}
+
+/// FUNCTION: Whether the bang at `at` is the command `:!` and not the
+/// bang of a modifier glued to it, as in `silent!`. The shell reads
+/// the rest of the line, so its words are never the project's.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/142
+fn shell(stmt: &[Tok], at: usize) -> bool {
+    stmt[at].text == SHELL && !(stmt[at].glued && at > 0 && modifier(&stmt[at - 1].text))
 }
 
 /// FUNCTION: Whether a token is part of a range: the whole buffer, a
