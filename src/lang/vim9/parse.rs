@@ -967,6 +967,11 @@ const CODE_ARGS: &[&str] = &[
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 const NORMAL: &str = "normal";
 
+// The command that hands the rest of its line to the shell, bars
+// included, and the bang that a modifier takes, as in `silent!`.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/142
+const SHELL: &str = "!";
+
 // What the name of every mapping and unmapping command ends with:
 // `nnoremap`, `xmap`, `iunmap`.
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
@@ -1511,7 +1516,7 @@ impl Collect<'_> {
             return;
         }
 
-        let member = i > 0 && stmt[i - 1].text == DOT;
+        let member = types::behind_dot(stmt, i);
 
         let owned = vims
             || (member && word == NEW)
@@ -2288,12 +2293,25 @@ fn ends_command(stmt: &[Tok], k: usize) -> bool {
 /// An escaped bar ends nothing, because that is how a pattern writes
 /// its alternation. `heads` still lists the word behind one, so the
 /// nearest head cannot be trusted here and every head before the
-/// token is asked. `:normal` takes every bar as a key.
+/// token is asked. `:normal` takes every bar as a key, and `:!` hands
+/// the rest of its line to the shell, which `shell_text` bounds.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/142
 pub(super) fn text_args(stmt: &[Tok], i: usize, heads: &[usize]) -> bool {
     heads.iter().copied().filter(|at| *at < i).any(|at| {
         if !reads_command(stmt, at) {
             return false;
+        }
+
+        // A line of a lambda block opens a command of its own, so the
+        // text of a command ends with its line, where no bar ends it.
+        // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/155
+        if (at + 1..=i).any(|k| opens_block_line(stmt, k, heads)) {
+            return false;
+        }
+
+        if shell(stmt, at) {
+            return shell_text(stmt, at, i, heads);
         }
 
         let open = (at + 1..i).all(|k| !ends_command(stmt, k));
@@ -2312,6 +2330,16 @@ pub(super) fn text_args(stmt: &[Tok], i: usize, heads: &[usize]) -> bool {
 
         name == NORMAL || (text_family(name) && open)
     })
+}
+
+/// FUNCTION: Whether the token at `k` opens a line of a lambda block:
+/// a head on a line that the token before it does not share, as
+/// `block_lines` gives. A head that a backslash carries on to a line
+/// of its own ends the text as well, which leaves a word counted and
+/// drops none.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/155
+fn opens_block_line(stmt: &[Tok], k: usize, heads: &[usize]) -> bool {
+    k > 0 && stmt[k].line != stmt[k - 1].line && heads.contains(&k)
 }
 
 /// FUNCTION: A command word without the count that the lexer glues to
@@ -2355,7 +2383,7 @@ fn text_family(name: &str) -> bool {
 
 /// FUNCTION: Whether the last command of a statement takes the rest
 /// of its line as text or as keys: a command of the text family,
-/// `:normal`, or a mapping command.
+/// `:normal`, `:!`, or a mapping command.
 ///
 /// The reader of a command line asks, because the words past a gap
 /// in such a line are Vim's whatever the gap holds.
@@ -2369,7 +2397,8 @@ pub(super) fn owns_line(stmt: &[Tok]) -> bool {
         .is_some_and(|at| {
             let word = uncounted(&stmt[at].text);
 
-            user_command(word)
+            shell(stmt, at)
+                || user_command(word)
                 || excmds::canonical(word)
                     .is_some_and(|name| name == NORMAL || text_family(name) || name.ends_with(MAP))
         })
@@ -2468,9 +2497,10 @@ fn sides(stmt: &[Tok], at: usize) -> Option<Sides> {
 
 /// FUNCTION: Where each command line that the right side of a mapping
 /// runs reads a command: behind `<ScriptCmd>` or `<Cmd>`, and behind
-/// the colon that opens a command line, past any modifier. The colon
-/// of a scope, as in `g:x`, opens none. The right side of an `<expr>`
-/// mapping is an expression and runs no command line.
+/// the colon that opens a command line, past any key name and any
+/// modifier. The colon of a scope, as in `g:x`, opens none. The right
+/// side of an `<expr>` mapping is an expression and runs no command
+/// line.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/131
 fn map_lines(stmt: &[Tok], at: usize) -> Vec<usize> {
     let mut out = Vec::new();
@@ -2499,11 +2529,40 @@ fn map_lines(stmt: &[Tok], at: usize) -> Vec<usize> {
             stmt[k - 1].text == COLON && !(stmt[k - 1].glued && stmt[k - 2].kind == TokKind::Ident);
 
         if runs || colon {
-            out.extend(k..=command_from(stmt, k).unwrap_or(k));
+            let head = if colon { past_keys(stmt, k) } else { k };
+
+            out.extend(head..=command_from(stmt, head).unwrap_or(head));
         }
     }
 
     out
+}
+
+/// FUNCTION: Where a command line that opens at `from` reads its
+/// command, past the key names typed before it: `:<C-u>call` clears
+/// the range that a count or a selection puts on the line, then reads
+/// `call`. A key name with nothing behind it ends the line and stays.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/141
+fn past_keys(stmt: &[Tok], from: usize) -> usize {
+    let mut at = from;
+
+    while stmt.get(at).is_some_and(|t| t.text == "<") {
+        let Some(len) = stmt[at + 1..]
+            .iter()
+            .position(|t| !t.glued || t.text == ">")
+        else {
+            break;
+        };
+        let end = at + 1 + len;
+
+        if stmt[end].text != ">" || !stmt[end].glued || end + 1 == stmt.len() {
+            break;
+        }
+
+        at = end + 1;
+    }
+
+    at
 }
 
 /// FUNCTION: Whether a word is one of a list of key names, which Vim
@@ -2779,7 +2838,7 @@ fn command_from(stmt: &[Tok], from: usize) -> Option<usize> {
     loop {
         let text = stmt.get(at)?.text.as_str();
 
-        if text == "!" || modifier(text) {
+        if (text == SHELL && !shell(stmt, at)) || modifier(text) {
             at += 1;
         } else if text == COLON {
             at += 1 + stmt
@@ -2790,6 +2849,28 @@ fn command_from(stmt: &[Tok], from: usize) -> Option<usize> {
             return Some(at);
         }
     }
+}
+
+/// FUNCTION: Whether the bang at `at` is the command `:!` and not the
+/// bang of a modifier glued to it, as in `silent!`. The shell reads
+/// the rest of the line, so its words are never the project's.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/142
+fn shell(stmt: &[Tok], at: usize) -> bool {
+    stmt[at].text == SHELL && !(stmt[at].glued && at > 0 && modifier(&stmt[at - 1].text))
+}
+
+/// FUNCTION: Whether the token at `i` is shell text of the `:!` at
+/// `at`. The shell reads to the end of the line, bars included, but in
+/// a mapping the command line ends at the key that runs it, as `<CR>`,
+/// and the mapping ends at a bar. A key name ends the text there even
+/// where the shell would read it, as `<Bar>`, which leaves a word
+/// counted and drops none.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/150
+fn shell_text(stmt: &[Tok], at: usize, i: usize, heads: &[usize]) -> bool {
+    let mapping = heads.iter().any(|h| *h < at && maps(stmt, *h));
+
+    stmt[i].line == stmt[at].line
+        && !(mapping && (at + 1..i).any(|k| stmt[k].text == "<" || ends_command(stmt, k)))
 }
 
 /// FUNCTION: Whether a token is part of a range: the whole buffer, a

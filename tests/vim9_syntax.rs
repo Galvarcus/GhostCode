@@ -173,6 +173,15 @@ fn a_dict_key_after_a_block_lambda_with_an_if_is_a_key() {
     assert!(!names.iter().any(|n| n == "err_msg"), "{names:?}");
 }
 
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/147
+#[test]
+fn a_dict_key_after_a_block_lambda_with_a_comment_behind_its_brace_is_a_key() {
+    let text = "vim9script\nvar o = {\n  out_cb: (ch, msg) => { # each line\n    if msg == \"\"\n      echo 1\n    endif\n  },\n  close_cb: (ch) => {\n    echo 2\n  },\n}\necho o\n";
+    let names: Vec<String> = refs(text).into_iter().map(|r| r.name).collect();
+
+    assert!(!names.iter().any(|n| n == "close_cb"), "{names:?}");
+}
+
 #[test]
 fn a_dict_argument_after_a_block_lambda_with_an_if_is_a_dict() {
     let text = "vim9script\nvar t = timer_start(20, (_) => {\n  if 1\n    echo 1\n  endif\n}, {repeat: 0})\n";
@@ -201,6 +210,15 @@ fn a_v_variable_after_a_dict_key_is_no_reference() {
 #[test]
 fn a_lambda_parameter_read_on_the_next_line_is_no_reference() {
     let text = "vim9script\nvar Add = (lnum: number) =>\n  lnum + 1\necho Add(1)\n";
+    let names: Vec<String> = refs(text).into_iter().map(|r| r.name).collect();
+
+    assert!(!names.iter().any(|n| n == "lnum"), "{names:?}");
+}
+
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/151
+#[test]
+fn a_lambda_parameter_read_after_a_comment_behind_the_arrow_is_no_reference() {
+    let text = "vim9script\nvar Add = (lnum: number) => # one more\n  lnum + 1\necho Add(1)\n";
     let names: Vec<String> = refs(text).into_iter().map(|r| r.name).collect();
 
     assert!(!names.iter().any(|n| n == "lnum"), "{names:?}");
@@ -245,4 +263,23 @@ fn a_project_function_in_a_call_string_is_still_a_name() {
         .collect();
 
     assert_eq!(marks, vec![false]);
+}
+
+/// Vim9 allows no space behind the dot of a member, and the end of a
+/// line is one, so a dot that ends a line reaches into nothing.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/153
+#[test]
+fn a_dot_that_ends_a_line_of_a_lambda_block_reaches_into_nothing() {
+    let text = "vim9script\nvar F = () => {\n    :!ctags -R .\n    Missing()\n}\n";
+    let missing = one(text, "Missing");
+
+    assert!(!missing.member && missing.recv.is_none(), "{missing:?}");
+}
+
+#[test]
+fn a_dot_that_opens_a_line_still_reaches_into_the_line_before() {
+    let text =
+        "vim9script\ndef Make(): dict<any>\n  return {}\nenddef\nvar x = Make()\n    .Value()\n";
+
+    assert!(one(text, "Value").member);
 }

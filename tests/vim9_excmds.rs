@@ -549,6 +549,24 @@ fn a_command_definition_behind_a_colon_declares_its_name() {
     assert!(refs(text).iter().all(|r| r.owned), "{:?}", refs(text));
 }
 
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/146
+#[test]
+fn a_command_definition_behind_a_colon_in_a_lambda_block_declares_its_name() {
+    let text = "vim9script\ndef Do(...a: list<string>)\nenddef\nvar h: list<func> = []\nh->add(() => {\n    :command! -nargs=* VSFind Do(<f-args>)\n})\n";
+
+    for name in ["nargs", "VSFind", "f", "args"] {
+        assert!(
+            refs(text)
+                .iter()
+                .filter(|r| r.name == name)
+                .all(|r| r.owned),
+            "{name}"
+        );
+    }
+
+    assert!(!one(text, "Do").owned);
+}
+
 #[test]
 fn the_variable_of_a_for_in_a_command_body_is_bound() {
     let text = "vim9script\ncommand! -nargs=0 ShowAll for w in ['a'] | echo w | endfor\n";
@@ -573,4 +591,73 @@ fn a_dot_glued_to_a_word_named_like_a_command_reaches_into_it() {
     let text = "vim9script\nvar edit = {main: 1}\nedit.main = 2\n";
 
     assert!(refs(text).iter().any(|r| r.name == "main" && r.member));
+}
+
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/142
+#[test]
+fn the_shell_command_of_a_bang_is_vims() {
+    let text = "vim9script\n!xdg-open foo\nsilent !xdg-open bar\n:!xdg-open baz\n";
+
+    for name in ["xdg", "open", "foo", "bar", "baz"] {
+        assert!(
+            refs(text)
+                .iter()
+                .filter(|r| r.name == name)
+                .all(|r| r.owned),
+            "{name}"
+        );
+    }
+}
+
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/150
+#[test]
+fn the_shell_text_of_a_bang_ends_with_its_command_line() {
+    let text = "vim9script\nnnoremap <F5> :!ctags -R .<CR>| call Missing()\nnnoremap x :!git pull<CR>:call Missing()<CR>\nvar F = () => {\n    :!ctags -R\n    Missing()\n}\n";
+    let missing: Vec<Reference> = refs(text)
+        .into_iter()
+        .filter(|r| r.name == "Missing")
+        .collect();
+
+    assert_eq!(missing.len(), 3, "{missing:?}");
+    assert!(missing.iter().all(|r| !r.owned), "{missing:?}");
+
+    for name in ["ctags", "git", "pull"] {
+        assert!(
+            refs(text)
+                .iter()
+                .filter(|r| r.name == name)
+                .all(|r| r.owned),
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn a_call_behind_the_bang_of_a_modifier_keeps_its_credit() {
+    let text = "vim9script\ndef Helper()\nenddef\nsilent! Helper()\n";
+
+    assert!(!one(text, "Helper").owned);
+}
+
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/155
+#[test]
+fn the_text_arguments_of_a_command_in_a_lambda_block_end_with_its_line() {
+    let text = "vim9script\nvar F = () => {\n    edit foo\n    Missing()\n    highlight Foo guifg=red\n    Missing()\n    normal! gg\n    Missing()\n}\n";
+    let missing: Vec<Reference> = refs(text)
+        .into_iter()
+        .filter(|r| r.name == "Missing")
+        .collect();
+
+    assert_eq!(missing.len(), 3, "{missing:?}");
+    assert!(missing.iter().all(|r| !r.owned), "{missing:?}");
+
+    for name in ["foo", "Foo", "guifg", "red", "gg"] {
+        assert!(
+            refs(text)
+                .iter()
+                .filter(|r| r.name == name)
+                .all(|r| r.owned),
+            "{name}"
+        );
+    }
 }

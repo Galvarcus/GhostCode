@@ -60,10 +60,10 @@ const PARAMS: char = '(';
 const LEGACY_COMMENT: char = '"';
 const LEGACY_CARRIED: &str = "\"\\ ";
 
-// What ends a line that opens a block lambda, and what opens the line
-// that closes one.
+// What ends a line that opens a block lambda, behind its arrow, and
+// what opens the line that closes one.
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/96
-const LAMBDA_BLOCK: &str = "=> {";
+const BLOCK_OPEN: &str = "{";
 const BLOCK_CLOSE: char = '}';
 
 // The arrow of a lambda, behind which Vim9 carries a line on.
@@ -73,6 +73,10 @@ const ARROW: &str = "=>";
 // What stands against the name of a key in a dictionary.
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/116
 const KEY_COLON: char = ':';
+
+// What may open a command line before its command, as in `:command!`.
+// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/146
+const COMMAND_COLON: char = ':';
 
 // The words that open or close a block. A bracket left unclosed by a
 // broken line must not swallow the file, so one of these at the start
@@ -254,7 +258,7 @@ pub fn tokens(text: &str) -> Vec<Tok> {
 
         // A line that ends by opening a block lambda leaves its depth
         // behind, and a lambda that closed takes its own away.
-        if rest.trim_end().ends_with(LAMBDA_BLOCK) {
+        if code_ends(&toks[from..], &[ARROW, BLOCK_OPEN]) {
             lambdas.push(depth);
         }
         while lambdas.last().is_some_and(|open| depth < *open) && set_aside.len() < lambdas.len() {
@@ -268,7 +272,7 @@ pub fn tokens(text: &str) -> Vec<Tok> {
         if depth <= 0 {
             depth = 0;
 
-            if !rest.trim_end().ends_with(ARROW) {
+            if !code_ends(&toks[from..], &[ARROW]) {
                 push_newline(&mut toks, line);
             }
         }
@@ -278,15 +282,34 @@ pub fn tokens(text: &str) -> Vec<Tok> {
     toks
 }
 
+/// FUNCTION: Whether the code of a line ends with these tokens, in
+/// order, with nothing behind them but a comment: the arrow of a
+/// lambda whose body stands on the next line, or the arrow and the
+/// brace that open a block lambda.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/147
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/151
+fn code_ends(line: &[Tok], tail: &[&str]) -> bool {
+    let mut code = line.iter().rev().filter(|t| t.kind != TokKind::Comment);
+
+    tail.iter()
+        .rev()
+        .all(|want| code.next().is_some_and(|t| t.text == *want))
+}
+
 /// FUNCTION: True when a line opens or closes a block, which ends any
 /// statement a broken line left open. A word with a colon against it
 /// is the key of a dictionary, as `command: 'x',` is, and opens
-/// nothing.
+/// nothing. A colon before the word changes nothing, as `:command!`
+/// is `command!`.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/116
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/146
 fn opens_block(line: &str) -> bool {
-    RESYNC.iter().any(|word| {
-        opens_with(line, word) && !line.trim_start()[word.len()..].starts_with(KEY_COLON)
-    })
+    let line = line.trim_start();
+    let line = line.strip_prefix(COMMAND_COLON).unwrap_or(line);
+
+    RESYNC
+        .iter()
+        .any(|word| opens_with(line, word) && !line[word.len()..].starts_with(KEY_COLON))
 }
 
 /// The kind of body a line stands in.

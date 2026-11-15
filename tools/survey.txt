@@ -31,3 +31,21 @@ https://github.com/monkoose/vim9-stargate b87f9e6f534de5cc261205f6fc7716ec1af28e
 
 # Classes and enums.
 https://github.com/yegappan/tetris dfc82aba0e2ec4d4e98445934e4a68fdfbb4eb70
+
+# A key before the command of a mapping command line, and the shell
+# command of :!.
+https://github.com/DanBradbury/copilot-chat.vim c7342e476e562282a11b683705c773a9fc49c505
+
+# Large, with a parser, and legacy files beside the Vim9 ones.
+https://github.com/lifepillar/vim-colortemplate 91aba2e7b230c2b0f9801e178d4115571cfbf5b2
+
+# Command-line mappings and autocommands.
+https://github.com/girishji/vimsuggest 540a417aa9339ed33f0533a1937f6f5d3ba417cf
+
+https://github.com/gh-tui-tools/gh-review.vim 89fd3000df32cf7f1b95dc0dad12ac82bfa79325
+
+# Jobs and popups.
+https://github.com/bfrg/vim-jqplay 968b06d95879e7fbd135b862cd4755d1e1b9a10b
+
+# Statusline expressions.
+https://github.com/kennypete/vim-tene 602d716c5354d3a2cb504e801ae8ba09bd0e3c2c
