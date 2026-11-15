@@ -2294,7 +2294,7 @@ fn ends_command(stmt: &[Tok], k: usize) -> bool {
 /// its alternation. `heads` still lists the word behind one, so the
 /// nearest head cannot be trusted here and every head before the
 /// token is asked. `:normal` takes every bar as a key, and `:!` hands
-/// every bar to the shell.
+/// the rest of its line to the shell, which `shell_text` bounds.
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/12
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/142
 pub(super) fn text_args(stmt: &[Tok], i: usize, heads: &[usize]) -> bool {
@@ -2304,7 +2304,7 @@ pub(super) fn text_args(stmt: &[Tok], i: usize, heads: &[usize]) -> bool {
         }
 
         if shell(stmt, at) {
-            return true;
+            return shell_text(stmt, at, i, heads);
         }
 
         let open = (at + 1..i).all(|k| !ends_command(stmt, k));
@@ -2840,6 +2840,20 @@ fn command_from(stmt: &[Tok], from: usize) -> Option<usize> {
 /// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/142
 fn shell(stmt: &[Tok], at: usize) -> bool {
     stmt[at].text == SHELL && !(stmt[at].glued && at > 0 && modifier(&stmt[at - 1].text))
+}
+
+/// FUNCTION: Whether the token at `i` is shell text of the `:!` at
+/// `at`. The shell reads to the end of the line, bars included, but in
+/// a mapping the command line ends at the key that runs it, as `<CR>`,
+/// and the mapping ends at a bar. A key name ends the text there even
+/// where the shell would read it, as `<Bar>`, which leaves a word
+/// counted and drops none.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/150
+fn shell_text(stmt: &[Tok], at: usize, i: usize, heads: &[usize]) -> bool {
+    let mapping = heads.iter().any(|h| *h < at && maps(stmt, *h));
+
+    stmt[i].line == stmt[at].line
+        && !(mapping && (at + 1..i).any(|k| stmt[k].text == "<" || ends_command(stmt, k)))
 }
 
 /// FUNCTION: Whether a token is part of a range: the whole buffer, a
