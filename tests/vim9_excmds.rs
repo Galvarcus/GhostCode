@@ -609,6 +609,29 @@ fn the_shell_command_of_a_bang_is_vims() {
     }
 }
 
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/150
+#[test]
+fn the_shell_text_of_a_bang_ends_with_its_command_line() {
+    let text = "vim9script\nnnoremap <F5> :!ctags -R .<CR>| call Missing()\nnnoremap x :!git pull<CR>:call Missing()<CR>\nvar F = () => {\n    :!ctags -R\n    Missing()\n}\n";
+    let missing: Vec<Reference> = refs(text)
+        .into_iter()
+        .filter(|r| r.name == "Missing")
+        .collect();
+
+    assert_eq!(missing.len(), 3, "{missing:?}");
+    assert!(missing.iter().all(|r| !r.owned), "{missing:?}");
+
+    for name in ["ctags", "git", "pull"] {
+        assert!(
+            refs(text)
+                .iter()
+                .filter(|r| r.name == name)
+                .all(|r| r.owned),
+            "{name}"
+        );
+    }
+}
+
 #[test]
 fn a_call_behind_the_bang_of_a_modifier_keeps_its_credit() {
     let text = "vim9script\ndef Helper()\nenddef\nsilent! Helper()\n";
