@@ -60,10 +60,10 @@ const PARAMS: char = '(';
 const LEGACY_COMMENT: char = '"';
 const LEGACY_CARRIED: &str = "\"\\ ";
 
-// What ends a line that opens a block lambda, and what opens the line
-// that closes one.
+// What ends a line that opens a block lambda, behind its arrow, and
+// what opens the line that closes one.
 // REFERENCE: https://github.com/Galvarcus/GhostCode/issues/96
-const LAMBDA_BLOCK: &str = "=> {";
+const BLOCK_OPEN: &str = "{";
 const BLOCK_CLOSE: char = '}';
 
 // The arrow of a lambda, behind which Vim9 carries a line on.
@@ -258,7 +258,7 @@ pub fn tokens(text: &str) -> Vec<Tok> {
 
         // A line that ends by opening a block lambda leaves its depth
         // behind, and a lambda that closed takes its own away.
-        if rest.trim_end().ends_with(LAMBDA_BLOCK) {
+        if opens_lambda(&toks[from..]) {
             lambdas.push(depth);
         }
         while lambdas.last().is_some_and(|open| depth < *open) && set_aside.len() < lambdas.len() {
@@ -280,6 +280,17 @@ pub fn tokens(text: &str) -> Vec<Tok> {
 
     push_newline(&mut toks, text.lines().count() as u32);
     toks
+}
+
+/// FUNCTION: Whether the tokens of a line end by opening a block
+/// lambda: the arrow, then the brace, with nothing behind them but a
+/// comment.
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/147
+fn opens_lambda(line: &[Tok]) -> bool {
+    let mut code = line.iter().rev().filter(|t| t.kind != TokKind::Comment);
+
+    code.next().is_some_and(|t| t.text == BLOCK_OPEN)
+        && code.next().is_some_and(|t| t.text == ARROW)
 }
 
 /// FUNCTION: True when a line opens or closes a block, which ends any

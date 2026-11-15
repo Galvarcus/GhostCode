@@ -173,6 +173,15 @@ fn a_dict_key_after_a_block_lambda_with_an_if_is_a_key() {
     assert!(!names.iter().any(|n| n == "err_msg"), "{names:?}");
 }
 
+/// REFERENCE: https://github.com/Galvarcus/GhostCode/issues/147
+#[test]
+fn a_dict_key_after_a_block_lambda_with_a_comment_behind_its_brace_is_a_key() {
+    let text = "vim9script\nvar o = {\n  out_cb: (ch, msg) => { # each line\n    if msg == \"\"\n      echo 1\n    endif\n  },\n  close_cb: (ch) => {\n    echo 2\n  },\n}\necho o\n";
+    let names: Vec<String> = refs(text).into_iter().map(|r| r.name).collect();
+
+    assert!(!names.iter().any(|n| n == "close_cb"), "{names:?}");
+}
+
 #[test]
 fn a_dict_argument_after_a_block_lambda_with_an_if_is_a_dict() {
     let text = "vim9script\nvar t = timer_start(20, (_) => {\n  if 1\n    echo 1\n  endif\n}, {repeat: 0})\n";
